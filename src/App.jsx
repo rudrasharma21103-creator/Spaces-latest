@@ -85,24 +85,18 @@ export default function CollaborationApp() {
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return
 
-    const pollUser = () => {
-      const storedUsers = Storage.getUsers()
-      const freshUser = storedUsers.find(u => u.id === currentUser.id)
+    const pollUser = async () => {
+      const storedUsers = await Storage.getUsers()
+      const freshUser = Array.isArray(storedUsers)
+        ? storedUsers.find(u => u.id === currentUser.id)
+        : null
 
       if (freshUser) {
-        if (!freshUser.friends) freshUser.friends = []
-
-        const friendsChanged =
-          (freshUser.friends?.length || 0) !==
-          (currentUser.friends?.length || 0)
-        const notifsChanged =
-          freshUser.notifications.length !== currentUser.notifications.length
-        const spacesChanged =
-          freshUser.spaces.length !== currentUser.spaces.length
-
-        if (friendsChanged || notifsChanged || spacesChanged) {
-          setCurrentUser(freshUser)
-        }
+        setCurrentUser(prev => ({
+          ...prev,
+          friends: freshUser.friends || prev.friends,
+          notifications: freshUser.notifications || prev.notifications
+        }))
       }
     }
 
@@ -111,8 +105,11 @@ export default function CollaborationApp() {
   }, [isAuthenticated, currentUser])
 
   useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      const userSpaces = Storage.getSpacesForUser(currentUser.spaces)
+    if (!isAuthenticated || !currentUser) return
+
+    const loadSpaces = async () => {
+      const userSpaces = await Storage.getSpacesForUser(currentUser.spaces)
+
       const enrichedSpaces = userSpaces.map(s => ({
         ...s,
         icon:
@@ -124,51 +121,56 @@ export default function CollaborationApp() {
             <UserIcon className="w-5 h-5" />
           )
       }))
+
       setSpaces(enrichedSpaces)
-
-      const friendList = Storage.getFriends(currentUser.friends || [])
-      setFriends(friendList)
-
-      if (
-        enrichedSpaces.length > 0 &&
-        !activeSpace &&
-        activeView === "channel"
-      ) {
-        setActiveSpace(enrichedSpaces[0].id)
-        if (enrichedSpaces[0].channels.length > 0) {
-          setActiveChannel(enrichedSpaces[0].channels[0].id)
-        }
-      }
     }
+
+    loadSpaces()
   }, [isAuthenticated, currentUser?.spaces, currentUser?.friends])
 
   useEffect(() => {
     if (!isAuthenticated) return
 
-    let chatId = null
+    // compute active chat id from current state
+    const chatId = getActiveChatId()
 
-    if (activeView === "channel" && activeChannel) {
-      chatId = Number(activeChannel)
-    } else if (activeView === "dm" && activeDMUser && currentUser) {
-      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
-      chatId = `dm_${ids[0]}_${ids[1]}`
+    // helper to connect websocket for a chat
+    const connectChatSocket = (chatId, onMessage) => {
+      try {
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws"
+        const host = window.location.hostname || "127.0.0.1"
+        const port = window.location.hostname ? window.location.port || "" : "127.0.0.1:8000"
+        // prefer explicit backend websocket path; adjust as needed
+        const url = `${protocol}://${host}:${window.location.hostname ? window.location.port || "8000" : "8000"}/ws/${chatId}`
+        const ws = new WebSocket(url)
+        ws.onopen = () => console.debug("ws open", url)
+        ws.onmessage = e => {
+          try {
+            const msg = JSON.parse(e.data)
+            onMessage(msg)
+          } catch (err) {
+            console.error("ws message parse error", err)
+          }
+        }
+        ws.onerror = e => console.error("ws error", e)
+        ws.onclose = () => console.debug("ws closed", url)
+        return ws
+      } catch (e) {
+        console.error(e)
+        return { close: () => {} }
+      }
     }
 
     if (!chatId) return
 
-    const loadMessages = () => {
-      const storedMessages = Storage.getMessages(chatId)
-      setMessages(prev => {
-        if ((prev[chatId]?.length || 0) !== storedMessages.length) {
-          return { ...prev, [chatId]: storedMessages }
-        }
-        return prev
-      })
-    }
+    const ws = connectChatSocket(chatId, msg => {
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: [...(prev[chatId] || []), msg]
+      }))
+    })
 
-    loadMessages()
-    const interval = setInterval(loadMessages, 1000)
-    return () => clearInterval(interval)
+    return () => ws.close()
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser])
 
   useEffect(() => {
@@ -177,22 +179,27 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     if (showAddFriendModal && inviteSearchQuery.length > 0) {
-      const results = Storage.searchUsersByName(inviteSearchQuery).filter(
-        u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
-      )
-      setInviteSearchResults(results)
+      const fetchResults = async () => {
+        const res = await Storage.searchUsersByName(inviteSearchQuery)
+        const list = Array.isArray(res) ? res : []
+        const results = list.filter(
+          u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
+        )
+        setInviteSearchResults(results)
+      }
+      fetchResults()
     } else {
       setInviteSearchResults([])
     }
   }, [inviteSearchQuery, showAddFriendModal, currentUser])
 
   // --- Auth & Logout ---
-  const handleAuthSubmit = e => {
+  const handleAuthSubmit = async e => {
     e.preventDefault()
     setAuthError("")
     setAuthSuccess("")
 
-    if (authMode === "signup") {
+  if (authMode === "signup") {
       if (!authData.name || !authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
         return
@@ -201,11 +208,12 @@ export default function CollaborationApp() {
         setAuthError("Passwords do not match")
         return
       }
-      const existingUser = Storage.findUserByEmail(authData.email)
+      const existingUser = await Storage.findUserByEmail(authData.email)
       if (existingUser) {
         setAuthError("Email already registered")
         return
       }
+
       const newUser = {
         id: Date.now(),
         name: authData.name,
@@ -218,22 +226,31 @@ export default function CollaborationApp() {
         friends: [],
         notifications: []
       }
-      Storage.saveUser(newUser)
-      setCurrentUser(newUser)
-      setIsAuthenticated(true)
-      setAuthSuccess("Account created successfully!")
+
+      const res = await Storage.saveUser(newUser)
+      if (res && res.user) {
+        setCurrentUser(res.user)
+        setIsAuthenticated(true)
+        setAuthSuccess("Account created successfully!")
+      } else {
+        setAuthError("Signup failed")
+      }
     } else {
       if (!authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
         return
       }
-      const user = Storage.findUserByEmail(authData.email)
-      if (user && user.password === authData.password) {
-        setCurrentUser(user)
+      const res = await Storage.login({
+        email: authData.email,
+        password: authData.password
+      })
+
+      if (res && res.user) {
+        setCurrentUser(res.user)
         setIsAuthenticated(true)
         setAuthSuccess("Logged in successfully!")
       } else {
-        setAuthError("Invalid credentials")
+        setAuthError(res?.error || "Invalid credentials")
       }
     }
   }
@@ -274,7 +291,8 @@ export default function CollaborationApp() {
 
   const getCurrentMessages = () => {
     const chatId = getActiveChatId()
-    return chatId ? messages[chatId] || [] : []
+    const data = chatId ? messages[chatId] : []
+    return Array.isArray(data) ? data : []
   }
 
   const getUser = userId => {

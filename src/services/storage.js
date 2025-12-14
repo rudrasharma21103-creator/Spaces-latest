@@ -1,239 +1,202 @@
-const USERS_KEY = "app_users"
-const SPACES_KEY = "app_spaces"
-const MESSAGES_KEY = "app_messages"
+import { getToken, saveAuth } from "./auth"
 
-// --- User Management ---
+const API_BASE = "http://127.0.0.1:8000"
 
-export const getUsers = () => {
-  const data = localStorage.getItem(USERS_KEY)
-  return data ? JSON.parse(data) : []
+// --------------------
+// Helpers
+// --------------------
+const safeJson = async res => {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
 }
 
-export const saveUser = user => {
-  const users = getUsers()
-  const index = users.findIndex(u => u.id === user.id)
-  // Ensure friends array exists for backward compatibility
+const ensureArray = data => {
+  if (Array.isArray(data)) return data
+  if (data && Array.isArray(data.items)) return data.items
+  if (data && Array.isArray(data.spaces)) return data.spaces
+  if (data && Array.isArray(data.users)) return data.users
+  if (data && Array.isArray(data.messages)) return data.messages
+  return []
+}
+
+const authFetch = async (url, options = {}) => {
+  const token = getToken()
+
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
+  })
+
+  if (res.status === 401) {
+    localStorage.clear()
+    window.location.reload()
+    return Promise.reject("Unauthorized")
+  }
+
+  return res
+}
+
+// --------------------
+// User Management
+// --------------------
+
+export const getUsers = async () => {
+  const res = await authFetch(`${API_BASE}/users/`)
+  const data = await safeJson(res)
+  return ensureArray(data)
+}
+
+export const saveUser = async user => {
   if (!user.friends) user.friends = []
+  if (!user.notifications) user.notifications = []
 
-  if (index !== -1) {
-    users[index] = user
-  } else {
-    users.push(user)
+  // Use the signup endpoint so backend hashes password and returns token
+  const res = await authFetch(`${API_BASE}/users/signup`, {
+    method: "POST",
+    body: JSON.stringify(user)
+  })
+
+  const data = await safeJson(res)
+  if (data?.user && data?.token) {
+    saveAuth(data.user, data.token)
+    return data
   }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
+  return data || null
 }
 
-export const findUserByEmail = email => {
-  const users = getUsers()
-  return users.find(u => u.email.toLowerCase() === email.toLowerCase())
+export const login = async ({ email, password }) => {
+  const res = await authFetch(`${API_BASE}/users/login`, {
+    method: "POST",
+    body: JSON.stringify({ email, password })
+  })
+
+  const data = await safeJson(res)
+  if (data?.user && data?.token) {
+    saveAuth(data.user, data.token)
+    return data
+  }
+  return data || null
 }
 
-export const searchUsersByName = query => {
+export const findUserByEmail = async email => {
+  const res = await authFetch(`${API_BASE}/users/by-email/${email}`)
+  const data = await safeJson(res)
+  return data || null
+}
+
+export const searchUsersByName = async query => {
   if (!query) return []
-  const users = getUsers()
-  return users.filter(u => u.name.toLowerCase().includes(query.toLowerCase()))
+  const res = await authFetch(`${API_BASE}/users/search/${query}`)
+  const data = await safeJson(res)
+  return ensureArray(data)
 }
 
-// --- Space Management ---
+// --------------------
+// Space Management
+// --------------------
 
-export const getSpaces = () => {
-  const data = localStorage.getItem(SPACES_KEY)
-  return data ? JSON.parse(data) : []
+export const getSpaces = async () => {
+  const res = await authFetch(`${API_BASE}/spaces/`)
+  const data = await safeJson(res)
+  return ensureArray(data)
 }
 
-export const saveSpace = space => {
-  const spaces = getSpaces()
-  const index = spaces.findIndex(s => s.id === space.id)
-  if (index !== -1) {
-    spaces[index] = space
-  } else {
-    spaces.push(space)
-  }
-  localStorage.setItem(SPACES_KEY, JSON.stringify(spaces))
+export const saveSpace = async space => {
+  await authFetch(`${API_BASE}/spaces/`, {
+    method: "POST",
+    body: JSON.stringify(space)
+  })
 }
 
-export const getSpacesForUser = userSpaceIds => {
-  const allSpaces = getSpaces()
-  return allSpaces.filter(s => userSpaceIds.includes(s.id))
+export const getSpacesForUser = async userSpaceIds => {
+  if (!Array.isArray(userSpaceIds) || userSpaceIds.length === 0) return []
+
+  const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
+    method: "POST",
+    body: JSON.stringify(userSpaceIds)
+  })
+
+  const data = await safeJson(res)
+  return ensureArray(data)
 }
 
-// --- Message Management ---
+// --------------------
+// Message Management
+// --------------------
 
-export const getMessages = chatId => {
-  const data = localStorage.getItem(MESSAGES_KEY)
-  const allMessages = data ? JSON.parse(data) : {}
-  return allMessages[chatId] || []
+export const getMessages = async chatId => {
+  if (!chatId) return []
+  const res = await authFetch(`${API_BASE}/messages/${chatId}`)
+  const data = await safeJson(res)
+  return ensureArray(data)
 }
 
-export const saveMessage = (chatId, message) => {
-  const data = localStorage.getItem(MESSAGES_KEY)
-  const allMessages = data ? JSON.parse(data) : {}
-  if (!allMessages[chatId]) {
-    allMessages[chatId] = []
-  }
-  allMessages[chatId].push(message)
-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(allMessages))
+export const saveMessage = async (chatId, message) => {
+  await authFetch(`${API_BASE}/messages/${chatId}`, {
+    method: "POST",
+    body: JSON.stringify(message)
+  })
 }
 
-// --- Friend & DM Logic ---
+// --------------------
+// Friend & DM Logic
+// --------------------
 
-export const getFriends = friendIds => {
-  if (!friendIds || friendIds.length === 0) return []
-  const users = getUsers()
+export const getFriends = async friendIds => {
+  if (!Array.isArray(friendIds) || friendIds.length === 0) return []
+  const users = await getUsers()
   return users.filter(u => friendIds.includes(u.id))
 }
 
-export const sendFriendRequest = (fromId, fromName, toUserId) => {
-  const users = getUsers()
-  const targetUserIndex = users.findIndex(u => u.id === toUserId)
-
-  if (targetUserIndex !== -1) {
-    const targetUser = users[targetUserIndex]
-
-    // Check if already friends or request pending
-    const isFriend = targetUser.friends?.includes(fromId)
-    const hasPending = targetUser.notifications.some(
-      n =>
-        n.type === "friend_request" &&
-        n.fromId === fromId &&
-        n.status === "pending"
-    )
-
-    if (!isFriend && !hasPending) {
-      const notification = {
-        id: `fr-${Date.now()}-${Math.random()}`,
-        type: "friend_request",
-        from: fromName,
-        fromId: fromId,
-        status: "pending",
-        timestamp: Date.now()
-      }
-      targetUser.notifications.push(notification)
-      users[targetUserIndex] = targetUser
-      localStorage.setItem(USERS_KEY, JSON.stringify(users))
-    }
+export const sendFriendRequest = async (fromId, fromName, toUserId) => {
+  const notification = {
+    id: `fr-${Date.now()}-${Math.random()}`,
+    type: "friend_request",
+    from: fromName,
+    fromId,
+    status: "pending",
+    timestamp: Date.now()
   }
+
+  await authFetch(`${API_BASE}/actions/send-friend-request`, {
+    method: "POST",
+    body: JSON.stringify({
+      toUserId,
+      notification
+    })
+  })
 }
 
-export const acceptFriendRequest = (userId, notificationId) => {
-  const users = getUsers()
-  const userIndex = users.findIndex(u => u.id === userId)
-
-  if (userIndex === -1) return null
-
-  const user = users[userIndex]
-  const notifIndex = user.notifications.findIndex(n => n.id === notificationId)
-
-  if (notifIndex === -1) return null
-
-  const notif = user.notifications[notifIndex]
-
-  // Verify it's a friend request
-  if (notif.type === "friend_request" && notif.fromId) {
-    // 1. Add friend ID to current user
-    if (!user.friends) user.friends = []
-    if (!user.friends.includes(notif.fromId)) {
-      user.friends.push(notif.fromId)
-    }
-
-    // 2. Remove notification
-    user.notifications.splice(notifIndex, 1)
-    users[userIndex] = user
-
-    // 3. Add current user ID to the Sender's friend list (Bi-directional)
-    const senderIndex = users.findIndex(u => u.id === notif.fromId)
-    if (senderIndex !== -1) {
-      const sender = users[senderIndex]
-      if (!sender.friends) sender.friends = []
-      if (!sender.friends.includes(userId)) {
-        sender.friends.push(userId)
-      }
-      users[senderIndex] = sender
-    }
-
-    localStorage.setItem(USERS_KEY, JSON.stringify(users))
-    return user
-  }
-
-  return null
+export const acceptFriendRequest = async (userId, notificationId) => {
+  const res = await authFetch(`${API_BASE}/actions/accept-friend`, {
+    method: "POST",
+    body: JSON.stringify({ userId, notificationId })
+  })
+  return safeJson(res)
 }
 
-// --- Space Logic (Direct Add for Friends) ---
+// --------------------
+// Space Logic (Direct Add for Friends)
+// --------------------
 
-export const addMemberToSpace = (userIdToDetail, spaceId) => {
-  const users = getUsers()
-  const allSpaces = getSpaces()
-
-  const spaceIndex = allSpaces.findIndex(s => s.id === spaceId)
-  const userIndex = users.findIndex(u => u.id === userIdToDetail)
-
-  if (spaceIndex !== -1 && userIndex !== -1) {
-    const space = allSpaces[spaceIndex]
-    const user = users[userIndex]
-
-    // Add user to space
-    if (!space.members.includes(userIdToDetail)) {
-      space.members.push(userIdToDetail)
-      // Default to adding to the first channel (usually #general)
-      if (space.channels.length > 0) {
-        space.channels[0].members.push(userIdToDetail)
-      }
-      localStorage.setItem(SPACES_KEY, JSON.stringify(allSpaces))
-    }
-
-    // Add space to user
-    if (!user.spaces.includes(spaceId)) {
-      user.spaces.push(spaceId)
-      localStorage.setItem(USERS_KEY, JSON.stringify(users))
-    }
-  }
+export const addMemberToSpace = async (userIdToDetail, spaceId) => {
+  await authFetch(`${API_BASE}/actions/add-member`, {
+    method: "POST",
+    body: JSON.stringify({ userIdToDetail, spaceId })
+  })
 }
 
-export const acceptInvite = (userId, notificationId) => {
-  const users = getUsers()
-  const allSpaces = getSpaces()
-  const userIndex = users.findIndex(u => u.id === userId)
-
-  if (userIndex === -1) return null
-
-  const user = users[userIndex]
-  const notifIndex = user.notifications.findIndex(n => n.id === notificationId)
-
-  if (notifIndex === -1) return null
-
-  const notif = user.notifications[notifIndex]
-
-  if (notif.type === "invite" && notif.spaceId) {
-    const spaceIndex = allSpaces.findIndex(s => s.id === notif.spaceId)
-
-    if (spaceIndex !== -1) {
-      const space = allSpaces[spaceIndex]
-
-      // Add user to space
-      if (!space.members.includes(userId)) {
-        space.members.push(userId)
-        if (space.channels.length > 0) {
-          if (!space.channels[0].members.includes(userId)) {
-            space.channels[0].members.push(userId)
-          }
-        }
-        allSpaces[spaceIndex] = space
-        localStorage.setItem(SPACES_KEY, JSON.stringify(allSpaces))
-      }
-
-      // Add space to user
-      if (!user.spaces.includes(notif.spaceId)) {
-        user.spaces.push(notif.spaceId)
-      }
-
-      // Remove notification
-      user.notifications.splice(notifIndex, 1)
-      users[userIndex] = user
-      localStorage.setItem(USERS_KEY, JSON.stringify(users))
-
-      return space
-    }
-  }
-
-  return null
+export const acceptInvite = async (userId, notificationId) => {
+  const res = await authFetch(`${API_BASE}/actions/accept-invite`, {
+    method: "POST",
+    body: JSON.stringify({ userId, notificationId })
+  })
+  return safeJson(res)
 }

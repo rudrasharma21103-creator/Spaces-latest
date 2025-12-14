@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Spaces</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+
     <style>
-      /* Custom Scrollbar */
+      /* Keeping your custom scrollbar styles */
       .scrollbar-thin::-webkit-scrollbar {
         width: 6px;
         height: 6px;
@@ -22,32 +22,32 @@
         background: #94a3b8;
       }
 
-      /* Animations */
+      /* Keeping your custom animation styles */
       @keyframes fadeInScale {
-        from { opacity: 0; transform: scale(0.98) translateY(10px); }
-        to { opacity: 1; transform: scale(1) translateY(0); }
+        from {
+          opacity: 0;
+          transform: scale(0.98) translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
       }
+
       .animate-fade-in {
         animation: fadeInScale 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
       }
-      
+
       .glass-panel {
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "lucide-react": "https://esm.sh/lucide-react@^0.561.0"
-  }
-}
-</script>
-</head>
-  <body>
+  </head>
+
+  <body class="bg-gray-100">
     <div id="root"></div>
+
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
