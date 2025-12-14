@@ -79,6 +79,7 @@ export default function CollaborationApp() {
 
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const wsRef = useRef(null)
 
   // --- Initialization & Data Loading ---
 
@@ -169,6 +170,8 @@ export default function CollaborationApp() {
         [chatId]: [...(prev[chatId] || []), msg]
       }))
     })
+
+    wsRef.current = ws
 
     return () => ws.close()
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser])
@@ -378,6 +381,16 @@ export default function CollaborationApp() {
     }
 
     Storage.saveMessage(chatId, newMsg)
+
+    // 🔥 REAL-TIME PUSH: send the new message over the websocket if open
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify(newMsg))
+      } catch (e) {
+        console.error("ws send error", e)
+      }
+    }
+
     setMessages(prev => ({
       ...prev,
       [chatId]: [...(prev[chatId] || []), newMsg]
