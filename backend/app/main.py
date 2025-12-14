@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import ws
-from app.database import client
 
+from app.database import client
 from app.routes.users import router as users_router
 from app.routes.spaces import router as spaces_router
 from app.routes.messages import router as messages_router
 from app.routes.actions import router as actions_router
+from app.routes import ws
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -25,7 +26,6 @@ app.include_router(spaces_router)
 app.include_router(messages_router)
 app.include_router(actions_router)
 app.include_router(ws.router)
-
 
 @app.get("/db-test")
 def db_test():

@@ -20,3 +20,4 @@ class ConnectionManager:
             await ws.send_json(message)
 
 manager = ConnectionManager()
+
