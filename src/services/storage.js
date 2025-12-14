@@ -12,6 +12,9 @@ export const getUsers = () => {
 export const saveUser = user => {
   const users = getUsers()
   const index = users.findIndex(u => u.id === user.id)
+  // Ensure friends array exists for backward compatibility
+  if (!user.friends) user.friends = []
+
   if (index !== -1) {
     users[index] = user
   } else {
@@ -72,79 +75,47 @@ export const saveMessage = (chatId, message) => {
   localStorage.setItem(MESSAGES_KEY, JSON.stringify(allMessages))
 }
 
-// --- DM Logic ---
+// --- Friend & DM Logic ---
 
-export const getDMUsers = dmUserIds => {
-  if (!dmUserIds || dmUserIds.length === 0) return []
+export const getFriends = friendIds => {
+  if (!friendIds || friendIds.length === 0) return []
   const users = getUsers()
-  return users.filter(u => dmUserIds.includes(u.id))
+  return users.filter(u => friendIds.includes(u.id))
 }
 
-export const startDM = (currentUserId, targetUserId) => {
+export const sendFriendRequest = (fromId, fromName, toUserId) => {
   const users = getUsers()
+  const targetUserIndex = users.findIndex(u => u.id === toUserId)
 
-  // Update Current User
-  const currentUserIndex = users.findIndex(u => u.id === currentUserId)
-  if (currentUserIndex !== -1) {
-    const user = users[currentUserIndex]
-    if (!user.dms) user.dms = []
-    if (!user.dms.includes(targetUserId)) {
-      user.dms.push(targetUserId)
-      users[currentUserIndex] = user
-    }
-  }
-
-  // Update Target User (so they see the DM too)
-  const targetUserIndex = users.findIndex(u => u.id === targetUserId)
   if (targetUserIndex !== -1) {
-    const user = users[targetUserIndex]
-    if (!user.dms) user.dms = []
-    if (!user.dms.includes(currentUserId)) {
-      user.dms.push(currentUserId)
-      users[targetUserIndex] = user
-    }
-  }
+    const targetUser = users[targetUserIndex]
 
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
-}
+    // Check if already friends or request pending
+    const isFriend = targetUser.friends?.includes(fromId)
+    const hasPending = targetUser.notifications.some(
+      n =>
+        n.type === "friend_request" &&
+        n.fromId === fromId &&
+        n.status === "pending"
+    )
 
-// --- Invitation & Notification Logic ---
-
-export const sendInvite = (fromName, toUserIds, spaceId, spaceName) => {
-  const users = getUsers()
-  let updated = false
-
-  users.forEach(user => {
-    if (toUserIds.includes(user.id)) {
-      // Check if already invited or member
-      const alreadyMember = user.spaces.includes(spaceId)
-      const alreadyInvited = user.notifications.some(
-        n =>
-          n.type === "invite" && n.spaceId === spaceId && n.status === "pending"
-      )
-
-      if (!alreadyMember && !alreadyInvited) {
-        const notification = {
-          id: `notif-${Date.now()}-${Math.random()}`,
-          type: "invite",
-          from: fromName,
-          spaceId: spaceId,
-          spaceName: spaceName,
-          status: "pending",
-          timestamp: Date.now()
-        }
-        user.notifications.push(notification)
-        updated = true
+    if (!isFriend && !hasPending) {
+      const notification = {
+        id: `fr-${Date.now()}-${Math.random()}`,
+        type: "friend_request",
+        from: fromName,
+        fromId: fromId,
+        status: "pending",
+        timestamp: Date.now()
       }
+      targetUser.notifications.push(notification)
+      users[targetUserIndex] = targetUser
+      localStorage.setItem(USERS_KEY, JSON.stringify(users))
     }
-  })
-
-  if (updated) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users))
   }
 }
 
-export const acceptInvite = (userId, notificationId) => {
+export const acceptFriendRequest = (userId, notificationId) => {
   const users = getUsers()
   const userIndex = users.findIndex(u => u.id === userId)
 
@@ -157,47 +128,112 @@ export const acceptInvite = (userId, notificationId) => {
 
   const notif = user.notifications[notifIndex]
 
-  // 1. Add space ID to user's spaces
-  if (!user.spaces.includes(notif.spaceId)) {
-    user.spaces.push(notif.spaceId)
-  }
-
-  // 2. Remove notification
-  user.notifications.splice(notifIndex, 1)
-
-  // 3. Save User
-  users[userIndex] = user
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
-
-  // 4. Update Space members
-  const allSpaces = getSpaces()
-  const spaceIndex = allSpaces.findIndex(s => s.id === notif.spaceId)
-  if (spaceIndex !== -1) {
-    const space = allSpaces[spaceIndex]
-    if (!space.members.includes(userId)) {
-      space.members.push(userId)
-      localStorage.setItem(SPACES_KEY, JSON.stringify(allSpaces))
+  // Verify it's a friend request
+  if (notif.type === "friend_request" && notif.fromId) {
+    // 1. Add friend ID to current user
+    if (!user.friends) user.friends = []
+    if (!user.friends.includes(notif.fromId)) {
+      user.friends.push(notif.fromId)
     }
-    return space
+
+    // 2. Remove notification
+    user.notifications.splice(notifIndex, 1)
+    users[userIndex] = user
+
+    // 3. Add current user ID to the Sender's friend list (Bi-directional)
+    const senderIndex = users.findIndex(u => u.id === notif.fromId)
+    if (senderIndex !== -1) {
+      const sender = users[senderIndex]
+      if (!sender.friends) sender.friends = []
+      if (!sender.friends.includes(userId)) {
+        sender.friends.push(userId)
+      }
+      users[senderIndex] = sender
+    }
+
+    localStorage.setItem(USERS_KEY, JSON.stringify(users))
+    return user
   }
 
   return null
 }
 
-const Storage = {
-  getUsers,
-  saveUser,
-  findUserByEmail,
-  searchUsersByName,
-  getSpaces,
-  saveSpace,
-  getSpacesForUser,
-  getMessages,
-  saveMessage,
-  getDMUsers,
-  startDM,
-  sendInvite,
-  acceptInvite
+// --- Space Logic (Direct Add for Friends) ---
+
+export const addMemberToSpace = (userIdToDetail, spaceId) => {
+  const users = getUsers()
+  const allSpaces = getSpaces()
+
+  const spaceIndex = allSpaces.findIndex(s => s.id === spaceId)
+  const userIndex = users.findIndex(u => u.id === userIdToDetail)
+
+  if (spaceIndex !== -1 && userIndex !== -1) {
+    const space = allSpaces[spaceIndex]
+    const user = users[userIndex]
+
+    // Add user to space
+    if (!space.members.includes(userIdToDetail)) {
+      space.members.push(userIdToDetail)
+      // Default to adding to the first channel (usually #general)
+      if (space.channels.length > 0) {
+        space.channels[0].members.push(userIdToDetail)
+      }
+      localStorage.setItem(SPACES_KEY, JSON.stringify(allSpaces))
+    }
+
+    // Add space to user
+    if (!user.spaces.includes(spaceId)) {
+      user.spaces.push(spaceId)
+      localStorage.setItem(USERS_KEY, JSON.stringify(users))
+    }
+  }
 }
 
-export default Storage
+export const acceptInvite = (userId, notificationId) => {
+  const users = getUsers()
+  const allSpaces = getSpaces()
+  const userIndex = users.findIndex(u => u.id === userId)
+
+  if (userIndex === -1) return null
+
+  const user = users[userIndex]
+  const notifIndex = user.notifications.findIndex(n => n.id === notificationId)
+
+  if (notifIndex === -1) return null
+
+  const notif = user.notifications[notifIndex]
+
+  if (notif.type === "invite" && notif.spaceId) {
+    const spaceIndex = allSpaces.findIndex(s => s.id === notif.spaceId)
+
+    if (spaceIndex !== -1) {
+      const space = allSpaces[spaceIndex]
+
+      // Add user to space
+      if (!space.members.includes(userId)) {
+        space.members.push(userId)
+        if (space.channels.length > 0) {
+          if (!space.channels[0].members.includes(userId)) {
+            space.channels[0].members.push(userId)
+          }
+        }
+        allSpaces[spaceIndex] = space
+        localStorage.setItem(SPACES_KEY, JSON.stringify(allSpaces))
+      }
+
+      // Add space to user
+      if (!user.spaces.includes(notif.spaceId)) {
+        user.spaces.push(notif.spaceId)
+      }
+
+      // Remove notification
+      user.notifications.splice(notifIndex, 1)
+      users[userIndex] = user
+      localStorage.setItem(USERS_KEY, JSON.stringify(users))
+
+      return space
+    }
+  }
+
+  return null
+}

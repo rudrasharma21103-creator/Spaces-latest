@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react"
 import {
   Send,
   Hash,
+  Users,
   Search,
   Plus,
   Bell,
@@ -14,13 +15,14 @@ import {
   Mail,
   UserPlus,
   Check,
+  Sparkles,
   GraduationCap,
   Briefcase,
   User as UserIcon,
-  MessageCircle,
   LogIn,
   UserPlus as UserPlusIcon,
   CheckCircle,
+  XCircle,
   File as FileIcon
 } from "lucide-react"
 import * as Storage from "./services/storage"
@@ -28,7 +30,7 @@ import * as Storage from "./services/storage"
 export default function CollaborationApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
-  const [authMode, setAuthMode] = useState("login") // 'login' or 'signup'
+  const [authMode, setAuthMode] = useState("login")
   const [authData, setAuthData] = useState({
     email: "",
     password: "",
@@ -40,43 +42,35 @@ export default function CollaborationApp() {
 
   // Main Data State
   const [spaces, setSpaces] = useState([])
-  const [users, setUsers] = useState([]) // For lookups
-  const [dmUsers, setDmUsers] = useState([]) // Users we have open DMs with
+  const [users, setUsers] = useState([])
+  const [friends, setFriends] = useState([])
 
   // UI State
   const [activeSpace, setActiveSpace] = useState(null)
   const [activeChannel, setActiveChannel] = useState(1)
   const [activeView, setActiveView] = useState("channel")
-  const [activeDMUser, setActiveDMUser] = useState(null) // userId of person we are chatting with
+  const [activeDMUser, setActiveDMUser] = useState(null)
 
   const [messages, setMessages] = useState({})
-  const [chats, setChats] = useState([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
-  const [showThreadPanel, setShowThreadPanel] = useState(false)
-  const [activeThread, setActiveThread] = useState(null)
-  const [threadReply, setThreadReply] = useState("")
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState("")
   const [newChannelType, setNewChannelType] = useState("public")
-  const [editingMessage, setEditingMessage] = useState(null)
-  const [showEmojiPicker, setShowEmojiPicker] = useState(null)
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
-  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [showAddFriendModal, setShowAddFriendModal] = useState(false)
+  const [showAddToSpaceModal, setShowAddToSpaceModal] = useState(false)
   const [showNotificationsModal, setShowNotificationsModal] = useState(false)
-  const [showDMModal, setShowDMModal] = useState(false)
+  const [showMemberDetails, setShowMemberDetails] = useState(false)
 
-  // Invite System State
-  const [inviteType, setInviteType] = useState(null)
+  // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
   const [inviteSearchResults, setInviteSearchResults] = useState([])
   const [selectedInviteUser, setSelectedInviteUser] = useState(null)
   const [newSpaceName, setNewSpaceName] = useState("")
-  const [copiedCode, setCopiedCode] = useState(false)
   const [inviteSent, setInviteSent] = useState(false)
 
   // File Attachment State
@@ -85,11 +79,9 @@ export default function CollaborationApp() {
 
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
-  const emojis = ["😀", "😂", "❤️", "👍", "👎", "🎉", "🔥", "✅", "👀", "🚀"]
 
   // --- Initialization & Data Loading ---
 
-  // 1. Polling for User Data (Notifications/Space/DM changes)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return
 
@@ -98,15 +90,17 @@ export default function CollaborationApp() {
       const freshUser = storedUsers.find(u => u.id === currentUser.id)
 
       if (freshUser) {
-        // Deep compare roughly or just check key lengths/content to avoid excessive re-renders
-        const dmsChanged =
-          (freshUser.dms?.length || 0) !== (currentUser.dms?.length || 0)
+        if (!freshUser.friends) freshUser.friends = []
+
+        const friendsChanged =
+          (freshUser.friends?.length || 0) !==
+          (currentUser.friends?.length || 0)
         const notifsChanged =
           freshUser.notifications.length !== currentUser.notifications.length
         const spacesChanged =
           freshUser.spaces.length !== currentUser.spaces.length
 
-        if (dmsChanged || notifsChanged || spacesChanged) {
+        if (friendsChanged || notifsChanged || spacesChanged) {
           setCurrentUser(freshUser)
         }
       }
@@ -116,10 +110,8 @@ export default function CollaborationApp() {
     return () => clearInterval(interval)
   }, [isAuthenticated, currentUser])
 
-  // 2. Load Spaces and DMs
   useEffect(() => {
     if (isAuthenticated && currentUser) {
-      // Load Spaces
       const userSpaces = Storage.getSpacesForUser(currentUser.spaces)
       const enrichedSpaces = userSpaces.map(s => ({
         ...s,
@@ -134,11 +126,9 @@ export default function CollaborationApp() {
       }))
       setSpaces(enrichedSpaces)
 
-      // Load DM Users
-      const dms = Storage.getDMUsers(currentUser.dms || [])
-      setDmUsers(dms)
+      const friendList = Storage.getFriends(currentUser.friends || [])
+      setFriends(friendList)
 
-      // Set default active space if needed
       if (
         enrichedSpaces.length > 0 &&
         !activeSpace &&
@@ -150,9 +140,8 @@ export default function CollaborationApp() {
         }
       }
     }
-  }, [isAuthenticated, currentUser?.spaces, currentUser?.dms])
+  }, [isAuthenticated, currentUser?.spaces, currentUser?.friends])
 
-  // 3. Load Messages for Active View & Poll
   useEffect(() => {
     if (!isAuthenticated) return
 
@@ -161,7 +150,6 @@ export default function CollaborationApp() {
     if (activeView === "channel" && activeChannel) {
       chatId = Number(activeChannel)
     } else if (activeView === "dm" && activeDMUser && currentUser) {
-      // Generate stable DM ID: dm_min_max
       const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
       chatId = `dm_${ids[0]}_${ids[1]}`
     }
@@ -183,22 +171,20 @@ export default function CollaborationApp() {
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser])
 
-  // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, activeChannel, activeView, activeDMUser])
 
-  // Autocomplete
   useEffect(() => {
-    if ((showInviteModal || showDMModal) && inviteSearchQuery.length > 0) {
+    if (showAddFriendModal && inviteSearchQuery.length > 0) {
       const results = Storage.searchUsersByName(inviteSearchQuery).filter(
-        u => u.id !== currentUser?.id
+        u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
       )
       setInviteSearchResults(results)
     } else {
       setInviteSearchResults([])
     }
-  }, [inviteSearchQuery, showInviteModal, showDMModal, currentUser])
+  }, [inviteSearchQuery, showAddFriendModal, currentUser])
 
   // --- Auth & Logout ---
   const handleAuthSubmit = e => {
@@ -229,6 +215,7 @@ export default function CollaborationApp() {
         status: "online",
         spaces: [],
         dms: [],
+        friends: [],
         notifications: []
       }
       Storage.saveUser(newUser)
@@ -255,7 +242,7 @@ export default function CollaborationApp() {
     setIsAuthenticated(false)
     setCurrentUser(null)
     setSpaces([])
-    setDmUsers([])
+    setFriends([])
     setActiveSpace(null)
     setActiveView("channel")
     setAuthData({ email: "", password: "", confirmPassword: "", name: "" })
@@ -293,9 +280,21 @@ export default function CollaborationApp() {
   const getUser = userId => {
     if (currentUser?.id === userId) return currentUser
     let found = users.find(u => u.id === userId)
-    if (!found) found = dmUsers.find(u => u.id === userId)
+    if (!found) found = friends.find(u => u.id === userId)
     if (!found) found = Storage.getUsers().find(u => u.id === userId)
     return found
+  }
+
+  const getActiveMembers = () => {
+    if (activeView === "channel") {
+      const channel = getCurrentChannels().find(c => c.id === activeChannel)
+      if (!channel) return []
+      return channel.members.map(id => getUser(id)).filter(u => u !== undefined)
+    } else if (activeView === "dm" && activeDMUser && currentUser) {
+      const partner = getUser(activeDMUser)
+      return partner ? [currentUser, partner] : [currentUser]
+    }
+    return []
   }
 
   const getActiveViewName = () => {
@@ -311,7 +310,6 @@ export default function CollaborationApp() {
   }
 
   // --- Actions ---
-
   const handleFileSelect = async e => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true)
@@ -319,7 +317,6 @@ export default function CollaborationApp() {
       const newAttachments = []
 
       for (const file of files) {
-        // Convert to Base64
         const reader = new FileReader()
         const base64Promise = new Promise(resolve => {
           reader.onload = () => resolve(reader.result)
@@ -338,7 +335,6 @@ export default function CollaborationApp() {
 
       setSelectedFiles(prev => [...prev, ...newAttachments])
       setIsUploading(false)
-      // Reset input so same file can be selected again
       if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
@@ -437,72 +433,68 @@ export default function CollaborationApp() {
     }
   }
 
-  const startDirectMessage = () => {
+  // --- Friend & Invite System ---
+
+  const sendFriendRequest = () => {
     if (!selectedInviteUser || !currentUser) return
-    Storage.startDM(currentUser.id, selectedInviteUser.id)
-
-    // Refresh Local
-    const updatedUser = Storage.getUsers().find(u => u.id === currentUser.id)
-    if (updatedUser) setCurrentUser(updatedUser)
-
-    // Set Active
-    setActiveView("dm")
-    setActiveDMUser(selectedInviteUser.id)
-
-    setShowDMModal(false)
-    setSelectedInviteUser(null)
-    setInviteSearchQuery("")
-  }
-
-  // --- Invite System ---
-  const openInviteModal = type => {
-    setInviteType(type)
-    setShowInviteModal(true)
-    setInviteSearchQuery("")
-    setInviteSearchResults([])
-    setSelectedInviteUser(null)
-    setInviteSent(false)
-  }
-
-  const selectInviteUser = user => {
-    setSelectedInviteUser(user)
-    setInviteSearchQuery(user.name)
-    setInviteSearchResults([])
-  }
-
-  const sendInvites = () => {
-    if (!selectedInviteUser || !currentUser || !activeSpace) return
-    if (inviteType === "space") {
-      const space = getCurrentSpace()
-      if (space) {
-        Storage.sendInvite(
-          currentUser.name,
-          [selectedInviteUser.id],
-          space.id,
-          space.name
-        )
-      }
-    }
+    Storage.sendFriendRequest(
+      currentUser.id,
+      currentUser.name,
+      selectedInviteUser.id
+    )
     setInviteSent(true)
     setTimeout(() => {
-      setShowInviteModal(false)
+      setShowAddFriendModal(false)
       setInviteSearchQuery("")
       setSelectedInviteUser(null)
       setInviteSent(false)
     }, 2000)
   }
 
-  const handleAcceptInvite = notificationId => {
+  const addFriendToSpace = () => {
+    if (!selectedInviteUser || !currentUser || !activeSpace) return
+    Storage.addMemberToSpace(selectedInviteUser.id, activeSpace)
+
+    setInviteSent(true)
+    setTimeout(() => {
+      setShowAddToSpaceModal(false)
+      setSelectedInviteUser(null)
+      setInviteSent(false)
+      // Refresh current space
+      const updatedSpace = Storage.getSpaces().find(s => s.id === activeSpace)
+      if (updatedSpace) {
+        setSpaces(prev =>
+          prev.map(s => (s.id === activeSpace ? updatedSpace : s))
+        )
+      }
+    }, 1500)
+  }
+
+  const handleNotificationAction = (notificationId, type) => {
     if (!currentUser) return
-    const joinedSpace = Storage.acceptInvite(currentUser.id, notificationId)
-    if (joinedSpace) {
-      const updatedUser = Storage.getUsers().find(u => u.id === currentUser.id)
+
+    if (type === "friend_request") {
+      const updatedUser = Storage.acceptFriendRequest(
+        currentUser.id,
+        notificationId
+      )
       if (updatedUser) {
         setCurrentUser(updatedUser)
-        setActiveSpace(joinedSpace.id)
-        setActiveView("channel")
-        if (joinedSpace.channels.length > 0) {
-          setActiveChannel(joinedSpace.channels[0].id)
+      }
+    } else {
+      // Space invite
+      const joinedSpace = Storage.acceptInvite(currentUser.id, notificationId)
+      if (joinedSpace) {
+        const updatedUser = Storage.getUsers().find(
+          u => u.id === currentUser.id
+        )
+        if (updatedUser) {
+          setCurrentUser(updatedUser)
+          setActiveSpace(joinedSpace.id)
+          setActiveView("channel")
+          if (joinedSpace.channels.length > 0) {
+            setActiveChannel(joinedSpace.channels[0].id)
+          }
         }
       }
     }
@@ -520,126 +512,108 @@ export default function CollaborationApp() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg">
-              <MessageCircle className="w-8 h-8 text-white" />
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-6 font-sans">
+        <div className="w-full max-w-md animate-fade-in">
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-3xl mb-6 shadow-xl shadow-indigo-200 transform rotate-3 hover:rotate-6 transition-transform">
+              <Sparkles className="w-10 h-10 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">Spaces</h1>
-            <p className="text-gray-600">
-              Connect, collaborate, and communicate
+            <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">
+              Spaces
+            </h1>
+            <p className="text-slate-500 text-lg">
+              Your new favorite place to collaborate.
             </p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
-            <div className="flex border-b border-gray-200">
+          <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 overflow-hidden">
+            {/* Auth Form */}
+            <div className="flex border-b border-slate-100 p-1 bg-slate-50/50">
               <button
                 onClick={() => setAuthMode("login")}
-                className={`flex-1 py-4 px-6 text-center font-medium transition-all duration-200 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-xl transition-all duration-300 ${
                   authMode === "login"
-                    ? "text-blue-600 bg-blue-50 border-b-2 border-blue-600"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200"
+                    : "text-slate-400 hover:text-slate-600"
                 }`}
               >
                 Sign In
               </button>
               <button
                 onClick={() => setAuthMode("signup")}
-                className={`flex-1 py-4 px-6 text-center font-medium transition-all duration-200 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-xl transition-all duration-300 ${
                   authMode === "signup"
-                    ? "text-blue-600 bg-blue-50 border-b-2 border-blue-600"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200"
+                    : "text-slate-400 hover:text-slate-600"
                 }`}
               >
                 Sign Up
               </button>
             </div>
-
             <form onSubmit={handleAuthSubmit} className="p-8 space-y-6">
               {authSuccess && (
-                <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
-                  <Check className="w-4 h-4" />
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 rounded-2xl text-sm flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5" />
                   {authSuccess}
                 </div>
               )}
-
               {authError && (
-                <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
-                  <X className="w-4 h-4" />
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm flex items-center gap-3">
+                  <XCircle className="w-5 h-5" />
                   {authError}
                 </div>
               )}
 
               {authMode === "signup" && (
                 <div>
-                  <label
-                    htmlFor="name"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                     Full Name
                   </label>
                   <input
-                    id="name"
                     type="text"
                     value={authData.name}
                     onChange={e =>
                       setAuthData({ ...authData, name: e.target.value })
                     }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-sm"
-                    placeholder="Enter your full name"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 transition-all font-medium"
+                    placeholder="Jane Doe"
                   />
                 </div>
               )}
-
               <div>
-                <label
-                  htmlFor="email"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
-                  Email Address
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Email
                 </label>
                 <input
-                  id="email"
                   type="email"
                   value={authData.email}
                   onChange={e =>
                     setAuthData({ ...authData, email: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-sm"
-                  placeholder="you@example.com"
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 transition-all font-medium"
+                  placeholder="jane@example.com"
                 />
               </div>
-
               <div>
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                   Password
                 </label>
                 <input
-                  id="password"
                   type="password"
                   value={authData.password}
                   onChange={e =>
                     setAuthData({ ...authData, password: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-sm"
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 transition-all font-medium"
                   placeholder="••••••••"
                 />
               </div>
-
               {authMode === "signup" && (
                 <div>
-                  <label
-                    htmlFor="confirmPassword"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                     Confirm Password
                   </label>
                   <input
-                    id="confirmPassword"
                     type="password"
                     value={authData.confirmPassword}
                     onChange={e =>
@@ -648,23 +622,22 @@ export default function CollaborationApp() {
                         confirmPassword: e.target.value
                       })
                     }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-sm"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 transition-all font-medium"
                     placeholder="••••••••"
                   />
                 </div>
               )}
-
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold rounded-xl transition-all hover:scale-105 shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all hover:shadow-lg hover:shadow-indigo-500/30 flex items-center justify-center gap-2 transform active:scale-[0.98]"
               >
                 {authMode === "login" ? (
                   <>
-                    <LogIn className="w-4 h-4" /> Sign In
+                    <LogIn className="w-5 h-5" /> Sign In
                   </>
                 ) : (
                   <>
-                    <UserPlusIcon className="w-4 h-4" /> Create Account
+                    <UserPlusIcon className="w-5 h-5" /> Create Account
                   </>
                 )}
               </button>
@@ -679,313 +652,334 @@ export default function CollaborationApp() {
   const filteredSpaces = spaces.filter(space =>
     space.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
-  const filteredChannels = getCurrentChannels().filter(channel =>
-    channel.name.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-  const filteredDMs = dmUsers.filter(u =>
+  const filteredFriends = friends.filter(u =>
     u.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
+  const activeMembers = getActiveMembers()
 
   return (
-    <div className="flex h-screen bg-white text-gray-800">
-      {/* Left Sidebar */}
+    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+      {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          sidebarCollapsed ? "w-16" : "w-80"
-        } bg-white flex flex-col border-r border-gray-200 transition-all duration-300 shadow-sm`}
+          sidebarCollapsed ? "w-20" : "w-72"
+        } glass-panel flex flex-col border-r border-slate-200/60 transition-all duration-300 z-20 flex-shrink-0`}
       >
-        <div className="p-4 border-b border-gray-200">
+        <div className="p-5 border-b border-slate-100 flex items-center justify-between h-[72px]">
           {!sidebarCollapsed && (
-            <div className="flex items-center justify-between mb-3">
-              <h1 className="font-bold text-lg text-blue-600">Spaces</h1>
-              <button
-                onClick={() => setShowCreateSpaceModal(true)}
-                className="p-2 hover:bg-blue-100 rounded-lg transition-all duration-200 hover:scale-105"
-                title="Add space"
-              >
-                <Plus className="w-5 h-5 text-blue-600" />
-              </button>
+            <div className="flex items-center gap-3 animate-fade-in">
+              <div className="bg-indigo-600 p-1.5 rounded-lg">
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
+              <h1 className="font-extrabold text-lg tracking-tight text-slate-800">
+                Spaces
+              </h1>
             </div>
           )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-all duration-200 hover:scale-105 w-full flex items-center justify-center"
-          >
-            <Menu className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex gap-1 ml-auto">
+            {!sidebarCollapsed && (
+              <button
+                onClick={() => setShowCreateSpaceModal(true)}
+                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 hover:text-indigo-600 transition-colors"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            )}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 transition-colors"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {!sidebarCollapsed && (
-          <div className="p-4">
+          <div className="px-5 pt-4 pb-2 animate-fade-in">
             <div className="relative group">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-100/50 border border-slate-200/50 rounded-xl text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
               />
             </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3 space-y-4">
           {!sidebarCollapsed ? (
-            <div className="h-full flex flex-col">
-              {/* Spaces List */}
-              <div className="px-3 py-2">
-                <div className="text-xs font-semibold text-gray-500 mb-2 px-2 uppercase tracking-wide">
-                  Spaces
-                </div>
-                {filteredSpaces.length > 0 ? (
-                  filteredSpaces.map(space => (
-                    <div key={space.id} className="mb-3">
+            <div className="animate-fade-in">
+              <div className="px-3 mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Your Spaces
+                </span>
+                <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                  {spaces.length}
+                </span>
+              </div>
+
+              {filteredSpaces.length > 0 ? (
+                filteredSpaces.map(space => (
+                  <div key={space.id} className="mb-2">
+                    <div
+                      className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-200 group ${
+                        activeView === "channel" && activeSpace === space.id
+                          ? "bg-white shadow-md shadow-indigo-100 border border-indigo-50"
+                          : "hover:bg-slate-100/80 border border-transparent"
+                      }`}
+                      onClick={() => {
+                        setActiveSpace(space.id)
+                        setActiveView("channel")
+                        if (space.channels.length > 0)
+                          setActiveChannel(space.channels[0].id)
+                      }}
+                    >
                       <div
-                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer ${
-                          activeView === "channel" && activeSpace === space.id
-                            ? "bg-blue-100 text-blue-700 shadow-sm"
-                            : "hover:bg-gray-100"
+                        className={`p-2 rounded-lg transition-colors ${
+                          activeSpace === space.id
+                            ? "bg-indigo-100 text-indigo-600"
+                            : "bg-slate-100 text-slate-500 group-hover:bg-white"
                         }`}
-                        onClick={() => {
-                          setActiveSpace(space.id)
-                          setActiveView("channel")
-                          if (space.channels.length > 0)
-                            setActiveChannel(space.channels[0].id)
-                        }}
                       >
-                        <div className="bg-yellow-100 p-2 rounded-lg">
-                          {space.icon}
-                        </div>
-                        <span className="font-medium text-sm">
-                          {space.name}
-                        </span>
+                        {space.icon}
+                      </div>
+                      <span
+                        className={`font-semibold text-sm truncate flex-1 ${
+                          activeSpace === space.id
+                            ? "text-slate-900"
+                            : "text-slate-600"
+                        }`}
+                      >
+                        {space.name}
+                      </span>
+                      <button
+                        onClick={e => {
+                          e.stopPropagation()
+                          toggleSpaceExpansion(space.id)
+                        }}
+                        className="p-1 hover:bg-slate-200 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        {space.expanded ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+                        )}
+                      </button>
+                    </div>
+
+                    {space.expanded && (
+                      <div className="ml-5 pl-4 border-l-2 border-slate-100 mt-1 space-y-0.5">
+                        {space.channels.map(channel => (
+                          <button
+                            key={channel.id}
+                            onClick={() => {
+                              setActiveChannel(channel.id)
+                              setActiveView("channel")
+                              setActiveSpace(space.id)
+                            }}
+                            className={`flex items-center gap-2.5 w-full px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all ${
+                              activeView === "channel" &&
+                              activeChannel === channel.id
+                                ? "bg-indigo-50 text-indigo-600"
+                                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                            }`}
+                          >
+                            <Hash
+                              className={`w-3.5 h-3.5 ${
+                                activeChannel === channel.id
+                                  ? "text-indigo-400"
+                                  : "text-slate-300"
+                              }`}
+                            />
+                            <span className="truncate">{channel.name}</span>
+                          </button>
+                        ))}
                         <button
-                          onClick={e => {
-                            e.stopPropagation()
-                            toggleSpaceExpansion(space.id)
+                          onClick={() => {
+                            setActiveSpace(space.id)
+                            setShowChannelModal(true)
                           }}
-                          className="ml-auto p-1 hover:bg-gray-200 rounded-lg"
+                          className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-lg text-[13px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all group"
                         >
-                          {space.expanded ? (
-                            <ChevronDown className="w-4 h-4 text-gray-500" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4 text-gray-500" />
-                          )}
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add channel</span>
                         </button>
                       </div>
-
-                      {space.expanded &&
-                        (searchQuery === "" || filteredChannels.length > 0) && (
-                          <div className="ml-7 mt-1 space-y-1">
-                            {(searchQuery === ""
-                              ? space.channels
-                              : filteredChannels
-                            ).map(channel => (
-                              <div key={channel.id} className="group relative">
-                                <button
-                                  onClick={() => {
-                                    setActiveChannel(channel.id)
-                                    setActiveView("channel")
-                                    setShowThreadPanel(false)
-                                    setActiveSpace(space.id)
-                                  }}
-                                  className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl text-xs transition-all duration-200 ${
-                                    activeView === "channel" &&
-                                    activeChannel === channel.id
-                                      ? "bg-blue-100 text-blue-700 shadow-sm"
-                                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
-                                  }`}
-                                >
-                                  <Hash className="w-3.5 h-3.5" />
-                                  <span className="truncate flex-1 text-sm">
-                                    {channel.name}
-                                  </span>
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              onClick={() => {
-                                setActiveSpace(space.id)
-                                setShowChannelModal(true)
-                              }}
-                              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl text-xs text-blue-600 hover:bg-blue-50 transition-all duration-200 group"
-                            >
-                              <Plus className="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-200" />
-                              <span className="text-sm">Add channel</span>
-                            </button>
-                          </div>
-                        )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-4 text-gray-500 text-xs">
-                    No spaces found
+                    )}
                   </div>
-                )}
-              </div>
-
-              {/* Direct Messages List */}
-              <div className="px-3 py-2 mt-2 border-t border-gray-100 pt-4">
-                <div className="flex items-center justify-between mb-2 px-2">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Direct Messages
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowDMModal(true)
-                      setInviteSearchQuery("")
-                      setInviteSearchResults([])
-                    }}
-                    className="hover:bg-gray-200 p-1 rounded"
-                  >
-                    <Plus className="w-3 h-3 text-gray-500" />
-                  </button>
+                ))
+              ) : (
+                <div className="text-center py-6 text-slate-400 text-xs italic">
+                  No spaces found
                 </div>
-                {filteredDMs.map(user => (
-                  <button
-                    key={user.id}
-                    onClick={() => {
-                      setActiveView("dm")
-                      setActiveDMUser(user.id)
-                      setActiveSpace(null)
-                    }}
-                    className={`flex items-center gap-3 w-full p-2 rounded-xl mb-1 transition-all ${
-                      activeView === "dm" && activeDMUser === user.id
-                        ? "bg-blue-100 text-blue-700 shadow-sm"
-                        : "hover:bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    <div className="relative">
-                      <span className="text-lg">{user.avatar}</span>
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                          user.status === "online"
-                            ? "bg-green-500"
-                            : "bg-gray-400"
-                        }`}
-                      ></span>
-                    </div>
-                    <span className="text-sm font-medium">{user.name}</span>
-                  </button>
-                ))}
-                {filteredDMs.length === 0 && (
-                  <div className="text-center py-2 text-gray-400 text-xs">
-                    No conversations yet
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-3 mt-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Hash className="w-5 h-5 text-blue-600" />
-              </div>
-              <div className="w-full border-t border-gray-200 my-2"></div>
-              {dmUsers.map(u => (
-                <div
-                  key={u.id}
-                  className="text-lg cursor-pointer hover:scale-110 transition-transform"
+            <div className="flex flex-col items-center gap-3 mt-2 animate-fade-in">
+              {spaces.map(s => (
+                <button
+                  key={s.id}
+                  className={`p-3 rounded-2xl transition-all duration-300 ${
+                    activeSpace === s.id
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/30"
+                      : "bg-slate-100 text-slate-500 hover:bg-white hover:shadow-md"
+                  }`}
+                  title={s.name}
                   onClick={() => {
-                    setActiveView("dm")
-                    setActiveDMUser(u.id)
+                    setActiveSpace(s.id)
+                    setActiveView("channel")
+                    if (s.channels.length > 0)
+                      setActiveChannel(s.channels[0].id)
                   }}
                 >
-                  {u.avatar}
-                </div>
+                  {s.icon}
+                </button>
               ))}
+              <button
+                onClick={() => setShowCreateSpaceModal(true)}
+                className="p-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 transition-all"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-50 relative z-0">
         {/* Header */}
-        <div className="h-14 border-b border-gray-200 bg-white flex items-center justify-between px-6 shadow-sm">
-          <div className="flex items-center gap-3">
+        <div className="h-[72px] bg-white/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-6 border-b border-slate-200/50 shadow-sm">
+          <div
+            onClick={() => setShowMemberDetails(prev => !prev)}
+            className="flex items-center gap-4 cursor-pointer group p-1.5 -ml-2 rounded-xl hover:bg-slate-50 transition-all"
+          >
             {activeView === "dm" ? (
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">
-                  {getUser(activeDMUser)?.avatar}
-                </span>
-                <h2 className="font-bold text-lg text-gray-800">
-                  {getActiveViewName()}
-                </h2>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center text-lg shadow-sm border border-white">
+                    {getUser(activeDMUser)?.avatar}
+                  </div>
+                  <span
+                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
+                      getUser(activeDMUser)?.status === "online"
+                        ? "bg-emerald-500"
+                        : "bg-slate-300"
+                    }`}
+                  ></span>
+                </div>
+                <div>
+                  <h2 className="font-bold text-lg text-slate-800 leading-tight">
+                    {getActiveViewName()}
+                  </h2>
+                  <p className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{" "}
+                    Online
+                  </p>
+                </div>
               </div>
             ) : (
-              <>
-                <h2 className="font-bold text-lg text-blue-600">
-                  {getActiveViewName()}
-                </h2>
-                <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded-full border border-gray-200">
-                  {getCurrentChannels().find(c => c.id === activeChannel)
-                    ?.members.length || 0}{" "}
-                  members
-                </span>
-              </>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 border border-slate-200">
+                  <Hash className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-lg text-slate-800 leading-tight">
+                    {getActiveViewName().replace("#", "")}
+                  </h2>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3 h-3" /> {activeMembers.length}{" "}
+                      members
+                    </span>
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-indigo-500">
+                      • View details
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
+
           <div className="flex items-center gap-2">
             {activeView === "channel" && (
               <button
-                onClick={() => openInviteModal("space")}
-                className="p-2 hover:bg-blue-100 rounded-xl transition-all duration-200 hover:scale-105 group bg-blue-50 text-blue-600 font-medium text-xs flex items-center gap-2 px-3"
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedInviteUser(null)
+                  setShowAddToSpaceModal(true)
+                }}
+                className="hidden md:flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-slate-200 active:scale-95"
               >
                 <UserPlus className="w-4 h-4" />
-                Invite
+                <span>Add Member</span>
               </button>
             )}
 
-            <div className="relative group z-20">
-              <button className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105">
+            <div className="h-8 w-px bg-slate-200 mx-2"></div>
+
+            {/* User Menu */}
+            <div className="relative group z-40">
+              <button className="flex items-center gap-3 pl-2 pr-1 py-1.5 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-100 hover:shadow-sm">
+                <div className="text-right hidden sm:block">
+                  <div className="text-xs font-bold text-slate-700">
+                    {currentUser?.name}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">
+                    Available
+                  </div>
+                </div>
                 <div className="relative">
-                  <span className="text-xl">{currentUser?.avatar}</span>
+                  <div className="w-9 h-9 bg-indigo-50 rounded-full flex items-center justify-center text-lg border border-indigo-100">
+                    {currentUser?.avatar}
+                  </div>
                   {currentUser?.notifications.length ? (
-                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border border-white"></span>
                     </span>
                   ) : null}
                 </div>
-                <span className="hidden sm:inline text-sm font-medium">
-                  {currentUser?.name}
-                </span>
-                <ChevronDown className="w-4 h-4 text-gray-500 hidden sm:block" />
+                <ChevronDown className="w-4 h-4 text-slate-300" />
               </button>
 
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-200 py-2 hidden group-hover:block z-50">
-                {/* Dropdown Content */}
-                <div className="px-4 py-3 border-b border-gray-100">
+              <div className="absolute right-0 top-full mt-2 w-72 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-100 py-2 hidden group-hover:block animate-fade-in origin-top-right">
+                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{currentUser?.avatar}</span>
+                    <span className="text-3xl bg-white p-2 rounded-full shadow-sm border border-slate-100">
+                      {currentUser?.avatar}
+                    </span>
                     <div className="overflow-hidden">
-                      <div className="font-semibold text-gray-800 truncate">
+                      <div className="font-bold text-slate-800 truncate">
                         {currentUser?.name}
                       </div>
-                      <div className="text-sm text-gray-600 truncate">
+                      <div className="text-xs text-slate-500 truncate">
                         {currentUser?.email}
                       </div>
                     </div>
                   </div>
                 </div>
-                <div className="py-1">
+                <div className="p-2 space-y-1">
                   <button
                     onClick={() => setShowNotificationsModal(true)}
-                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 justify-between"
+                    className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl flex items-center justify-between transition-colors font-medium"
                   >
                     <div className="flex items-center gap-3">
                       <Bell className="w-4 h-4" /> Notifications
                     </div>
                     {currentUser?.notifications.length ? (
-                      <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                      <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm shadow-red-200">
                         {currentUser.notifications.length}
                       </span>
                     ) : null}
                   </button>
+                  <div className="h-px bg-slate-100 my-1 mx-2"></div>
                   <button
                     onClick={handleLogout}
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3"
+                    className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 rounded-xl flex items-center gap-3 transition-colors font-medium"
                   >
                     <LogIn className="w-4 h-4" /> Sign Out
                   </button>
@@ -995,193 +989,418 @@ export default function CollaborationApp() {
           </div>
         </div>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin bg-gray-50">
-          {getCurrentMessages().length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400">
-              <MessageSquare className="w-12 h-12 mb-2 opacity-20" />
-              <p>No messages yet. Start the conversation!</p>
-            </div>
-          ) : (
-            getCurrentMessages().map(msg => {
-              const user = getUser(msg.userId)
-              return (
-                <div
-                  key={msg.id}
-                  className="group hover:bg-gray-100 p-3 rounded-xl transition-all duration-200"
-                >
-                  <div className="flex gap-3">
-                    <div className="relative">
-                      <span className="text-2xl">{user?.avatar || "👤"}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2 mb-1.5">
-                        <span className="font-semibold text-sm text-gray-800">
-                          {user?.name}
-                        </span>
-                        <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                          {msg.timestamp ? formatTime(msg.timestamp) : "now"}
-                        </span>
+        {/* Messages / Chat Area */}
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin">
+              {getCurrentMessages().length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                  <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                    <MessageSquare className="w-10 h-10 text-slate-300" />
+                  </div>
+                  <p className="font-semibold text-slate-400">
+                    No messages yet.
+                  </p>
+                  <p className="text-sm">Start the conversation!</p>
+                </div>
+              ) : (
+                getCurrentMessages().map((msg, idx) => {
+                  const user = getUser(msg.userId)
+                  const isMe = user?.id === currentUser?.id
+                  // Check if previous message was same user to group them
+                  const prevMsg = idx > 0 ? getCurrentMessages()[idx - 1] : null
+                  const isSequence = prevMsg && prevMsg.userId === msg.userId
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex gap-4 ${
+                        isMe ? "flex-row-reverse" : ""
+                      } ${isSequence ? "mt-1" : "mt-6"} group animate-fade-in`}
+                    >
+                      <div className="flex-shrink-0 w-10 flex flex-col items-center">
+                        {!isSequence ? (
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border border-white ${
+                              isMe ? "bg-indigo-50" : "bg-white"
+                            }`}
+                          >
+                            {user?.avatar}
+                          </div>
+                        ) : (
+                          <div className="w-10" />
+                        )}
                       </div>
 
-                      {/* Text Content */}
-                      {msg.text && (
-                        <p className="text-gray-700 leading-relaxed text-sm whitespace-pre-wrap break-words">
-                          {msg.text}
-                        </p>
-                      )}
+                      <div
+                        className={`flex flex-col max-w-[75%] sm:max-w-[60%] ${
+                          isMe ? "items-end" : "items-start"
+                        }`}
+                      >
+                        {!isSequence && (
+                          <div className="flex items-baseline gap-2 mb-1 px-1">
+                            <span className="text-xs font-bold text-slate-700">
+                              {user?.name}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {msg.timestamp
+                                ? formatTime(msg.timestamp)
+                                : "now"}
+                            </span>
+                          </div>
+                        )}
 
-                      {/* Attachments */}
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {msg.attachments.map(att => (
-                            <div
-                              key={att.id}
-                              className="group relative border border-gray-200 rounded-lg overflow-hidden bg-white hover:shadow-md transition-shadow max-w-[200px]"
-                            >
-                              {att.type.startsWith("image/") && att.data ? (
-                                <div className="relative">
+                        {msg.text && (
+                          <div
+                            className={`px-4 py-2.5 shadow-sm text-[15px] leading-relaxed break-words relative group-hover:shadow-md transition-shadow ${
+                              isMe
+                                ? "bg-indigo-600 text-white rounded-2xl rounded-tr-sm"
+                                : "bg-white text-slate-800 rounded-2xl rounded-tl-sm border border-slate-100"
+                            }`}
+                          >
+                            {msg.text}
+                          </div>
+                        )}
+
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div
+                            className={`flex flex-wrap gap-2 mt-2 ${
+                              isMe ? "justify-end" : ""
+                            }`}
+                          >
+                            {msg.attachments.map(att => (
+                              <div
+                                key={att.id}
+                                className="relative rounded-xl overflow-hidden bg-white border border-slate-200 shadow-sm transition-transform hover:scale-[1.02]"
+                              >
+                                {att.type.startsWith("image/") && att.data ? (
                                   <img
                                     src={att.data}
                                     alt={att.name}
-                                    className="w-full h-32 object-cover"
+                                    className="max-w-[200px] max-h-[200px] object-cover"
                                   />
-                                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 truncate px-2">
-                                    {att.name}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="p-3 flex items-center gap-2">
-                                  <div className="bg-gray-100 p-2 rounded">
-                                    <FileIcon className="w-5 h-5 text-gray-500" />
-                                  </div>
-                                  <div className="overflow-hidden">
-                                    <div className="text-xs font-medium truncate">
-                                      {att.name}
+                                ) : (
+                                  <div className="p-3 flex items-center gap-3 min-w-[180px]">
+                                    <div className="bg-indigo-50 p-2 rounded-lg text-indigo-500">
+                                      <FileIcon className="w-5 h-5" />
                                     </div>
-                                    <div className="text-[10px] text-gray-500">
-                                      {(att.size / 1024).toFixed(1)} KB
+                                    <div className="overflow-hidden">
+                                      <div className="text-xs font-bold text-slate-700 truncate">
+                                        {att.name}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">
+                                        {(att.size / 1024).toFixed(1)} KB
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )
-            })
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+                  )
+                })
+              )}
+              <div ref={messagesEndRef} />
+            </div>
 
-        {/* Message Input */}
-        <div className="p-6 border-t border-gray-200 bg-white">
-          {/* File Previews */}
-          {selectedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {selectedFiles.map(file => (
-                <div
-                  key={file.id}
-                  className="relative bg-gray-100 border border-gray-200 rounded-lg p-2 flex items-center gap-2 pr-8"
-                >
-                  {file.type.startsWith("image/") && file.data ? (
-                    <img
-                      src={file.data}
-                      className="w-8 h-8 rounded object-cover"
-                      alt=""
-                    />
-                  ) : (
-                    <FileIcon className="w-5 h-5 text-gray-500" />
-                  )}
-                  <div className="flex flex-col">
-                    <span className="text-xs font-medium truncate max-w-[150px]">
-                      {file.name}
-                    </span>
-                    <span className="text-[10px] text-gray-500">
-                      {(file.size / 1024).toFixed(1)} KB
-                    </span>
+            {/* Message Input */}
+            <div className="p-4 sm:p-6 pt-2">
+              <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-2 relative transition-all focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-400">
+                {/* Attachments Preview */}
+                {selectedFiles.length > 0 && (
+                  <div className="flex gap-2 p-3 border-b border-slate-100 mb-2 overflow-x-auto">
+                    {selectedFiles.map(file => (
+                      <div
+                        key={file.id}
+                        className="relative group bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center gap-2 flex-shrink-0"
+                      >
+                        {file.type.startsWith("image/") && file.data ? (
+                          <img
+                            src={file.data}
+                            className="w-8 h-8 rounded-lg object-cover"
+                            alt=""
+                          />
+                        ) : (
+                          <FileIcon className="w-5 h-5 text-indigo-500" />
+                        )}
+                        <span className="text-xs font-medium max-w-[80px] truncate">
+                          {file.name}
+                        </span>
+                        <button
+                          onClick={() => removeAttachment(file.id)}
+                          className="absolute -top-1.5 -right-1.5 bg-white rounded-full p-0.5 shadow-md border border-slate-200 hover:text-red-500"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
+                )}
+
+                <div className="flex items-end gap-2 px-2 pb-1">
                   <button
-                    onClick={() => removeAttachment(file.id)}
-                    className="absolute top-1 right-1 p-0.5 hover:bg-gray-300 rounded-full"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2.5 mb-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-indigo-600 transition-colors"
                   >
-                    <X className="w-3 h-3 text-gray-600" />
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                  />
+
+                  <textarea
+                    rows={1}
+                    placeholder={`Message ${getActiveViewName()}`}
+                    value={messageInput}
+                    onChange={e => setMessageInput(e.target.value)}
+                    onKeyPress={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        sendMessage()
+                      }
+                    }}
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-slate-800 placeholder-slate-400 py-3.5 max-h-32 resize-none leading-relaxed"
+                    style={{ minHeight: "48px" }}
+                  />
+
+                  <button
+                    onClick={sendMessage}
+                    disabled={
+                      (!messageInput.trim() && selectedFiles.length === 0) ||
+                      isUploading
+                    }
+                    className="p-3 mb-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-2xl shadow-lg shadow-indigo-200 transition-all active:scale-90"
+                  >
+                    <Send className="w-5 h-5 ml-0.5" />
                   </button>
                 </div>
-              ))}
+              </div>
+              <div className="text-center mt-2 text-[10px] text-slate-400 font-medium">
+                Press <strong>Enter</strong> to send
+              </div>
             </div>
-          )}
+          </div>
 
-          <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-500/50 transition-all duration-200 shadow-sm">
-            <input
-              type="file"
-              multiple
-              className="hidden"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 hover:bg-gray-200 rounded-lg transition-all text-gray-500 hover:text-blue-600"
-              title="Attach files"
-            >
-              <Paperclip className="w-4.5 h-4.5" />
-            </button>
-            <input
-              type="text"
-              placeholder={`Message ${getActiveViewName()}`}
-              value={messageInput}
-              onChange={e => setMessageInput(e.target.value)}
-              onKeyPress={e => e.key === "Enter" && sendMessage()}
-              className="flex-1 bg-transparent focus:outline-none text-sm text-gray-800 placeholder-gray-500"
-            />
-            <button
-              onClick={sendMessage}
-              disabled={isUploading}
-              className="p-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-400 rounded-lg text-white shadow-sm transition-colors"
-            >
-              <Send className="w-4.5 h-4.5" />
-            </button>
+          {/* Member Details Sidebar */}
+          <div
+            className={`border-l border-slate-200 bg-white transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col shadow-2xl z-30 ${
+              showMemberDetails
+                ? "w-80 translate-x-0"
+                : "w-0 translate-x-full opacity-0 overflow-hidden"
+            }`}
+          >
+            <div className="h-[72px] flex items-center justify-between px-6 border-b border-slate-100 bg-slate-50/50">
+              <h3 className="font-bold text-slate-800">Details</h3>
+              <button
+                onClick={() => setShowMemberDetails(false)}
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+              <div className="text-center mb-8">
+                <div className="inline-block relative mb-4">
+                  {activeView === "dm" ? (
+                    <span className="text-7xl drop-shadow-md filter">
+                      {getUser(activeDMUser)?.avatar}
+                    </span>
+                  ) : (
+                    <div className="w-24 h-24 bg-gradient-to-br from-slate-100 to-slate-200 rounded-3xl mx-auto flex items-center justify-center text-slate-400 shadow-inner">
+                      <Hash className="w-10 h-10" />
+                    </div>
+                  )}
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900">
+                  {getActiveViewName().replace("#", "")}
+                </h2>
+                {activeView === "channel" && (
+                  <p className="text-sm font-medium text-slate-500 mt-1">
+                    {activeMembers.length} members in this channel
+                  </p>
+                )}
+              </div>
+
+              {activeView === "channel" && (
+                <div className="mb-8">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                    Topic
+                  </h4>
+                  <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-sm text-slate-600 leading-relaxed">
+                    Welcome to the{" "}
+                    <span className="font-bold text-indigo-600">
+                      #{getActiveViewName().replace("# ", "")}
+                    </span>{" "}
+                    channel. This is the beginning of your collaboration journey
+                    in {getCurrentSpace()?.name}.
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center justify-between">
+                  Members
+                  <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px]">
+                    {activeMembers.length}
+                  </span>
+                </h4>
+                <div className="space-y-1">
+                  {activeMembers.map(member => (
+                    <div
+                      key={member.id}
+                      className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-xl transition-colors cursor-default group border border-transparent hover:border-slate-100"
+                    >
+                      <div className="relative">
+                        <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl shadow-sm border border-slate-100">
+                          {member.avatar}
+                        </div>
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                            member.status === "online"
+                              ? "bg-emerald-500"
+                              : "bg-slate-300"
+                          }`}
+                        ></span>
+                      </div>
+                      <div className="overflow-hidden">
+                        <div className="text-sm font-bold text-slate-800 truncate">
+                          {member.name}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {member.email}
+                        </div>
+                      </div>
+                      {member.id === currentUser?.id && (
+                        <span className="ml-auto text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md font-bold tracking-wide">
+                          YOU
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Create Space Modal */}
+      {/* Right Sidebar - FRIENDS & DMs */}
+      <div className="w-64 bg-white border-l border-slate-200 flex flex-col flex-shrink-0 z-20">
+        <div className="p-5 border-b border-slate-100 flex items-center justify-between h-[72px]">
+          <h2 className="font-bold text-slate-800 flex items-center gap-2">
+            Friends{" "}
+            <span className="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full text-xs">
+              {filteredFriends.length}
+            </span>
+          </h2>
+          <button
+            onClick={() => {
+              setInviteSearchQuery("")
+              setInviteSearchResults([])
+              setShowAddFriendModal(true)
+            }}
+            className="p-2 hover:bg-indigo-50 rounded-xl text-indigo-600 transition-all hover:scale-105"
+            title="Add Friend"
+          >
+            <UserPlus className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin">
+          {filteredFriends.length > 0 ? (
+            filteredFriends.map(friend => (
+              <button
+                key={friend.id}
+                onClick={() => {
+                  setActiveView("dm")
+                  setActiveDMUser(friend.id)
+                  setActiveSpace(null)
+                }}
+                className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition-all group ${
+                  activeView === "dm" && activeDMUser === friend.id
+                    ? "bg-indigo-50/50 border border-indigo-100 shadow-sm"
+                    : "hover:bg-slate-50 border border-transparent"
+                }`}
+              >
+                <div className="relative">
+                  <div className="w-9 h-9 bg-slate-50 rounded-full flex items-center justify-center text-lg border border-slate-100 group-hover:bg-white transition-colors">
+                    {friend.avatar}
+                  </div>
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                      friend.status === "online"
+                        ? "bg-emerald-500"
+                        : "bg-slate-300"
+                    }`}
+                  ></span>
+                </div>
+                <div className="text-left overflow-hidden">
+                  <div className="text-sm font-semibold text-slate-700 truncate group-hover:text-indigo-700 transition-colors">
+                    {friend.name}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {friend.status === "online" ? "Online" : "Offline"}
+                  </div>
+                </div>
+              </button>
+            ))
+          ) : (
+            <div className="flex flex-col items-center justify-center h-40 text-center px-4">
+              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3 text-slate-300">
+                <UserPlus className="w-6 h-6" />
+              </div>
+              <p className="text-xs text-slate-500 font-medium mb-1">
+                No friends yet
+              </p>
+              <p className="text-[10px] text-slate-400">
+                Add people to start chatting!
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* --- MODALS --- */}
+
+      {/* Generic Modal Wrapper */}
       {showCreateSpaceModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-gray-200 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-blue-600">
-                Create a space
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl ring-1 ring-slate-900/5">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-slate-800">
+                Create Space
               </h3>
               <button
                 onClick={() => setShowCreateSpaceModal(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-xs font-medium mb-2 text-gray-700">
-                  Space name
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Space Name
                 </label>
                 <input
                   type="text"
                   value={newSpaceName}
                   onChange={e => setNewSpaceName(e.target.value)}
-                  placeholder="e.g. Acme Corp"
-                  className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-sm"
+                  placeholder="e.g. Design Team"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 font-medium"
                   autoFocus
                 />
               </div>
               <button
                 onClick={createSpace}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white shadow-sm text-sm"
+                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl font-bold text-white shadow-lg shadow-indigo-200 transition-all"
               >
                 Create Space
               </button>
@@ -1190,191 +1409,273 @@ export default function CollaborationApp() {
         </div>
       )}
 
-      {/* Invite Modal (Space) */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-gray-200 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-blue-600">
-                Invite to{" "}
-                {inviteType === "space" ? getCurrentSpace()?.name : "Channel"}
-              </h3>
+      {/* Add Friend Modal */}
+      {showAddFriendModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl ring-1 ring-slate-900/5">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-slate-800">Add Friend</h3>
               <button
-                onClick={() => setShowInviteModal(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
+                onClick={() => setShowAddFriendModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
             {!inviteSent ? (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <div className="relative">
-                  <label className="block text-xs font-medium mb-2 text-gray-700">
-                    Search User by Name
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Find People
                   </label>
-                  <input
-                    type="text"
-                    value={inviteSearchQuery}
-                    onChange={e => {
-                      setInviteSearchQuery(e.target.value)
-                      setSelectedInviteUser(null)
-                    }}
-                    placeholder="Start typing a name..."
-                    className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-sm"
-                  />
+                  <div className="relative">
+                    <Search className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={inviteSearchQuery}
+                      onChange={e => {
+                        setInviteSearchQuery(e.target.value)
+                        setSelectedInviteUser(null)
+                      }}
+                      placeholder="Search by name..."
+                      className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 font-medium"
+                    />
+                  </div>
                   {inviteSearchResults.length > 0 && !selectedInviteUser && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-2 bg-white border border-slate-100 rounded-2xl shadow-xl max-h-48 overflow-y-auto py-2">
                       {inviteSearchResults.map(u => (
                         <div
                           key={u.id}
-                          onClick={() => selectInviteUser(u)}
-                          className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2"
+                          onClick={() => setSelectedInviteUser(u)}
+                          className="px-4 py-3 hover:bg-indigo-50 cursor-pointer flex items-center gap-3 transition-colors border-l-2 border-transparent hover:border-indigo-500"
                         >
-                          <span>{u.avatar}</span>
-                          <span>{u.name}</span>
+                          <span className="text-xl bg-slate-50 rounded-full w-8 h-8 flex items-center justify-center">
+                            {u.avatar}
+                          </span>
+                          <span className="font-semibold text-slate-700">
+                            {u.name}
+                          </span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
                 {selectedInviteUser && (
-                  <div className="flex items-center gap-2 p-3 bg-blue-50 text-blue-800 rounded-lg border border-blue-100 text-sm">
-                    <UserIcon className="w-4 h-4" />
-                    <span>
-                      Selected: <strong>{selectedInviteUser.name}</strong>
-                    </span>
+                  <div className="flex items-center gap-4 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                    <div className="text-2xl bg-white p-2 rounded-full shadow-sm">
+                      {selectedInviteUser.avatar}
+                    </div>
+                    <div>
+                      <p className="text-xs text-indigo-500 font-bold uppercase tracking-wide">
+                        Selected
+                      </p>
+                      <p className="font-bold text-slate-800">
+                        {selectedInviteUser.name}
+                      </p>
+                    </div>
+                    <CheckCircle className="w-6 h-6 text-indigo-500 ml-auto" />
                   </div>
                 )}
                 <button
-                  onClick={sendInvites}
+                  onClick={sendFriendRequest}
                   disabled={!selectedInviteUser}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-white shadow-sm text-sm"
+                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg shadow-indigo-200 transition-all"
                 >
-                  <Mail className="w-4 h-4" />
-                  Send Invitation
+                  <UserPlus className="w-5 h-5" />
+                  Send Request
                 </button>
               </div>
             ) : (
-              <div className="text-center py-8">
-                <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg animate-pulse">
-                  <Check className="w-7 h-7 text-white" />
+              <div className="text-center py-10">
+                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+                  <Check className="w-10 h-10 text-emerald-600" />
                 </div>
-                <h4 className="text-lg font-bold mb-2 text-green-600">
-                  Invitation sent!
+                <h4 className="text-2xl font-bold mb-2 text-slate-800">
+                  Sent!
                 </h4>
+                <p className="text-slate-500">
+                  Friend request delivered successfully.
+                </p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Start DM Modal */}
-      {showDMModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-gray-200 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-800">New Message</h3>
+      {/* Add To Space Modal */}
+      {showAddToSpaceModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl ring-1 ring-slate-900/5">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-slate-800">Add Member</h3>
               <button
-                onClick={() => setShowDMModal(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
+                onClick={() => setShowAddToSpaceModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <div className="space-y-4">
-              <div className="relative">
-                <label className="block text-xs font-medium mb-2 text-gray-700">
-                  To:
-                </label>
-                <input
-                  type="text"
-                  value={inviteSearchQuery}
-                  onChange={e => {
-                    setInviteSearchQuery(e.target.value)
-                    setSelectedInviteUser(null)
-                  }}
-                  placeholder="Search for a user..."
-                  className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-sm"
-                />
-                {inviteSearchResults.length > 0 && !selectedInviteUser && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                    {inviteSearchResults.map(u => (
-                      <div
-                        key={u.id}
-                        onClick={() => selectInviteUser(u)}
-                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2"
-                      >
-                        <span>{u.avatar}</span>
-                        <span>{u.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {selectedInviteUser && (
-                <div className="flex items-center gap-2 p-3 bg-gray-50 text-gray-800 rounded-lg border border-gray-200 text-sm">
-                  <span className="text-lg">{selectedInviteUser.avatar}</span>
-                  <span>
-                    <strong>{selectedInviteUser.name}</strong>
-                  </span>
+
+            {currentUser?.friends.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <UserPlus className="w-8 h-8 text-slate-300" />
                 </div>
-              )}
-              <button
-                onClick={startDirectMessage}
-                disabled={!selectedInviteUser}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-sm text-sm"
-              >
-                Start Chatting
-              </button>
-            </div>
+                <p className="text-slate-500 font-medium mb-4">
+                  You need friends to add them to a space.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowAddToSpaceModal(false)
+                    setShowAddFriendModal(true)
+                  }}
+                  className="text-indigo-600 font-bold hover:underline"
+                >
+                  Find Friends
+                </button>
+              </div>
+            ) : !inviteSent ? (
+              <div className="space-y-6">
+                <div className="max-h-60 overflow-y-auto pr-2 space-y-2 scrollbar-thin">
+                  {friends.map(friend => {
+                    const currentSpaceObj = spaces.find(
+                      s => s.id === activeSpace
+                    )
+                    const isMember = currentSpaceObj?.members.includes(
+                      friend.id
+                    )
+                    if (isMember) return null
+
+                    const isSelected = selectedInviteUser?.id === friend.id
+
+                    return (
+                      <div
+                        key={friend.id}
+                        onClick={() => setSelectedInviteUser(friend)}
+                        className={`p-3 rounded-2xl cursor-pointer flex items-center justify-between border-2 transition-all ${
+                          isSelected
+                            ? "bg-indigo-50 border-indigo-500 shadow-md"
+                            : "bg-white border-slate-100 hover:border-indigo-200"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl bg-white p-1 rounded-full border border-slate-100">
+                            {friend.avatar}
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              isSelected ? "text-indigo-900" : "text-slate-700"
+                            }`}
+                          >
+                            {friend.name}
+                          </span>
+                        </div>
+                        {isSelected && (
+                          <CheckCircle className="w-6 h-6 text-indigo-500" />
+                        )}
+                      </div>
+                    )
+                  })}
+                  {friends.every(f =>
+                    spaces
+                      .find(s => s.id === activeSpace)
+                      ?.members.includes(f.id)
+                  ) && (
+                    <p className="text-center text-slate-400 italic py-4">
+                      All your friends are already here!
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  onClick={addFriendToSpace}
+                  disabled={!selectedInviteUser}
+                  className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-lg transition-all"
+                >
+                  Add to {getCurrentSpace()?.name}
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-10">
+                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Check className="w-10 h-10 text-emerald-600" />
+                </div>
+                <h4 className="text-2xl font-bold mb-2 text-slate-800">
+                  Added!
+                </h4>
+                <p className="text-slate-500">Member added successfully.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Notifications Modal */}
       {showNotificationsModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-gray-200 shadow-xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Bell className="w-5 h-5" /> Notifications
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl ring-1 ring-slate-900/5 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+                <Bell className="w-6 h-6 text-indigo-500" /> Notifications
               </h3>
               <button
                 onClick={() => setShowNotificationsModal(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto space-y-3">
+            <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
               {currentUser?.notifications.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  No new notifications
+                <div className="text-center py-12 text-slate-400">
+                  <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                  <p>No new notifications</p>
                 </div>
               ) : (
                 currentUser?.notifications.map(notif => (
                   <div
                     key={notif.id}
-                    className="p-4 border border-gray-200 rounded-xl bg-gray-50"
+                    className="p-5 border border-slate-100 rounded-2xl bg-slate-50 hover:bg-white hover:shadow-lg transition-all group"
                   >
-                    <div className="flex gap-3">
-                      <div className="bg-blue-100 p-2 rounded-full h-fit">
-                        <Mail className="w-4 h-4 text-blue-600" />
+                    <div className="flex gap-4">
+                      <div className="bg-white p-3 rounded-full h-fit shadow-sm border border-slate-100">
+                        {notif.type === "friend_request" ? (
+                          <UserPlus className="w-5 h-5 text-indigo-600" />
+                        ) : (
+                          <Mail className="w-5 h-5 text-pink-500" />
+                        )}
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm text-gray-800">
-                          <strong>{notif.from}</strong> invited you to join{" "}
-                          <strong>{notif.spaceName}</strong>
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        {notif.type === "friend_request" ? (
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            <span className="font-bold text-slate-900">
+                              {notif.from}
+                            </span>{" "}
+                            sent you a friend request.
+                          </p>
+                        ) : (
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            <span className="font-bold text-slate-900">
+                              {notif.from}
+                            </span>{" "}
+                            invited you to{" "}
+                            <span className="font-bold text-indigo-600">
+                              {notif.spaceName}
+                            </span>
+                          </p>
+                        )}
+
+                        <p className="text-xs text-slate-400 mt-2 font-medium">
                           {new Date(notif.timestamp).toLocaleDateString()}
                         </p>
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex gap-3 mt-4">
                           <button
-                            onClick={() => handleAcceptInvite(notif.id)}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1"
+                            onClick={() =>
+                              handleNotificationAction(notif.id, notif.type)
+                            }
+                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
                           >
-                            <CheckCircle className="w-3 h-3" /> Accept
+                            <CheckCircle className="w-4 h-4" /> Accept
                           </button>
                         </div>
                       </div>
@@ -1389,69 +1690,83 @@ export default function CollaborationApp() {
 
       {/* Create Channel Modal */}
       {showChannelModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-gray-200 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-800">
-                Create a channel
-              </h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl ring-1 ring-slate-900/5">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-slate-800">New Channel</h3>
               <button
                 onClick={() => setShowChannelModal(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-xs font-medium mb-2 text-gray-700">
-                  Channel name
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Channel Name
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-gray-500">
+                  <span className="absolute left-4 top-3.5 text-slate-400 font-bold">
                     #
                   </span>
                   <input
                     type="text"
                     value={newChannelName}
                     onChange={e => setNewChannelName(e.target.value)}
-                    placeholder="new-channel"
-                    className="w-full pl-8 pr-3 py-2 bg-gray-100 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-sm"
+                    placeholder="announcements"
+                    className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800 font-medium"
                     autoFocus
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium mb-2 text-gray-700">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                   Visibility
                 </label>
                 <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    className={`flex-1 flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      newChannelType === "public"
+                        ? "border-indigo-500 bg-indigo-50/50"
+                        : "border-slate-100 hover:border-slate-200"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="channelType"
                       checked={newChannelType === "public"}
                       onChange={() => setNewChannelType("public")}
-                      className="text-blue-600 focus:ring-blue-500"
+                      className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span className="text-sm">Public</span>
+                    <span className="text-sm font-bold text-slate-700">
+                      Public
+                    </span>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    className={`flex-1 flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      newChannelType === "private"
+                        ? "border-indigo-500 bg-indigo-50/50"
+                        : "border-slate-100 hover:border-slate-200"
+                    }`}
+                  >
                     <input
                       type="radio"
                       name="channelType"
                       checked={newChannelType === "private"}
                       onChange={() => setNewChannelType("private")}
-                      className="text-blue-600 focus:ring-blue-500"
+                      className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span className="text-sm">Private</span>
+                    <span className="text-sm font-bold text-slate-700">
+                      Private
+                    </span>
                   </label>
                 </div>
               </div>
 
               <button
                 onClick={createChannel}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold text-white shadow-sm text-sm"
+                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl font-bold text-white shadow-lg transition-all"
               >
                 Create Channel
               </button>
