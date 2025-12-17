@@ -26,7 +26,7 @@ import {
   File as FileIcon
 } from "lucide-react"
 import * as Storage from "./services/storage"
-import { getToken } from "./services/auth"
+import { getToken, getStoredUser, logout, saveAuth } from "./services/auth"
 
 export default function CollaborationApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -40,6 +40,33 @@ export default function CollaborationApp() {
   })
   const [authError, setAuthError] = useState("")
   const [authSuccess, setAuthSuccess] = useState("")
+
+  // --- Restore auth from localStorage on mount ---
+  useEffect(() => {
+    const restore = async () => {
+      const token = getToken()
+      const storedUser = getStoredUser()
+      if (token && storedUser) {
+        // Immediately set stored user so UI doesn't flash to auth page
+        setCurrentUser(storedUser)
+        setIsAuthenticated(true)
+
+        // Background validation/refresh from server (best-effort)
+        try {
+          const users = await Storage.getUsers()
+          const fresh = Array.isArray(users) ? users.find(u => u.id === storedUser.id) : null
+          if (fresh) {
+            setCurrentUser(fresh)
+            localStorage.setItem("spaces_user", JSON.stringify(fresh))
+          }
+        } catch (err) {
+          console.error("Auth refresh failed:", err)
+        }
+      }
+    }
+
+    restore()
+  }, [])
 
   // Main Data State
   const [spaces, setSpaces] = useState([])
@@ -221,24 +248,56 @@ export default function CollaborationApp() {
         console.log("WebSocket connected")
       }
 
-      ws.onmessage = event => {
-        try {
-          const data = JSON.parse(event.data)
+      // Use an async handler so we can perform data refreshes when 'system' events arrive
+    const handleWsEvent = async data => {
+      switch (data.type) {
+        case "presence_update":
+          setOnlineUserIds(Array.isArray(data.online_users) ? data.online_users : [])
+          break
 
-          if (data.type === "presence_update") {
-            // Update presence list
-            setOnlineUserIds(Array.isArray(data.online_users) ? data.online_users : [])
-          } else if (!data.type || data.type === "message") {
-            // Only append actual message payloads
+        case "sync_spaces":
+          // Refresh current user from server and update localStorage so UI updates immediately
+          try {
+            const allUsers = await Storage.getUsers()
+            const freshUser = Array.isArray(allUsers) ? allUsers.find(u => u.id === currentUser.id) : null
+            if (freshUser) {
+              setCurrentUser(freshUser)
+              localStorage.setItem("spaces_user", JSON.stringify(freshUser))
+            }
+          } catch (e) {
+            console.error("sync_spaces failed:", e)
+          }
+          break
+
+        case "new_message":
+          // Append incoming messages consistently using a defined payload
+          setMessages(prev => ({
+            ...prev,
+            [data.chatId]: [...(prev[data.chatId] || []), data.message]
+          }))
+          break
+
+        default:
+          // Fallback: if it's a message-like payload without explicit type
+          if (!data.type || data.type === "message") {
             setMessages(prev => ({
               ...prev,
               [chatId]: [...(prev[chatId] || []), data]
             }))
+          } else {
+            console.log("Other event:", data)
           }
-        } catch (err) {
-          console.error("Error parsing WebSocket message:", err)
-        }
       }
+    }
+
+    ws.onmessage = event => {
+      try {
+        const data = JSON.parse(event.data)
+        handleWsEvent(data)
+      } catch (err) {
+        console.error("Error parsing WebSocket message:", err)
+      }
+    }
 
       ws.onerror = error => {
         console.error("WebSocket error:", error)
@@ -327,6 +386,12 @@ export default function CollaborationApp() {
         setCurrentUser(res.user)
         setIsAuthenticated(true)
         setAuthSuccess("Account created successfully!")
+        // Persist auth info if server returned a token, otherwise at least save user
+        if (res.token) {
+          saveAuth(res.user, res.token)
+        } else {
+          localStorage.setItem("spaces_user", JSON.stringify(res.user))
+        }
       } else {
         setAuthError("Signup failed")
       }
@@ -344,6 +409,12 @@ export default function CollaborationApp() {
         setCurrentUser(res.user)
         setIsAuthenticated(true)
         setAuthSuccess("Logged in successfully!")
+        // Ensure auth is saved (Storage.login normally does this, but be defensive)
+        if (res.token) {
+          saveAuth(res.user, res.token)
+        } else {
+          localStorage.setItem("spaces_user", JSON.stringify(res.user))
+        }
       } else {
         setAuthError(res?.error || "Invalid credentials")
       }
@@ -351,6 +422,8 @@ export default function CollaborationApp() {
   }
 
   const handleLogout = () => {
+    // Clear persisted auth immediately
+    logout()
     setIsAuthenticated(false)
     setCurrentUser(null)
     setSpaces([])
