@@ -57,7 +57,6 @@ export const saveUser = async user => {
   if (!user.friends) user.friends = []
   if (!user.notifications) user.notifications = []
 
-  // Use the signup endpoint so backend hashes password and returns token
   const res = await authFetch(`${API_BASE}/users/signup`, {
     method: "POST",
     body: JSON.stringify(user)
@@ -174,11 +173,23 @@ export const sendFriendRequest = async (fromId, fromName, toUserId) => {
   })
 }
 
-export const acceptFriendRequest = async (userId, notificationId) => {
+/* ✅ FIXED — ONLY REQUIRED CHANGE */
+export const acceptFriendRequest = async (friendId, notificationId = null) => {
+  // Get current user from localStorage
+  const userStr = localStorage.getItem("spaces_user")
+  const user = userStr ? JSON.parse(userStr) : null
+
+  if (!user) return null
+
   const res = await authFetch(`${API_BASE}/actions/accept-friend`, {
     method: "POST",
-    body: JSON.stringify({ userId, notificationId })
+    body: JSON.stringify({
+      userId: user.id,
+      friendId: friendId,
+      notificationId: notificationId
+    })
   })
+
   return safeJson(res)
 }
 

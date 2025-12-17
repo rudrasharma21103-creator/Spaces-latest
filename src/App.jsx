@@ -26,6 +26,7 @@ import {
   File as FileIcon
 } from "lucide-react"
 import * as Storage from "./services/storage"
+import { getToken } from "./services/auth"
 
 export default function CollaborationApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -44,6 +45,8 @@ export default function CollaborationApp() {
   const [spaces, setSpaces] = useState([])
   const [users, setUsers] = useState([])
   const [friends, setFriends] = useState([])
+  // Presence: list of online user IDs (updated via WebSocket presence_update)
+  const [onlineUserIds, setOnlineUserIds] = useState([])
 
   // UI State
   const [activeSpace, setActiveSpace] = useState(null)
@@ -129,52 +132,114 @@ export default function CollaborationApp() {
     loadSpaces()
   }, [isAuthenticated, currentUser?.spaces, currentUser?.friends])
 
+  // Load friends list for the current user (keeps `friends` state in sync)
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated || !currentUser) return
 
-    // compute active chat id from current state
-    const chatId = getActiveChatId()
-
-    // helper to connect websocket for a chat
-    const connectChatSocket = (chatId, onMessage) => {
-      try {
-        const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-        const host = window.location.hostname || "127.0.0.1"
-        const port = window.location.hostname ? window.location.port || "" : "127.0.0.1:8000"
-        // prefer explicit backend websocket path; adjust as needed
-        const url = `${protocol}://${host}:${window.location.hostname ? window.location.port || "8000" : "8000"}/ws/${chatId}`
-        const ws = new WebSocket(url)
-        ws.onopen = () => console.debug("ws open", url)
-        ws.onmessage = e => {
-          try {
-            const msg = JSON.parse(e.data)
-            onMessage(msg)
-          } catch (err) {
-            console.error("ws message parse error", err)
-          }
+    const loadFriends = async () => {
+      if (currentUser?.friends && currentUser.friends.length > 0) {
+        try {
+          const friendsList = await Storage.getFriends(currentUser.friends)
+          setFriends(Array.isArray(friendsList) ? friendsList : [])
+        } catch (error) {
+          console.error("Error loading friends:", error)
+          setFriends([])
         }
-        ws.onerror = e => console.error("ws error", e)
-        ws.onclose = () => console.debug("ws closed", url)
-        return ws
-      } catch (e) {
-        console.error(e)
-        return { close: () => {} }
+      } else {
+        setFriends([])
       }
     }
 
+    loadFriends()
+  }, [isAuthenticated, currentUser?.friends])
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return
+
+    const chatId = getActiveChatId()
     if (!chatId) return
 
-    const ws = connectChatSocket(chatId, msg => {
-      setMessages(prev => ({
-        ...prev,
-        [chatId]: [...(prev[chatId] || []), msg]
-      }))
-    })
+    // Load existing messages for this chat first
+    const loadHistory = async () => {
+      try {
+        const history = await Storage.getMessages(chatId)
+        setMessages(prev => ({ ...prev, [chatId]: history || [] }))
+      } catch (err) {
+        console.error("Failed to load chat history:", err)
+      }
+    }
 
-    wsRef.current = ws
+    loadHistory()
 
-    return () => ws.close()
-  }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser])
+    // Clean up previous connection if present
+    if (wsRef.current) {
+      try {
+        wsRef.current.close()
+      } catch (err) {
+        console.error("Error closing previous websocket:", err)
+      }
+      wsRef.current = null
+    }
+
+    // Create new WebSocket connection
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+    const token = getToken()
+    // Include both token and explicit userId as query params (backend prefers token if present)
+    const wsUrl = `${protocol}//127.0.0.1:8000/ws/chat/${chatId}?token=${token}&userId=${currentUser.id}`
+
+    try {
+      const ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        console.log("WebSocket connected")
+      }
+
+      ws.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data)
+
+          if (data.type === "presence_update") {
+            // Update presence list
+            setOnlineUserIds(Array.isArray(data.online_users) ? data.online_users : [])
+          } else if (!data.type || data.type === "message") {
+            // Only append actual message payloads
+            setMessages(prev => ({
+              ...prev,
+              [chatId]: [...(prev[chatId] || []), data]
+            }))
+          }
+        } catch (err) {
+          console.error("Error parsing WebSocket message:", err)
+        }
+      }
+
+      ws.onerror = error => {
+        console.error("WebSocket error:", error)
+      }
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected")
+        // Clear local presence state until a fresh presence_update arrives (if any)
+        setOnlineUserIds([])
+      }
+
+      wsRef.current = ws
+    } catch (error) {
+      console.error("Error creating WebSocket:", error)
+    }
+
+    // Cleanup on unmount or when deps change
+    return () => {
+      if (wsRef.current) {
+        try {
+          wsRef.current.close()
+        } catch (err) {
+          console.error("Error closing websocket on cleanup:", err)
+        }
+        wsRef.current = null
+      }
+    }
+  }, [isAuthenticated, activeChannel, activeView, activeDMUser])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -263,6 +328,7 @@ export default function CollaborationApp() {
     setCurrentUser(null)
     setSpaces([])
     setFriends([])
+    setOnlineUserIds([])
     setActiveSpace(null)
     setActiveView("channel")
     setAuthData({ email: "", password: "", confirmPassword: "", name: "" })
@@ -298,13 +364,18 @@ export default function CollaborationApp() {
     return Array.isArray(data) ? data : []
   }
 
-  const getUser = userId => {
+  const getUser = (userId, fallbackName = "Unknown User") => {
     if (currentUser?.id === userId) return currentUser
+
+    // Look in the users and friends state you already loaded
     let found = users.find(u => u.id === userId)
     if (!found) found = friends.find(u => u.id === userId)
-    if (!found) found = Storage.getUsers().find(u => u.id === userId)
-    return found
+
+    return found || { name: fallbackName, avatar: "👤" }
   }
+
+  // Presence helper: normalize IDs as strings when checking presence
+  const isUserOnline = userId => onlineUserIds.includes(String(userId))
 
   const getActiveMembers = () => {
     if (activeView === "channel") {
@@ -364,25 +435,21 @@ export default function CollaborationApp() {
     setSelectedFiles(prev => prev.filter(f => f.id !== id))
   }
 
-  const sendMessage = () => {
-    if ((!messageInput.trim() && selectedFiles.length === 0) || !currentUser)
-      return
+  const sendMessage = async () => {
+    if ((!messageInput.trim() && selectedFiles.length === 0) || !currentUser) return
     const chatId = getActiveChatId()
     if (!chatId) return
 
     const newMsg = {
       id: Date.now(),
-      userId: currentUser.id,
       text: messageInput,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
       timestamp: new Date().toISOString(),
-      reactions: {},
-      thread: [],
       attachments: selectedFiles
     }
 
-    Storage.saveMessage(chatId, newMsg)
-
-    // 🔥 REAL-TIME PUSH: send the new message over the websocket if open
+    // 1. Send via WebSocket (the backend will broadcast this back to you)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       try {
         wsRef.current.send(JSON.stringify(newMsg))
@@ -391,13 +458,19 @@ export default function CollaborationApp() {
       }
     }
 
-    setMessages(prev => ({
-      ...prev,
-      [chatId]: [...(prev[chatId] || []), newMsg]
-    }))
+    // 2. Save to storage (persist for later)
+    try {
+      await Storage.saveMessage(chatId, newMsg)
+    } catch (e) {
+      console.error("failed to save message", e)
+    }
 
+    // 3. Clear input and attachments
     setMessageInput("")
     setSelectedFiles([])
+
+    // NOTE: Do NOT update local messages state here — the websocket listener
+    // will receive the broadcasted message and update `messages` for all clients.
   }
 
   const createSpace = () => {
@@ -501,33 +574,63 @@ export default function CollaborationApp() {
     }, 1500)
   }
 
-  const handleNotificationAction = (notificationId, type) => {
-    if (!currentUser) return
+  const handleNotificationAction = async (notificationId, type) => {
+    try {
+      if (!currentUser) return
 
-    if (type === "friend_request") {
-      const updatedUser = Storage.acceptFriendRequest(
-        currentUser.id,
-        notificationId
-      )
-      if (updatedUser) {
-        setCurrentUser(updatedUser)
-      }
-    } else {
-      // Space invite
-      const joinedSpace = Storage.acceptInvite(currentUser.id, notificationId)
-      if (joinedSpace) {
-        const updatedUser = Storage.getUsers().find(
-          u => u.id === currentUser.id
+      if (type === "friend_request") {
+        // 1. Locate the notification to extract the friend's id
+        const notification = (currentUser.notifications || []).find(
+          n => n.id === notificationId
         )
-        if (updatedUser) {
+        if (!notification) return
+
+        // 2. Call backend to accept the friend request (include notificationId so backend can remove it)
+        const result = await Storage.acceptFriendRequest(
+          notification.fromId,
+          notification.id
+        )
+
+        if (result && !result.error) {
+          // 3. Locally update the user to remove the notification and add the friend
+          const updatedNotifications = (currentUser.notifications || []).filter(
+            n => n.id !== notificationId
+          )
+          const updatedFriends = Array.from(
+            new Set([...(currentUser.friends || []), notification.fromId])
+          )
+
+          const updatedUser = {
+            ...currentUser,
+            notifications: updatedNotifications,
+            friends: updatedFriends
+          }
+
           setCurrentUser(updatedUser)
-          setActiveSpace(joinedSpace.id)
-          setActiveView("channel")
-          if (joinedSpace.channels.length > 0) {
-            setActiveChannel(joinedSpace.channels[0].id)
+          // Keep localStorage in sync with the updated user
+          localStorage.setItem("spaces_user", JSON.stringify(updatedUser))
+        }
+      } else {
+        // Space invite: accept via backend and refresh user state
+        const joinedSpace = await Storage.acceptInvite(currentUser.id, notificationId)
+        if (joinedSpace) {
+          const users = await Storage.getUsers()
+          const updatedUser = users.find(u => u.id === currentUser.id)
+          if (updatedUser) {
+            setCurrentUser(updatedUser)
+            localStorage.setItem("spaces_user", JSON.stringify(updatedUser))
+            setActiveSpace(joinedSpace.id)
+            setActiveView("channel")
+            if (joinedSpace.channels && joinedSpace.channels.length > 0) {
+              setActiveChannel(joinedSpace.channels[0].id)
+            }
           }
         }
       }
+
+      setShowNotificationsModal(false)
+    } catch (error) {
+      console.error("Failed to handle notification:", error)
     }
   }
 
@@ -683,8 +786,8 @@ export default function CollaborationApp() {
   const filteredSpaces = spaces.filter(space =>
     space.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
-  const filteredFriends = friends.filter(u =>
-    u.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredFriends = (friends || []).filter(u =>
+    u && u.name && u.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
   const activeMembers = getActiveMembers()
 
@@ -967,7 +1070,7 @@ export default function CollaborationApp() {
                   <div className="w-9 h-9 bg-indigo-50 rounded-full flex items-center justify-center text-lg border border-indigo-100">
                     {currentUser?.avatar}
                   </div>
-                  {currentUser?.notifications.length ? (
+                  {currentUser?.notifications?.length ? (
                     <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border border-white"></span>
@@ -1001,9 +1104,9 @@ export default function CollaborationApp() {
                     <div className="flex items-center gap-3">
                       <Bell className="w-4 h-4" /> Notifications
                     </div>
-                    {currentUser?.notifications.length ? (
+                    {currentUser?.notifications?.length ? (
                       <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm shadow-red-200">
-                        {currentUser.notifications.length}
+                        {currentUser?.notifications?.length}
                       </span>
                     ) : null}
                   </button>
@@ -1036,11 +1139,15 @@ export default function CollaborationApp() {
                 </div>
               ) : (
                 getCurrentMessages().map((msg, idx) => {
-                  const user = getUser(msg.userId)
-                  const isMe = user?.id === currentUser?.id
+                  const senderId = msg.senderId ?? msg.userId
+                  const senderName = msg.senderName ?? msg.sender ?? msg.name ?? "Unknown User"
+                  const user = getUser(senderId, senderName)
+                  const isMe = senderId === currentUser?.id
+
                   // Check if previous message was same user to group them
                   const prevMsg = idx > 0 ? getCurrentMessages()[idx - 1] : null
-                  const isSequence = prevMsg && prevMsg.userId === msg.userId
+                  const prevSenderId = prevMsg ? (prevMsg.senderId ?? prevMsg.userId) : null
+                  const isSequence = prevMsg && prevSenderId === senderId
 
                   return (
                     <div
@@ -1346,42 +1453,43 @@ export default function CollaborationApp() {
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin">
           {filteredFriends.length > 0 ? (
-            filteredFriends.map(friend => (
-              <button
-                key={friend.id}
-                onClick={() => {
-                  setActiveView("dm")
-                  setActiveDMUser(friend.id)
-                  setActiveSpace(null)
-                }}
-                className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition-all group ${
-                  activeView === "dm" && activeDMUser === friend.id
-                    ? "bg-indigo-50/50 border border-indigo-100 shadow-sm"
-                    : "hover:bg-slate-50 border border-transparent"
-                }`}
-              >
-                <div className="relative">
-                  <div className="w-9 h-9 bg-slate-50 rounded-full flex items-center justify-center text-lg border border-slate-100 group-hover:bg-white transition-colors">
-                    {friend.avatar}
+            filteredFriends.map(friend => {
+              const isOnline = isUserOnline(friend.id)
+              return (
+                <button
+                  key={friend.id}
+                  onClick={() => {
+                    setActiveView("dm")
+                    setActiveDMUser(friend.id)
+                    setActiveSpace(null)
+                  }}
+                  className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition-all group ${
+                    activeView === "dm" && activeDMUser === friend.id
+                      ? "bg-indigo-50/50 border border-indigo-100 shadow-sm"
+                      : "hover:bg-slate-50 border border-transparent"
+                  }`}
+                >
+                  <div className="relative">
+                    <div className="w-9 h-9 bg-slate-50 rounded-full flex items-center justify-center text-lg border border-slate-100 group-hover:bg-white transition-colors">
+                      {friend.avatar}
+                    </div>
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                        isOnline ? "bg-emerald-500" : "bg-slate-300"
+                      }`}
+                    ></span>
                   </div>
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                      friend.status === "online"
-                        ? "bg-emerald-500"
-                        : "bg-slate-300"
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-left overflow-hidden">
-                  <div className="text-sm font-semibold text-slate-700 truncate group-hover:text-indigo-700 transition-colors">
-                    {friend.name}
+                  <div className="text-left overflow-hidden">
+                    <div className="text-sm font-semibold text-slate-700 truncate group-hover:text-indigo-700 transition-colors">
+                      {friend.name}
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {isOnline ? "Online" : "Offline"}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-400 truncate">
-                    {friend.status === "online" ? "Online" : "Offline"}
-                  </div>
-                </div>
-              </button>
-            ))
+                </button>
+              )
+            })
           ) : (
             <div className="flex flex-col items-center justify-center h-40 text-center px-4">
               <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3 text-slate-300">
@@ -1657,13 +1765,13 @@ export default function CollaborationApp() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
-              {currentUser?.notifications.length === 0 ? (
+              {currentUser?.notifications?.length === 0 ? (
                 <div className="text-center py-12 text-slate-400">
                   <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
                   <p>No new notifications</p>
                 </div>
               ) : (
-                currentUser?.notifications.map(notif => (
+                currentUser?.notifications?.map(notif => (
                   <div
                     key={notif.id}
                     className="p-5 border border-slate-100 rounded-2xl bg-slate-50 hover:bg-white hover:shadow-lg transition-all group"
