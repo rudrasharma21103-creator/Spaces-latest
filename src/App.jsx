@@ -90,23 +90,50 @@ export default function CollaborationApp() {
     if (!isAuthenticated || !currentUser) return
 
     const pollUser = async () => {
-      const storedUsers = await Storage.getUsers()
-      const freshUser = Array.isArray(storedUsers)
-        ? storedUsers.find(u => u.id === currentUser.id)
-        : null
+      try {
+        const storedUsers = await Storage.getUsers()
+        const freshUser = Array.isArray(storedUsers)
+          ? storedUsers.find(u => u.id === currentUser.id)
+          : null
 
-      if (freshUser) {
-        setCurrentUser(prev => ({
-          ...prev,
-          friends: freshUser.friends || prev.friends,
-          notifications: freshUser.notifications || prev.notifications
-        }))
+        if (freshUser) {
+          setCurrentUser(prev => {
+            // Check if anything actually changed to avoid unnecessary re-renders
+            const hasSpaceChange = JSON.stringify(prev.spaces) !== JSON.stringify(freshUser.spaces)
+            const hasFriendChange = JSON.stringify(prev.friends) !== JSON.stringify(freshUser.friends)
+            const hasNotificationChange = JSON.stringify(prev.notifications) !== JSON.stringify(freshUser.notifications)
+
+            if (!hasSpaceChange && !hasFriendChange && !hasNotificationChange) {
+              return prev
+            }
+
+            // Be conservative about overwriting spaces: only accept server spaces if there are more or equal items.
+            let newSpaces = prev.spaces
+            if (Array.isArray(freshUser.spaces)) {
+              if ((freshUser.spaces.length || 0) >= (prev.spaces?.length || 0)) {
+                newSpaces = freshUser.spaces
+              } else {
+                // Server reports fewer spaces (likely eventual consistency); keep local state to avoid flicker
+                newSpaces = prev.spaces
+              }
+            }
+
+            return {
+              ...prev,
+              spaces: newSpaces,
+              friends: freshUser.friends || prev.friends,
+              notifications: freshUser.notifications || prev.notifications
+            }
+          })
+        }
+      } catch (err) {
+        console.error("Polling error:", err)
       }
     }
 
     const interval = setInterval(pollUser, 2000)
     return () => clearInterval(interval)
-  }, [isAuthenticated, currentUser])
+  }, [isAuthenticated, currentUser?.id])
 
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return
@@ -473,7 +500,7 @@ export default function CollaborationApp() {
     // will receive the broadcasted message and update `messages` for all clients.
   }
 
-  const createSpace = () => {
+  const createSpace = async () => {
     if (!newSpaceName.trim() || !currentUser) return
     const newSpace = {
       id: Date.now(),
@@ -500,13 +527,22 @@ export default function CollaborationApp() {
       expanded: true,
       ownerId: currentUser.id
     }
-    Storage.saveSpace(newSpace)
+
+    // 1. Optimistic UI: update local spaces so the UI shows the new space immediately
+    setSpaces(prev => [...prev, newSpace])
+    setCurrentUser(prev => ({ ...prev, spaces: [...(prev.spaces || []), newSpace.id] }))
+
+    // 2. Persist to storage / backend
+    await Storage.saveSpace(newSpace)
     const updatedUser = {
       ...currentUser,
-      spaces: [...currentUser.spaces, newSpace.id]
+      spaces: [...(currentUser.spaces || []), newSpace.id]
     }
-    Storage.saveUser(updatedUser)
+    await Storage.saveUser(updatedUser)
+
+    // Ensure local state reflects persisted user
     setCurrentUser(updatedUser)
+
     setShowCreateSpaceModal(false)
     setNewSpaceName("")
   }
