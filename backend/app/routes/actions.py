@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.database import users_collection, spaces_collection
+from app.ws_manager import manager
 
 router = APIRouter(prefix="/actions")
 
@@ -43,7 +44,7 @@ def accept_friend(payload: dict):
     return {"error": "Missing user_id or friend_id"}
 
 @router.post("/add-member")
-def add_member_to_space(payload: dict):
+async def add_member_to_space(payload: dict):
     user_id_to_add = payload.get("userIdToDetail")
     space_id = payload.get("spaceId")
     
@@ -57,6 +58,12 @@ def add_member_to_space(payload: dict):
         {"id": user_id_to_add},
         {"$addToSet": {"spaces": space_id}}
     )
+
+    # 🔥 REAL-TIME POKE: Tell the added user to refresh their spaces
+    try:
+        await manager.send_to_user(user_id_to_add, {"type": "sync_spaces", "spaceId": space_id})
+    except Exception:
+        pass
     
     return {"status": "member added"}
 
