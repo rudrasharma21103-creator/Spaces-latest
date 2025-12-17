@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.ws_manager import manager
 from app.auth import verify_ws_token
 
@@ -8,18 +8,25 @@ router = APIRouter()
 async def websocket_endpoint(
     websocket: WebSocket,
     chat_id: str,
-    token: str = Query(...)
+    userId: str = None  # Capture userId from query params directly
 ):
-    user_id = verify_ws_token(token)
-    if not user_id:
-        await websocket.close(code=1008)
-        return
+    # Accept the connection first
+    await websocket.accept()
 
-    await manager.connect(chat_id, websocket)
+    # Prefer token verification if provided, otherwise use the userId query param
+    token = websocket.query_params.get("token")
+    user_id = verify_ws_token(token) if token else userId
+
+    # Add to connection manager (pass user_id to track presence)
+    await manager.connect(chat_id, websocket, user_id=user_id)
 
     try:
         while True:
+            # Wait for messages
             data = await websocket.receive_json()
+
+            # Broadcast to all clients in this chat
             await manager.broadcast(chat_id, data)
     except WebSocketDisconnect:
-        manager.disconnect(chat_id, websocket)
+        # Remove from connection manager (pass user_id so presence updates)
+        await manager.disconnect(chat_id, websocket, user_id=user_id)

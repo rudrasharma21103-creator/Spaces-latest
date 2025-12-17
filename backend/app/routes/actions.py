@@ -16,15 +16,62 @@ def send_friend_request(payload: dict):
 
 @router.post("/accept-friend")
 def accept_friend(payload: dict):
-    user_id = payload["userId"]
-    friend_id = payload["friendId"]
+    user_id = payload.get("userId")
+    friend_id = payload.get("friendId")
+    notification_id = payload.get("notificationId")
 
-    users_collection.update_one(
-        {"id": user_id},
-        {"$addToSet": {"friends": friend_id}}
+    # Expect the frontend to provide the current user's id (userId)
+    if user_id and friend_id:
+        users_collection.update_one(
+            {"id": user_id},
+            {"$addToSet": {"friends": friend_id}}
+        )
+        users_collection.update_one(
+            {"id": friend_id},
+            {"$addToSet": {"friends": user_id}}
+        )
+
+        # Remove the specific notification if provided
+        if notification_id:
+            users_collection.update_one(
+                {"id": user_id},
+                {"$pull": {"notifications": {"id": notification_id}}}
+            )
+
+        return {"status": "accepted"}
+
+    return {"error": "Missing user_id or friend_id"}
+
+@router.post("/add-member")
+def add_member_to_space(payload: dict):
+    user_id_to_add = payload.get("userIdToDetail")
+    space_id = payload.get("spaceId")
+    
+    spaces_collection.update_one(
+        {"id": space_id},
+        {"$addToSet": {"members": user_id_to_add}}
     )
+    
+    # Add space to user's spaces list
     users_collection.update_one(
-        {"id": friend_id},
-        {"$addToSet": {"friends": user_id}}
+        {"id": user_id_to_add},
+        {"$addToSet": {"spaces": space_id}}
     )
-    return {"status": "accepted"}
+    
+    return {"status": "member added"}
+
+@router.post("/accept-invite")
+def accept_invite(payload: dict):
+    user_id = payload.get("userId")
+    notification_id = payload.get("notificationId")
+    
+    # In real app, you'd find the space from notification
+    # For now, return a mock response
+    return {
+        "status": "accepted",
+        "space": {
+            "id": 12345,
+            "name": "Test Space",
+            "channels": [{"id": 1, "name": "general"}]
+        }
+    }
