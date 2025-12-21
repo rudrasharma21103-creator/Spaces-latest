@@ -25,22 +25,30 @@ const ensureArray = data => {
 const authFetch = async (url, options = {}) => {
   const token = getToken()
 
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {})
+  try {
+    console.log("authFetch ->", url, options && options.method ? options.method : "GET")
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      }
+    })
+
+    console.log("authFetch response status", res.status, "for", url)
+
+    if (res.status === 401) {
+      localStorage.clear()
+      window.location.reload()
+      return Promise.reject("Unauthorized")
     }
-  })
 
-  if (res.status === 401) {
-    localStorage.clear()
-    window.location.reload()
-    return Promise.reject("Unauthorized")
+    return res
+  } catch (err) {
+    console.error("authFetch failed for", url, err)
+    throw err
   }
-
-  return res
 }
 
 // --------------------
@@ -57,37 +65,64 @@ export const saveUser = async user => {
   if (!user.friends) user.friends = []
   if (!user.notifications) user.notifications = []
 
-  const res = await authFetch(`${API_BASE}/users/signup`, {
-    method: "POST",
-    body: JSON.stringify(user)
-  })
+  try {
+    console.log("saveUser -> posting to /users/signup", { email: user.email })
+    const res = await authFetch(`${API_BASE}/users/signup`, {
+      method: "POST",
+      body: JSON.stringify(user)
+    })
+    console.log("saveUser -> status", res.status)
 
-  const data = await safeJson(res)
-  if (data?.user && data?.token) {
-    saveAuth(data.user, data.token)
-    return data
+    const data = await safeJson(res)
+    console.log("saveUser -> response json", data)
+
+    if (data?.user && data?.token) {
+      saveAuth(data.user, data.token)
+      return data
+    }
+    return data || null
+  } catch (err) {
+    console.error("saveUser failed", err)
+    throw err
   }
-  return data || null
 }
 
 export const login = async ({ email, password }) => {
-  const res = await authFetch(`${API_BASE}/users/login`, {
-    method: "POST",
-    body: JSON.stringify({ email, password })
-  })
+  try {
+    console.log("login -> posting to /users/login", { email })
+    const res = await authFetch(`${API_BASE}/users/login`, {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    })
+    console.log("login -> status", res.status)
 
-  const data = await safeJson(res)
-  if (data?.user && data?.token) {
-    saveAuth(data.user, data.token)
-    return data
+    const data = await safeJson(res)
+    console.log("login -> response json", data)
+
+    if (data?.user && data?.token) {
+      saveAuth(data.user, data.token)
+      return data
+    }
+    return data || null
+  } catch (err) {
+    console.error("login failed", err)
+    throw err
   }
-  return data || null
 }
 
 export const findUserByEmail = async email => {
-  const res = await authFetch(`${API_BASE}/users/by-email/${email}`)
-  const data = await safeJson(res)
-  return data || null
+  try {
+    const encoded = encodeURIComponent(email)
+    console.log("findUserByEmail ->", encoded)
+    const res = await authFetch(`${API_BASE}/users/by-email/${encoded}`)
+    console.log("findUserByEmail status", res.status)
+    const data = await safeJson(res)
+    console.log("findUserByEmail response", data)
+    return data || null
+  } catch (err) {
+    console.error("findUserByEmail failed", err)
+    return null
+  }
 }
 
 export const searchUsersByName = async query => {
@@ -198,10 +233,11 @@ export const acceptFriendRequest = async (friendId, notificationId = null) => {
 // --------------------
 
 export const addMemberToSpace = async (userIdToDetail, spaceId) => {
-  await authFetch(`${API_BASE}/actions/add-member`, {
+  const res = await authFetch(`${API_BASE}/actions/add-member`, {
     method: "POST",
     body: JSON.stringify({ userIdToDetail, spaceId })
   })
+  return safeJson(res)
 }
 
 export const acceptInvite = async (userId, notificationId) => {

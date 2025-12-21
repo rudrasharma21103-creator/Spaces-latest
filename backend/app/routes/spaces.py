@@ -17,10 +17,11 @@ def save_space(space: dict):
     )
 
     # 🔥 IMPORTANT FIX:
-    # Add this space to creator's user.spaces list
-    if "createdBy" in space:
+    # Add this space to creator's user.spaces list (support both createdBy and ownerId fields)
+    creator_id = space.get("createdBy") or space.get("ownerId")
+    if creator_id:
         users_collection.update_one(
-            {"id": space["createdBy"]},
+            {"id": creator_id},
             {"$addToSet": {"spaces": space["id"]}}
         )
 
