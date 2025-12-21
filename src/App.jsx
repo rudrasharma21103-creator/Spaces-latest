@@ -269,6 +269,24 @@ export default function CollaborationApp() {
           }
           break
 
+        case "space_updated":
+          // A member was added to a space — refresh that space locally so UI updates for all connected clients
+          try {
+            const allSpaces = await Storage.getSpaces()
+            const updatedSpace = Array.isArray(allSpaces) ? allSpaces.find(s => s.id === data.spaceId) : null
+            console.log("space_updated -> server returned updatedSpace", updatedSpace)
+            if (updatedSpace) {
+              setSpaces(prev => {
+                const mapped = prev.map(s => (s.id === updatedSpace.id ? { ...s, ...updatedSpace } : s))
+                console.log("space_updated -> new spaces state sample", mapped.find(s => s.id === updatedSpace.id))
+                return mapped
+              })
+            }
+          } catch (e) {
+            console.error("space_updated failed:", e)
+          }
+          break
+
         case "new_message":
           // Append incoming messages consistently using a defined payload
           setMessages(prev => ({
@@ -353,6 +371,8 @@ export default function CollaborationApp() {
     setAuthError("")
     setAuthSuccess("")
 
+    console.log("handleAuthSubmit", authMode, authData)
+
   if (authMode === "signup") {
       if (!authData.name || !authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
@@ -381,42 +401,56 @@ export default function CollaborationApp() {
         notifications: []
       }
 
-      const res = await Storage.saveUser(newUser)
-      if (res && res.user) {
-        setCurrentUser(res.user)
-        setIsAuthenticated(true)
-        setAuthSuccess("Account created successfully!")
-        // Persist auth info if server returned a token, otherwise at least save user
-        if (res.token) {
-          saveAuth(res.user, res.token)
+      try {
+        console.log("calling Storage.saveUser", { email: newUser.email, name: newUser.name })
+        const res = await Storage.saveUser(newUser)
+        console.log("Storage.saveUser result", res)
+        if (res && res.user) {
+          setCurrentUser(res.user)
+          setIsAuthenticated(true)
+          setAuthSuccess("Account created successfully!")
+          // Persist auth info if server returned a token, otherwise at least save user
+          if (res.token) {
+            saveAuth(res.user, res.token)
+          } else {
+            localStorage.setItem("spaces_user", JSON.stringify(res.user))
+          }
         } else {
-          localStorage.setItem("spaces_user", JSON.stringify(res.user))
+          setAuthError(res?.error || "Signup failed")
         }
-      } else {
-        setAuthError("Signup failed")
+      } catch (err) {
+        console.error("Storage.saveUser threw", err)
+        setAuthError(String(err) || "Signup failed")
       }
     } else {
       if (!authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
         return
       }
-      const res = await Storage.login({
-        email: authData.email,
-        password: authData.password
-      })
+      try {
+        console.log("calling Storage.login", { email: authData.email })
+        const res = await Storage.login({
+          email: authData.email,
+          password: authData.password
+        })
+        console.log("Storage.login result", res)
 
-      if (res && res.user) {
-        setCurrentUser(res.user)
-        setIsAuthenticated(true)
-        setAuthSuccess("Logged in successfully!")
-        // Ensure auth is saved (Storage.login normally does this, but be defensive)
-        if (res.token) {
-          saveAuth(res.user, res.token)
+        if (res && res.user) {
+          setCurrentUser(res.user)
+          setIsAuthenticated(true)
+          setAuthSuccess("Logged in successfully!")
+          // Ensure auth is saved (Storage.login normally does this, but be defensive)
+          if (res.token) {
+            saveAuth(res.user, res.token)
+          } else {
+            localStorage.setItem("spaces_user", JSON.stringify(res.user))
+          }
         } else {
-          localStorage.setItem("spaces_user", JSON.stringify(res.user))
+          setAuthError(res?.error || "Invalid credentials")
         }
-      } else {
-        setAuthError(res?.error || "Invalid credentials")
+      } catch (err) {
+        console.error("Storage.login threw", err)
+        setAuthError(String(err) || "Login failed")
       }
     }
   }
@@ -664,23 +698,34 @@ export default function CollaborationApp() {
     }, 2000)
   }
 
-  const addFriendToSpace = () => {
+  const addFriendToSpace = async () => {
     if (!selectedInviteUser || !currentUser || !activeSpace) return
-    Storage.addMemberToSpace(selectedInviteUser.id, activeSpace)
+    try {
+      const res = await Storage.addMemberToSpace(selectedInviteUser.id, activeSpace)
+      // If server confirms, fetch the latest space and update local state
+      if (res && res.status === "member added") {
+        try {
+          const allSpaces = await Storage.getSpaces()
+          const updatedSpace = Array.isArray(allSpaces)
+            ? allSpaces.find(s => s.id === activeSpace)
+            : null
+          if (updatedSpace) {
+            setSpaces(prev => prev.map(s => (s.id === activeSpace ? { ...s, ...updatedSpace } : s)))
+          }
+        } catch (e) {
+          console.error("Failed to refresh spaces after add-member:", e)
+        }
 
-    setInviteSent(true)
-    setTimeout(() => {
-      setShowAddToSpaceModal(false)
-      setSelectedInviteUser(null)
-      setInviteSent(false)
-      // Refresh current space
-      const updatedSpace = Storage.getSpaces().find(s => s.id === activeSpace)
-      if (updatedSpace) {
-        setSpaces(prev =>
-          prev.map(s => (s.id === activeSpace ? updatedSpace : s))
-        )
+        setInviteSent(true)
+        setTimeout(() => {
+          setShowAddToSpaceModal(false)
+          setSelectedInviteUser(null)
+          setInviteSent(false)
+        }, 1500)
       }
-    }, 1500)
+    } catch (err) {
+      console.error("Error adding member to space:", err)
+    }
   }
 
   const handleNotificationAction = async (notificationId, type) => {
@@ -773,7 +818,8 @@ export default function CollaborationApp() {
             {/* Auth Form */}
             <div className="flex border-b border-slate-100 p-1 bg-slate-50/50">
               <button
-                onClick={() => setAuthMode("login")}
+                type="button"
+                onClick={() => { setAuthMode("login"); setAuthError(""); setAuthSuccess(""); }}
                 className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-xl transition-all duration-300 ${
                   authMode === "login"
                     ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200"
@@ -783,7 +829,8 @@ export default function CollaborationApp() {
                 Sign In
               </button>
               <button
-                onClick={() => setAuthMode("signup")}
+                type="button"
+                onClick={() => { setAuthMode("signup"); setAuthError(""); setAuthSuccess(""); }}
                 className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-xl transition-all duration-300 ${
                   authMode === "signup"
                     ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200"
@@ -1487,7 +1534,7 @@ export default function CollaborationApp() {
                       #{getActiveViewName().replace("# ", "")}
                     </span>{" "}
                     channel. This is the beginning of your collaboration journey
-                    in {getCurrentSpace()?.name}.
+                    in {String(getCurrentSpace()?.name || "")}.
                   </div>
                 </div>
               )}
@@ -1840,7 +1887,7 @@ export default function CollaborationApp() {
                   disabled={!selectedInviteUser}
                   className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-lg transition-all"
                 >
-                  Add to {getCurrentSpace()?.name}
+                  Add to {String(getCurrentSpace()?.name || "")}
                 </button>
               </div>
             ) : (

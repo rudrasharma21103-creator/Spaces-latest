@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 SECRET_KEY = "d9a3f0b6c82e4f1b9d7a1c4e6f3b8a7d9e2c5f8a4b6d7c9e1f2a3b4c5d6e7"
