@@ -258,6 +258,15 @@ export const addMemberToSpace = async (userIdToDetail, spaceId) => {
   return safeJson(res)
 }
 
+// Remove a member from a space or a specific channel
+export const removeMemberFromSpace = async (userIdToRemove, spaceId, channelId = null) => {
+  const res = await authFetch(`${API_BASE}/actions/remove-member`, {
+    method: "POST",
+    body: JSON.stringify({ userIdToRemove, spaceId, channelId })
+  })
+  return safeJson(res)
+}
+
 export const acceptInvite = async (userId, notificationId) => {
   const res = await authFetch(`${API_BASE}/actions/accept-invite`, {
     method: "POST",

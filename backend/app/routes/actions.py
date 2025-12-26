@@ -192,6 +192,96 @@ async def add_member_to_space(payload: dict):
 
     return {"status": "member added"}
 
+@router.post("/remove-member")
+async def remove_member(payload: dict):
+    user_id_to_remove = payload.get("userIdToRemove")
+    space_id = payload.get("spaceId")
+    channel_id = payload.get("channelId")
+
+    if not user_id_to_remove or not space_id:
+        return {"error": "Missing userIdToRemove or spaceId"}
+
+    # Remove user from space-level members
+    spaces_collection.update_one(
+        {"id": space_id},
+        {"$pull": {"members": user_id_to_remove}}
+    )
+
+    # Remove user from channel members (either specific channel or all channels)
+    space = spaces_collection.find_one({"id": space_id})
+    updated_channels = []
+    if space and isinstance(space.get("channels"), list):
+        for ch in space.get("channels", []):
+            ch_members = ch.get("members", []) or []
+            if channel_id:
+                if ch.get("id") == channel_id:
+                    ch_members = [m for m in ch_members if m != user_id_to_remove]
+            else:
+                ch_members = [m for m in ch_members if m != user_id_to_remove]
+            ch["members"] = ch_members
+            updated_channels.append(ch)
+
+        spaces_collection.update_one({"id": space_id}, {"$set": {"channels": updated_channels}})
+
+    # If removing from the whole space (no channel_id provided), also remove space from user's spaces
+    if not channel_id:
+        users_collection.update_one({"id": user_id_to_remove}, {"$pull": {"spaces": space_id}})
+
+    # Notify removed user
+    try:
+        notif = {
+            "id": f"rm-{int(__import__('time').time()*1000)}",
+            "type": "info",
+            "message": f"You were removed from {space.get('name')}",
+            "timestamp": __import__('time').time()
+        }
+        users_collection.update_one({"id": user_id_to_remove}, {"$push": {"notifications": notif}})
+        await manager.send_to_user(user_id_to_remove, {"type": "notification", "notification": notif})
+    except Exception:
+        pass
+
+    # Broadcast updates to affected channels and inform members
+    try:
+        space_after = spaces_collection.find_one({"id": space_id})
+        if space_after and isinstance(space_after.get("channels"), list):
+            if channel_id:
+                try:
+                    await manager.broadcast(channel_id, {
+                        "type": "space_updated",
+                        "spaceId": space_id,
+                        "removedMemberId": user_id_to_remove,
+                        "members": space_after.get("members", [])
+                    })
+                except Exception:
+                    pass
+            else:
+                for ch in space_after.get("channels", []):
+                    try:
+                        await manager.broadcast(ch.get("id"), {
+                            "type": "space_updated",
+                            "spaceId": space_id,
+                            "removedMemberId": user_id_to_remove,
+                            "members": space_after.get("members", [])
+                        })
+                    except Exception:
+                        pass
+
+            # Also send a private update to each online member so they receive the update
+            for member_id in space_after.get("members", []):
+                try:
+                    await manager.send_to_user(member_id, {
+                        "type": "space_updated",
+                        "spaceId": space_id,
+                        "removedMemberId": user_id_to_remove,
+                        "members": space_after.get("members", [])
+                    })
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return {"status": "member removed"}
+
 @router.post("/accept-invite")
 def accept_invite(payload: dict):
     user_id = payload.get("userId")

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useMemo } from "react"
 import {
   Send,
   Hash,
@@ -39,6 +39,7 @@ import {
   ShieldAlert
 } from "lucide-react"
 import * as Storage from "./services/storage"
+import { getStoredUser, getToken, logout as authLogout } from "./services/auth"
 
 export default function CollaborationApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -105,6 +106,7 @@ export default function CollaborationApp() {
   const [showRenameModal, setShowRenameModal] = useState(null)
   const [newNameInput, setNewNameInput] = useState("")
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
+  const [showRemoveMemberConfirm, setShowRemoveMemberConfirm] = useState(null)
 
   // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
@@ -117,6 +119,16 @@ export default function CollaborationApp() {
 
   const [newSpaceName, setNewSpaceName] = useState("")
   const [inviteSent, setInviteSent] = useState(false)
+
+  // --- Persistent Login: restore auth state from localStorage on app load
+  useEffect(() => {
+    const stUser = getStoredUser()
+    const token = getToken()
+    if (stUser && token) {
+      setCurrentUser(stUser)
+      setIsAuthenticated(true)
+    }
+  }, [])
 
   // File Attachment State
   const [selectedFiles, setSelectedFiles] = useState([])
@@ -813,6 +825,9 @@ export default function CollaborationApp() {
   }
 
   const handleLogout = () => {
+    // Clear persisted auth
+    authLogout()
+
     setIsAuthenticated(false)
     setCurrentUser(null)
     setSpaces([])
@@ -860,6 +875,36 @@ export default function CollaborationApp() {
     if (days < 7) return `${days}d ago`
     return new Date(timestamp).toLocaleDateString()
   }
+
+  // Date label for chat header (Today / Yesterday / actual date) — updates with `timeTicker`
+  const formatDateLabel = (timestamp, now = Date.now()) => {
+    // Default to Today when we have no timestamp
+    if (!timestamp) return "Today"
+    const d = new Date(timestamp)
+    const n = new Date(now)
+
+    const sameDay = (a, b) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+
+    if (sameDay(d, n)) return "Today"
+    const yesterday = new Date(n)
+    yesterday.setDate(n.getDate() - 1)
+    if (sameDay(d, yesterday)) return "Yesterday"
+    return d.toLocaleDateString()
+  }
+
+  // Compute the current chat's date label (latest message) and update when relevant state changes
+  const messageDateLabel = useMemo(() => {
+    try {
+      const _msgs = getCurrentMessages() || []
+      const _latest = _msgs.length ? _msgs[_msgs.length - 1] : null
+      return formatDateLabel(_latest?.timestamp, timeTicker)
+    } catch (e) {
+      return "Today"
+    }
+  }, [messages, activeView, activeChannel, activeDMUser, timeTicker])
 
   // --- Dismissed notifications persistence helpers ---
   const dismissedKeyFor = userId => `spaces_dismissed_notifications_${userId}`
@@ -1008,16 +1053,16 @@ export default function CollaborationApp() {
       channel.members.includes(currentUser.id) ||
       space.ownerId === currentUser.id
 
-    if (hasAccess) {
-      setActiveSpace(spaceId)
-      setActiveChannel(channelId)
-      setActiveView("channel")
-      // Indicate a manual thread switch so scroll logic jumps directly to latest (no long smooth animation)
-      justSwitchedThreadRef.current = true
-    } else {
-      setShowAccessDeniedModal(true)
-    }
+  if (hasAccess) {
+    setActiveSpace(spaceId)
+    setActiveChannel(channelId)
+    setActiveView("channel")
+    // Indicate a manual thread switch so scroll logic jumps directly to latest (no long smooth animation)
+    justSwitchedThreadRef.current = true
+  } else {
+    setShowAccessDeniedModal(true)
   }
+}
 
   const handleFileSelect = async e => {
     if (e.target.files && e.target.files.length > 0) {
@@ -1048,6 +1093,46 @@ export default function CollaborationApp() {
 
   const removeAttachment = id => {
     setSelectedFiles(prev => prev.filter(f => f.id !== id))
+  }
+
+  // Open confirmation modal to remove a member from a channel (owner-only action)
+  const handleRemoveMember = memberId => {
+    if (!memberId || !activeSpace) return
+    const memberName = getUser(memberId)?.name || ""
+    setShowRemoveMemberConfirm({ id: memberId, name: memberName })
+  }
+
+  // Confirm and perform the removal
+  const confirmRemoveMember = async () => {
+    if (!showRemoveMemberConfirm || !activeSpace) return
+    const memberId = showRemoveMemberConfirm.id
+    try {
+      await Storage.removeMemberFromSpace(memberId, activeSpace, activeChannel)
+
+      // Refresh spaces for current user so UI updates accurately
+      try {
+        const sps = await Storage.getSpacesForUser(currentUser.spaces)
+        const enrichedSpaces = sps.map(s => ({
+          ...s,
+          icon:
+            s.iconType === "graduation" ? (
+              <GraduationCap className="w-5 h-5" />
+            ) : s.iconType === "briefcase" ? (
+              <Briefcase className="w-5 h-5" />
+            ) : (
+              <UserIcon className="w-5 h-5" />
+            )
+        }))
+        setSpaces(enrichedSpaces)
+      } catch (e) {
+        console.error('Failed to refresh spaces after remove', e)
+      }
+
+    } catch (e) {
+      console.error('Failed to remove member', e)
+    } finally {
+      setShowRemoveMemberConfirm(null)
+    }
   }
 
   const sendMessage = async () => {
@@ -2542,6 +2627,8 @@ export default function CollaborationApp() {
             <div className="flex-1 flex overflow-hidden bg-slate-50/50">
               <div className="flex-1 flex flex-col min-w-0">
                 {/* Updated Container with Custom Pattern Background */}
+                {/* day label computed above via `messageDateLabel` */}
+
                 <div
                   ref={messagesContainerRef}
                   onScroll={() => {
@@ -2610,7 +2697,7 @@ export default function CollaborationApp() {
 
                       <div className="sticky top-0 z-10 flex justify-center mb-6 pointer-events-none">
                         <span className="text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
-                          Today
+                          {messageDateLabel || 'Today'}
                         </span>
                       </div>
 
@@ -3065,31 +3152,44 @@ export default function CollaborationApp() {
                                 YOU
                               </span>
                             ) : (
-                              !isFriend && (
-                                <button
-                                  onClick={() =>
-                                    !isPending &&
-                                    setShowAddFriendConfirm(member.id)
-                                  }
-                                  disabled={isPending}
-                                  className={`p-1.5 rounded-lg transition-all ${
-                                    isPending
-                                      ? "text-slate-300 cursor-default"
-                                      : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
-                                  }`}
-                                  title={
-                                    isPending
-                                      ? "Request Sent"
-                                      : "Add to friends"
-                                  }
-                                >
-                                  {isPending ? (
-                                    <Check className="w-4 h-4" />
-                                  ) : (
-                                    <Plus className="w-4 h-4" />
-                                  )}
-                                </button>
-                              )
+                              <div className="flex items-center gap-2">
+                                {!isFriend && (
+                                  <button
+                                    onClick={() =>
+                                      !isPending &&
+                                      setShowAddFriendConfirm(member.id)
+                                    }
+                                    disabled={isPending}
+                                    className={`p-1.5 rounded-lg transition-all ${
+                                      isPending
+                                        ? "text-slate-300 cursor-default"
+                                        : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
+                                    }`}
+                                    title={
+                                      isPending
+                                        ? "Request Sent"
+                                        : "Add to friends"
+                                    }
+                                  >
+                                    {isPending ? (
+                                      <Check className="w-4 h-4" />
+                                    ) : (
+                                      <Plus className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                )}
+
+                                {/* Remove member (visible to main space or channel creator) */}
+                                {(currentUser?.id === getCurrentSpace()?.ownerId || currentUser?.id === (getCurrentChannels().find(c => c.id === activeChannel)?.ownerId)) && !isMe && (
+                                  <button
+                                    onClick={() => handleRemoveMember(member.id)}
+                                    className="p-1.5 rounded-lg transition-all hover:bg-red-100 text-slate-400 hover:text-red-600"
+                                    title="Remove member"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         )
@@ -3375,6 +3475,37 @@ export default function CollaborationApp() {
                 className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Member Confirmation Modal */}
+      {showRemoveMemberConfirm && (
+        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
+            <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mb-6 mx-auto">
+              <Trash2 className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+              Remove member?
+            </h3>
+            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+              You are about to remove <strong>{showRemoveMemberConfirm.name}</strong> from <strong>{getActiveViewName().replace('# ', '')}</strong>. They will receive a notification about this.
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowRemoveMemberConfirm(null)}
+                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveMember}
+                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+              >
+                Remove
               </button>
             </div>
           </div>
