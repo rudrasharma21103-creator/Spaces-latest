@@ -14,3 +14,5 @@ users_collection = db["users"]
 spaces_collection = db["spaces"]
 messages_collection = db["messages"]
 notifications_collection = db["notifications"]
+# Events collection used by the frontend to fetch/save calendar events
+events_collection = db["events"]

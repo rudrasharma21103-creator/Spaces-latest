@@ -39,14 +39,72 @@ def accept_friend(payload: dict):
                 {"$pull": {"notifications": {"id": notification_id}}}
             )
 
+        # Notify the original requester (friend_id) that their request was accepted
+        try:
+            user = users_collection.find_one({"id": user_id})
+            friend = users_collection.find_one({"id": friend_id})
+            if friend:
+                notif = {
+                    "id": f"fr-accept-{int(__import__('time').time()*1000)}",
+                    "type": "info",
+                    "message": f"{user.get('name')} accepted your friend request",
+                    "timestamp": __import__('time').time()
+                }
+                users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
+                try:
+                    manager.send_to_user(friend_id, {"type": "notification", "notification": notif})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return {"status": "accepted"}
 
     return {"error": "Missing user_id or friend_id"}
+
+@router.post("/reject-friend")
+def reject_friend(payload: dict):
+    user_id = payload.get("userId")
+    friend_id = payload.get("friendId")
+    notification_id = payload.get("notificationId")
+
+    if user_id and friend_id:
+        # Remove the notification from the rejecting user's notifications
+        if notification_id:
+            users_collection.update_one(
+                {"id": user_id},
+                {"$pull": {"notifications": {"id": notification_id}}}
+            )
+
+        # Notify the original requester that their request was rejected
+        try:
+            user = users_collection.find_one({"id": user_id})
+            friend = users_collection.find_one({"id": friend_id})
+            if friend:
+                notif = {
+                    "id": f"fr-reject-{int(__import__('time').time()*1000)}",
+                    "type": "info",
+                    "message": f"{user.get('name')} rejected your friend request",
+                    "timestamp": __import__('time').time()
+                }
+                users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
+                try:
+                    manager.send_to_user(friend_id, {"type": "notification", "notification": notif})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return {"status": "rejected"}
 
 @router.post("/add-member")
 async def add_member_to_space(payload: dict):
     user_id_to_add = payload.get("userIdToDetail")
     space_id = payload.get("spaceId")
+    channel_id = payload.get("channelId")
+
+    if not user_id_to_add or not space_id:
+        return {"error": "Missing userIdToDetail or spaceId"}
 
     # 1) Add member to the space-level members list
     spaces_collection.update_one(
@@ -54,15 +112,22 @@ async def add_member_to_space(payload: dict):
         {"$addToSet": {"members": user_id_to_add}}
     )
 
-    # 2) Ensure each channel inside the space also contains the member
-    #    (channels store their own members on the frontend and need to stay in sync)
+    # 2) If a channelId is provided, add the user to that channel only
     space = spaces_collection.find_one({"id": space_id})
+    updated_channels = []
     if space and isinstance(space.get("channels"), list):
-        updated_channels = []
         for ch in space.get("channels", []):
             ch_members = ch.get("members", [])
-            if user_id_to_add not in ch_members:
-                ch_members.append(user_id_to_add)
+            if channel_id:
+                # Only update the specific channel
+                if ch.get("id") == channel_id:
+                    if user_id_to_add not in ch_members:
+                        ch_members.append(user_id_to_add)
+                # Else leave channel members unchanged
+            else:
+                # Old behavior: add to all channels when channelId not provided
+                if user_id_to_add not in ch_members:
+                    ch_members.append(user_id_to_add)
             ch["members"] = ch_members
             updated_channels.append(ch)
 
@@ -84,14 +149,14 @@ async def add_member_to_space(payload: dict):
     except Exception:
         pass
 
-    # 5) Broadcast to each channel in the space so connected clients update UI immediately
+    # 5) Broadcast: inform only affected channels and space members
     try:
         space_after = spaces_collection.find_one({"id": space_id})
         if space_after and isinstance(space_after.get("channels"), list):
-            # 5a) Broadcast to each channel group so clients currently viewing those channels update immediately
-            for ch in space_after.get("channels", []):
+            # If channelId provided, broadcast only to that channel
+            if channel_id:
                 try:
-                    await manager.broadcast(ch.get("id"), {
+                    await manager.broadcast(channel_id, {
                         "type": "space_updated",
                         "spaceId": space_id,
                         "memberId": user_id_to_add,
@@ -99,8 +164,19 @@ async def add_member_to_space(payload: dict):
                     })
                 except Exception:
                     pass
+            else:
+                for ch in space_after.get("channels", []):
+                    try:
+                        await manager.broadcast(ch.get("id"), {
+                            "type": "space_updated",
+                            "spaceId": space_id,
+                            "memberId": user_id_to_add,
+                            "members": space_after.get("members", [])
+                        })
+                    except Exception:
+                        pass
 
-            # 5b) Also send a private update to each online member so they receive the update
+            # Also send a private update to each online member so they receive the update
             for member_id in space_after.get("members", []):
                 try:
                     await manager.send_to_user(member_id, {
