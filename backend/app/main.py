@@ -29,7 +29,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
 =======
-    allow_origins=["https://spaces-wc1z.onrender.com"],
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
 >>>>>>> ff1028af72fbaa2ee34bf7c8b3c02f0968cf9bda
