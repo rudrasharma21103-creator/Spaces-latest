@@ -11,15 +11,23 @@ from app.routes.debug import router as debug_router
 
 app = FastAPI()
 
-# Fix CORS - allow all origins for local dev to avoid CORS issues from any Vite port
-# NOTE: In production, restrict this to known origins instead of '*'
+# CORS configuration: prefer explicit origins in production
+import os
+FRONTEND_URL = os.getenv("FRONTEND_URL")  # set this on Render to your Vercel URL (e.g., https://myapp.vercel.app)
+origins = [
+    FRONTEND_URL,
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+# Filter out unset values
+origins = [o for o in origins if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_origins=origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 app.include_router(users_router)
