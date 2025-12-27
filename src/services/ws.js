@@ -2,9 +2,8 @@ import { getToken } from "./auth"
 
 export const connectChatSocket = (chatId, onMessage) => {
   const token = getToken()
-  const ws = new WebSocket(
-    `ws://127.0.0.1:8000/ws/chat/${chatId}?token=${token}`
-  )
+  const WS_BASE = import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000"
+  const ws = new WebSocket(`${WS_BASE}/ws/chat/${chatId}?token=${token}`)
 
   ws.onmessage = event => {
     const data = JSON.parse(event.data)
@@ -20,7 +19,8 @@ export const connectUserSocket = onMessage => {
   const token = getToken()
   // We connect to a stable 'notifications' chat id — manager will still register
   // the socket under the verified user id so server can call send_to_user.
-  const ws = new WebSocket(`ws://127.0.0.1:8000/ws/chat/notifications?token=${token}`)
+  const WS_BASE = import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000"
+  const ws = new WebSocket(`${WS_BASE}/ws/chat/notifications?token=${token}`)
   ws.onmessage = e => {
     try {
       const data = JSON.parse(e.data)
