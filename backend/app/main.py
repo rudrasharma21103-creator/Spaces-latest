@@ -15,7 +15,7 @@ app = FastAPI()
 # NOTE: In production, restrict this to known origins instead of '*'
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://spaces-wc1z.onrender.com"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
