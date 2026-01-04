@@ -38,9 +38,7 @@ import {
   ExternalLink,
   ShieldAlert,
   Grid3x3,
-  FileText,
-  Download,
-  Clock
+  FileText
 } from "lucide-react"
 import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
@@ -195,7 +193,6 @@ export default function CollaborationApp() {
   const [currentMeeting, setCurrentMeeting] = useState(null)
   const [googleDocs, setGoogleDocs] = useState([])
   const [gmailAttachments, setGmailAttachments] = useState([])
-  const [gmailLastCheckTime, setGmailLastCheckTime] = useState(null) // For real-time Gmail sync
   // Documents shared in chats/channels (collected from messages)
   const [sharedChatDocs, setSharedChatDocs] = useState([])
   const [connectedApps, setConnectedApps] = useState([])
@@ -216,7 +213,6 @@ export default function CollaborationApp() {
   const messageInputRef = useRef(null)
   const justSwitchedThreadRef = useRef(false)
   const [isAtBottom, setIsAtBottom] = useState(true)
-  const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
   // --- Initialize Google API on mount ---
   useEffect(() => {
@@ -239,40 +235,17 @@ export default function CollaborationApp() {
   // Helper: render avatar for a user object
   const renderAvatar = (user, size = 40) => {
     if (!user) return null
-    let url = user.avatar_url || user.avatarImage || user.avatar_image
+    const url = user.avatar_url || user.avatarImage || user.avatar_image
     const preset = user.avatar_preset
-    const emojiAvatar =
-      typeof user.avatar === "string" && user.avatar.trim().length > 0
-        ? user.avatar
-        : null
     const name = user.name || "?"
     const initial = (name && name[0]) ? name[0].toUpperCase() : "?"
 
     const sizeStyle = { width: size, height: size, lineHeight: `${size}px`, fontSize: Math.floor(size/2) }
 
-    // Handle relative URLs by prepending API_BASE
-    if (url && typeof url === 'string') {
-      // Convert relative URLs to absolute
-      if (url.startsWith('/')) {
-        url = `${API_BASE}${url}`
-      }
-      
-      if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
-        // Ensure we bust browser cache if server did not include a version param
-        let finalUrl = url
-        try {
-          if (!rawUrlStartsWithDataOrBlob(url)) {
-            const hasVersion = /[?&]v=\d+/.test(url)
-            if (!hasVersion) {
-              const sep = url.includes("?") ? "&" : "?"
-              finalUrl = `${url}${sep}v=${Date.now()}`
-            }
-          }
-        } catch (e) {}
-        return (
-          <img src={finalUrl} alt={name} className="rounded-full object-cover" style={sizeStyle} />
-        )
-      }
+    if (url && typeof url === 'string' && (url.startsWith('data:') || url.startsWith('http')) ) {
+      return (
+        <img src={url} alt={name} className="rounded-full object-cover" style={sizeStyle} />
+      )
     }
 
     if (preset) {
@@ -285,155 +258,15 @@ export default function CollaborationApp() {
       )
     }
 
-    // fallback: emoji avatar or letter avatar with generated gradient
+    // fallback: letter avatar with generated gradient from user id
     const colors = ["#ff9a9e","#fad0c4","#f6d365","#f093fb","#a1c4fd","#c2e9fb","#d4fc79","#96fbc4"]
     const idx = (String(user.id || user._id || name).length) % colors.length
     const grad = `linear-gradient(135deg, ${colors[idx]} 0%, ${colors[(idx+3)%colors.length]} 100%)`
-    if (emojiAvatar) {
-      return (
-        <div className="rounded-full flex items-center justify-center font-bold" style={{ ...sizeStyle, background: grad }}>
-          {emojiAvatar}
-        </div>
-      )
-    }
     return (
       <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
         {initial}
       </div>
     )
-  }
-
-  // small helper to detect data/blob urls
-  const rawUrlStartsWithDataOrBlob = u => {
-    try {
-      return typeof u === 'string' && (u.startsWith('data:') || u.startsWith('blob:'))
-    } catch (e) { return false }
-  }
-
-  const getUserIdValue = user => {
-    if (!user) return ""
-    if (user.id !== undefined && user.id !== null) return String(user.id)
-    if (user.userId !== undefined && user.userId !== null) return String(user.userId)
-    if (user._id) {
-      if (typeof user._id === "object" && user._id.$oid) return String(user._id.$oid)
-      return String(user._id)
-    }
-    return ""
-  }
-
-  const avatarPresets = [
-    ["#ff9a9e", "#fecfef"],
-    ["#a1c4fd", "#c2e9fb"],
-    ["#f6d365", "#fda085"],
-    ["#f093fb", "#f5576c"],
-    ["#96fbc4", "#f9f586"],
-    ["#c2e9fb", "#a1c4fd"],
-    ["#fddb92", "#d1fdff"],
-    ["#fbc2eb", "#a6c1ee"]
-  ]
-
-  const syncUserCollections = updatedUser => {
-    if (!updatedUser) return
-    const updatedId = getUserIdValue(updatedUser)
-    if (!updatedId) return
-    setUsers(prev => {
-      if (!Array.isArray(prev)) return [updatedUser]
-      const exists = prev.some(u => getUserIdValue(u) === updatedId)
-      if (exists) {
-        return prev.map(user =>
-          getUserIdValue(user) === updatedId ? { ...user, ...updatedUser } : user
-        )
-      }
-      return [...prev, updatedUser]
-    })
-    setFriends(prev => {
-      if (!Array.isArray(prev)) return prev
-      const exists = prev.some(f => getUserIdValue(f) === updatedId)
-      if (exists) {
-        return prev.map(friend =>
-          getUserIdValue(friend) === updatedId ? { ...friend, ...updatedUser } : friend
-        )
-      }
-      // If this updated user is in the current user's friend list but missing from `friends` state, append it
-      try {
-        const myFriends = Array.isArray(currentUser?.friends) ? currentUser.friends.map(String) : []
-        if (myFriends.includes(String(updatedId))) {
-          return [...prev, updatedUser]
-        }
-      } catch (e) {}
-      return prev
-    })
-    // Update spaces' member objects if spaces store member details (defensive)
-    setSpaces(prev => {
-      if (!Array.isArray(prev)) return prev
-      let changed = false
-      const mapped = prev.map(space => {
-        let spaceChanged = false
-        const s = { ...space }
-
-        // Update space-level members if they are objects
-        if (Array.isArray(s.members) && s.members.length > 0 && typeof s.members[0] === 'object') {
-          const newMembers = s.members.map(m =>
-            getUserIdValue(m) === updatedId ? { ...m, ...updatedUser } : m
-          )
-          if (JSON.stringify(newMembers) !== JSON.stringify(s.members)) {
-            s.members = newMembers
-            spaceChanged = true
-          }
-        }
-
-        // Update channels' member objects (defensive)
-        if (Array.isArray(s.channels)) {
-          const newChannels = s.channels.map(ch => {
-            if (Array.isArray(ch.members) && ch.members.length > 0 && typeof ch.members[0] === 'object') {
-              const newChMembers = ch.members.map(m =>
-                getUserIdValue(m) === updatedId ? { ...m, ...updatedUser } : m
-              )
-              if (JSON.stringify(newChMembers) !== JSON.stringify(ch.members)) {
-                spaceChanged = true
-                return { ...ch, members: newChMembers }
-              }
-            }
-            return ch
-          })
-          if (spaceChanged) s.channels = newChannels
-        }
-
-        if (spaceChanged) changed = true
-        return spaceChanged ? s : space
-      })
-      return changed ? mapped : prev
-    })
-    // Update invite search results if present
-    try {
-      setInviteSearchResults(prev => {
-        if (!Array.isArray(prev)) return prev
-        let changed = false
-        const mapped = prev.map(u => {
-          if (getUserIdValue(u) === updatedId) {
-            changed = true
-            return { ...u, ...updatedUser }
-          }
-          return u
-        })
-        return changed ? mapped : prev
-      })
-    } catch (e) {}
-
-    // Refresh any messages that reference this user so UI re-renders (avatars cached by id)
-    try {
-      setMessages(prev => {
-        const out = {}
-        let changed = false
-        for (const k of Object.keys(prev || {})) {
-          const list = prev[k] || []
-          const newList = list.map(m => (m && (m.userId === updatedId || m.userId === String(updatedId)) ? { ...m } : m))
-          if (JSON.stringify(newList) !== JSON.stringify(list)) changed = true
-          out[k] = newList
-        }
-        return changed ? out : prev
-      })
-    } catch (e) {}
   }
 
   // --- Debounce Logic ---
@@ -549,14 +382,14 @@ export default function CollaborationApp() {
       for (const friend of friends) {
         // 1. Friend Name Match
         if (friend.name.toLowerCase().includes(query)) {
-            results.push({
-              id: `friend-${friend.id}`,
-              type: "user",
-              title: friend.name,
-              subtitle: friend.status === "online" ? "Online" : "Offline",
-              userId: friend.id,
-              icon: renderAvatar(friend, 32)
-            })
+          results.push({
+            id: `friend-${friend.id}`,
+            type: "user",
+            title: friend.name,
+            subtitle: friend.status === "online" ? "Online" : "Offline",
+            userId: friend.id,
+            icon: <div className="text-xl">{friend.avatar}</div>
+          })
         }
 
         // 2. Message Match
@@ -575,7 +408,7 @@ export default function CollaborationApp() {
                 userId: friend.id,
                 messageId: msg.id,
                 timestamp: msg.timestamp,
-                icon: renderAvatar(friend, 28)
+                icon: <div className="text-sm">{friend.avatar}</div>
               })
             }
           }
@@ -652,50 +485,39 @@ export default function CollaborationApp() {
           }
         }
 
-        // Poll for Unread Messages in Channels - only check channels user isn't currently viewing
-        // Use cached message counts instead of fetching all messages for every channel
+        // Poll for Unread Messages in Channels
         const allSpaces = await Storage.getSpaces()
-        const channelsToCheck = []
         for (const space of allSpaces) {
           for (const ch of (space.channels || [])) {
-            // Skip the currently active channel - we already have real-time updates
-            if (activeView === "channel" && activeChannel === ch.id) continue
-            channelsToCheck.push(ch)
-          }
-        }
-        
-        // Only check a few channels per poll cycle to avoid overloading
-        const maxChannelsPerPoll = 3
-        const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
-        
-        for (const ch of channelsThisCycle) {
-          try {
-            const msgs = await Storage.getMessages(ch.id)
-            if (msgs === null) {
-              continue
-            }
-            const count = (msgs && msgs.length) || 0
-            const prevCount = messageCounts[ch.id] || 0
+            try {
+              const msgs = await Storage.getMessages(ch.id)
+              if (msgs === null) {
+                continue
+              }
+              const count = (msgs && msgs.length) || 0
+              const prevCount = messageCounts[ch.id] || 0
 
-            // If new message AND channel not active, mark unread
-            if (count > prevCount) {
-              if (!unreadChannels.includes(ch.id)) {
-                setUnreadChannels(prev => [...prev, ch.id])
+              // If new message AND channel not active, mark unread
+              if (
+                count > prevCount &&
+                (activeView !== "channel" || activeChannel !== ch.id)
+              ) {
+                if (!unreadChannels.includes(ch.id)) {
+                  setUnreadChannels(prev => [...prev, ch.id])
+                }
+              }
+              // Update tracking map
+              messageCounts[ch.id] = count
+            } catch (e) {
+              if (e && e.status === 403) {
+                // Restricted channel — ignore for unread polling
+              } else {
+                console.error("Failed to poll messages for channel", ch.id, e)
               }
             }
-            // Update tracking map
-            messageCounts[ch.id] = count
-          } catch (e) {
-            if (e && e.status === 403) {
-              // Restricted channel — ignore for unread polling
-            } else {
-              // Silently ignore polling errors to avoid console spam
-            }
           }
         }
-        if (channelsThisCycle.length > 0) {
-          setMessageCounts({ ...messageCounts })
-        }
+        setMessageCounts({ ...messageCounts })
 
         // Update Events
         const storedEvents = await Storage.getEvents()
@@ -752,8 +574,7 @@ export default function CollaborationApp() {
       }
     }
 
-    // Reduced polling frequency - WebSocket handles real-time updates
-    const interval = setInterval(pollData, 5000)
+    const interval = setInterval(pollData, 1500)
     return () => clearInterval(interval)
   }, [
     isAuthenticated,
@@ -799,18 +620,11 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     let userSocket = null
-    let refreshTimeout = null
 
     if (isAuthenticated && currentUser) {
-      const loadInitialData = async () => {
-        // Load spaces, users, friends, and events in parallel for faster startup
-        const [userSpaces, allUsers, friendsList, evts] = await Promise.all([
-          Storage.getSpacesForUser(currentUser.spaces).catch(() => []),
-          Storage.getUsers().catch(() => []),
-          Storage.getFriends(currentUser.friends || []).catch(() => []),
-          Storage.getEvents().catch(() => [])
-        ])
-        
+      ;(async () => {
+        // Await async storage helpers to ensure we get actual arrays (not Promises)
+        const userSpaces = await Storage.getSpacesForUser(currentUser.spaces)
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
 
         const enrichedSpaces = safeUserSpaces.map(s => ({
@@ -826,15 +640,30 @@ export default function CollaborationApp() {
         }))
 
         setSpaces(enrichedSpaces)
-        setUsers(Array.isArray(allUsers) ? allUsers : [])
-        setFriends(Array.isArray(friendsList) ? friendsList : [])
-        setEvents(evts || [])
 
-        return enrichedSpaces
-      }
+        try {
+            const allUsers = await Storage.getUsers()
+          setUsers(Array.isArray(allUsers) ? allUsers : [])
+        } catch (e) {
+          console.error("Failed to load users", e)
+          setUsers([])
+        }
 
-      ;(async () => {
-        const enrichedSpaces = await loadInitialData()
+        try {
+          const friendsList = await Storage.getFriends(currentUser.friends || [])
+          setFriends(friendsList)
+        } catch (e) {
+          console.error("Failed to load friends", e)
+          setFriends([])
+        }
+
+        try {
+          const evts = await Storage.getEvents()
+          setEvents(evts || [])
+        } catch (e) {
+          console.error("Failed to load events", e)
+          setEvents([])
+        }
 
         if (
           enrichedSpaces.length > 0 &&
@@ -858,23 +687,6 @@ export default function CollaborationApp() {
             setActiveChannel("")
           }
         }
-        
-        // Refresh again after a short delay to pick up background-refreshed data
-        refreshTimeout = setTimeout(async () => {
-          const refreshedSpaces = await loadInitialData()
-          // Update active space if we didn't have any before but now we do
-          if (refreshedSpaces.length > 0 && !activeSpace) {
-            const firstSpace = refreshedSpaces[0]
-            const accessibleChannel = firstSpace.channels?.find(
-              c =>
-                (c.members || []).includes(currentUser.id) ||
-                (firstSpace.members || []).includes(currentUser.id) ||
-                firstSpace.ownerId === currentUser.id
-            )
-            setActiveSpace(firstSpace.id)
-            if (accessibleChannel) setActiveChannel(accessibleChannel.id)
-          }
-        }, 1500)
       })()
 
       // Open a background user socket to receive notifications in real-time
@@ -883,54 +695,9 @@ export default function CollaborationApp() {
           userSocket = connectUserSocket(data => {
             if (!data || !data.type) return
 
-            // Handle global profile updates emitted by server
-            if (data.type === 'profileUpdated' && data.userId) {
-              const updatedUser = {
-                id: data.userId,
-                avatar_url: data.avatar_url,
-                avatar_preset: data.avatar_preset
-              }
-              syncUserCollections(updatedUser)
-              // Refresh authoritative users list to avoid stale cached data
-              ;(async () => {
-                try {
-                  const allUsers = await (await import("./services/storage")).getUsers()
-                  if (Array.isArray(allUsers)) setUsers(allUsers)
-                } catch (e) {
-                  // ignore refresh errors
-                }
-              })()
-              return
-            }
-
             // Only react to 'notification' messages
             if (data.type === "notification" && data.notification) {
               const incoming = data.notification
-
-              // Handle avatar update notifications from other users
-              if (incoming.type === 'avatar_updated' && incoming.userId && incoming.avatarData) {
-                const updatedUser = {
-                  id: incoming.userId,
-                  avatar_url: incoming.avatarData.avatar_url,
-                  avatar_preset: incoming.avatarData.avatar_preset,
-                  name: incoming.avatarData.name
-                }
-                syncUserCollections(updatedUser)
-                // Also refresh users and friends list to ensure real-time avatar sync
-                ;(async () => {
-                  try {
-                    const allUsers = await Storage.getUsers()
-                    if (Array.isArray(allUsers)) setUsers(allUsers)
-                    if (currentUser?.friends?.length > 0) {
-                      const friendsList = await Storage.getFriends(currentUser.friends)
-                      if (Array.isArray(friendsList)) setFriends(friendsList)
-                    }
-                  } catch (e) {
-                    console.error('Failed to refresh users after avatar update', e)
-                  }
-                })()
-                return
-              }
 
               // If this is a scheduled calendar meet, show incoming call pop instead of saving to notifications
               // NOTE: live `meet_invite` notifications are ignored when video feature is disabled
@@ -994,9 +761,6 @@ export default function CollaborationApp() {
     return () => {
       try {
         if (userSocket) userSocket.close()
-      } catch (e) {}
-      try {
-        if (refreshTimeout) clearTimeout(refreshTimeout)
       } catch (e) {}
     }
   }, [isAuthenticated, currentUser?.spaces, currentUser?.friends, currentUser?.id])
@@ -1072,8 +836,7 @@ export default function CollaborationApp() {
       }
     }
     loadMessages()
-    // Poll for messages as backup to WebSocket (WebSocket handles real-time delivery)
-    const interval = setInterval(loadMessages, 5000)
+    const interval = setInterval(loadMessages, 1000)
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
 
@@ -1502,14 +1265,12 @@ export default function CollaborationApp() {
         setGoogleDocs([])
       }
       
-      // Fetch Gmail attachments (fetch all when no specific app or when gmail is requested)
-      if (!specificApp || specificApp === 'gmail' || specificApp === 'all') {
+      // Try to fetch Gmail attachments (optional - don't fail if this errors)
+      if (!specificApp || specificApp === 'gmail') {
         try {
           const gmailFiles = await GoogleService.fetchGmailAttachments(token)
           setGmailAttachments(gmailFiles)
-          setGmailLastCheckTime(Date.now()) // Track last fetch time for real-time sync
         } catch (gmailError) {
-          console.warn('Gmail fetch error:', gmailError)
           // Gmail is optional, just log the error
           setGmailAttachments([])
         }
@@ -1571,55 +1332,17 @@ export default function CollaborationApp() {
     setSharedChatDocs(extractSharedChatDocs(messages))
   }, [showDocsModal, messages])
 
-  // Real-time Gmail sync - periodically check for new attachments
-  useEffect(() => {
-    if (!googleAccessToken || !showDocsModal) return
-    
-    const checkNewGmail = async () => {
-      try {
-        const result = await GoogleService.checkNewGmailAttachments(googleAccessToken, gmailLastCheckTime)
-        if (result.hasNew && result.attachments.length > 0) {
-          // Merge new attachments with existing ones, avoiding duplicates
-          setGmailAttachments(prev => {
-            const existingIds = new Set(prev.map(a => `${a.messageId}-${a.id}`))
-            const newOnes = result.attachments.filter(a => !existingIds.has(`${a.messageId}-${a.id}`))
-            if (newOnes.length > 0) {
-              // Show toast for new attachments
-              setSuccessMessage(`${newOnes.length} new Gmail attachment${newOnes.length > 1 ? 's' : ''} found`)
-              setShowSuccessToast(true)
-              setTimeout(() => setShowSuccessToast(false), 3000)
-              return [...newOnes, ...prev]
-            }
-            return prev
-          })
-        }
-        setGmailLastCheckTime(Date.now())
-      } catch (err) {
-        // Silently ignore sync errors
-        console.warn('Gmail sync check failed:', err)
-      }
-    }
-    
-    // Check every 30 seconds for new Gmail attachments
-    const interval = setInterval(checkNewGmail, 30000)
-    
-    return () => clearInterval(interval)
-  }, [googleAccessToken, showDocsModal, gmailLastCheckTime])
-
   // Add document as attachment to message input
   const addDocumentAsAttachment = (doc) => {
     const newAttachment = {
       id: Date.now() + Math.random(),
       name: doc.name,
-      size: doc.size || 0,
+      size: 0, // Google Docs don't have a file size in the traditional sense
       type: doc.mimeType,
       url: doc.webViewLink,
-      source: doc.source || "drive",
+      source: "drive",
       thumbnailLink: doc.thumbnailLink,
-      iconLink: doc.iconLink,
-      // Gmail-specific fields for direct download
-      gmailMessageId: doc.gmailMessageId || doc.messageId || null,
-      gmailAttachmentId: doc.gmailAttachmentId || doc.id || null
+      iconLink: doc.iconLink
     }
     setSelectedFiles(prev => [...prev, newAttachment])
     
@@ -1888,6 +1611,7 @@ export default function CollaborationApp() {
   }, [messages, activeView, activeChannel, activeDMUser, timeTicker])
 
   // Visible date label (changes while scrolling to indicate the date of messages in view)
+  const [visibleDateLabel, setVisibleDateLabel] = useState(messageDateLabel || "Today")
 
   // --- Dismissed notifications persistence helpers ---
   const dismissedKeyFor = userId => `spaces_dismissed_notifications_${userId}`
@@ -1991,10 +1715,8 @@ export default function CollaborationApp() {
   }
 
   const getUser = userId => {
-    if (currentUser?.id === userId || String(currentUser?.id) === String(userId)) return currentUser
-    // Use string comparison to handle type mismatches (number vs string ids)
-    const strUserId = String(userId)
-    const found = users.find(u => String(u.id) === strUserId) || friends.find(u => String(u.id) === strUserId)
+    if (currentUser?.id === userId) return currentUser
+    const found = users.find(u => u.id === userId) || friends.find(u => u.id === userId)
     return found
   }
 
@@ -2016,19 +1738,6 @@ export default function CollaborationApp() {
   const sanitizeMessagePayload = message => {
     if (!message) return message
     const { status, optimistic, retryCount, previewUrl, data, source, ...rest } = message
-    // Also sanitize attachments - remove local blob URLs that won't work for other users
-    if (rest.attachments && Array.isArray(rest.attachments)) {
-      rest.attachments = rest.attachments.map(att => {
-        const { previewUrl: attPreview, data: attData, source: attSource, ...cleanAtt } = att
-        // Ensure we have a proper server URL for the attachment (absolute URL with API_BASE)
-        if (cleanAtt.fileId && !cleanAtt.url) {
-          cleanAtt.url = `${API_BASE}/upload/file/${cleanAtt.fileId}/download`
-        } else if (cleanAtt.id && !cleanAtt.url && !String(cleanAtt.id).startsWith('tmp-')) {
-          cleanAtt.url = `${API_BASE}/upload/file/${cleanAtt.id}/download`
-        }
-        return cleanAtt
-      })
-    }
     return rest
   }
 
@@ -2044,39 +1753,6 @@ export default function CollaborationApp() {
       if (json && !json.error) return json
     } catch (e) {
       // ignore
-    }
-    return null
-  }
-
-  // Fetch a protected file URL using auth headers and return an object URL for preview/download
-  const fetchProtectedUrlAndCreateObjectURL = async att => {
-    try {
-      const url = att.url || att.public_url || null
-      const fid = (att.fileId || att.id) || null
-      // Prefer explicit URL if available
-      if (url) {
-        const token = getToken()
-        const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-        const resp = await fetch(url, { headers })
-        if (!resp.ok) return null
-        const blob = await resp.blob()
-        return URL.createObjectURL(blob)
-      }
-      // Otherwise try fileId metadata endpoint
-      if (fid) {
-        const meta = await fetchFileMetadata(fid)
-        const realUrl = meta && (meta.url || meta.public_url)
-        if (realUrl) {
-          const token = getToken()
-          const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-          const resp = await fetch(realUrl, { headers })
-          if (!resp.ok) return null
-          const blob = await resp.blob()
-          return URL.createObjectURL(blob)
-        }
-      }
-    } catch (e) {
-      console.error('fetchProtectedUrl failed', e)
     }
     return null
   }
@@ -2346,52 +2022,10 @@ export default function CollaborationApp() {
   }
 
   // Helper to open or download attachments
-  const openAttachment = async att => {
+  const openAttachment = att => {
     if (!att) return
-    
-    // Handle Gmail attachments - download and open directly
-    if (att.source === 'gmail' && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
-      try {
-        const blobUrl = await GoogleService.getGmailAttachmentPreviewUrl(
-          googleAccessToken,
-          att.gmailMessageId,
-          att.gmailAttachmentId,
-          att.type || att.mimeType,
-          att.name
-        )
-        if (blobUrl) {
-          window.open(blobUrl, "_blank")
-          return
-        }
-      } catch (e) {
-        console.error("Failed to open Gmail attachment:", e)
-      }
-    }
-    
     const url = att.url || att.public_url || att.previewUrl
     if (url) {
-      // If URL looks internal/protected (relative path, API host, or server upload), fetch with auth
-      let shouldFetchProtected = false
-      try {
-        const parsed = new URL(url, window.location.href)
-        const apiHost = (() => {
-          try { return new URL(API_BASE).host } catch(e) { return null }
-        })()
-        if (!parsed.protocol || parsed.origin === window.location.origin) shouldFetchProtected = true
-        if (apiHost && parsed.host && parsed.host.includes(apiHost)) shouldFetchProtected = true
-      } catch (e) {
-        shouldFetchProtected = true
-      }
-
-      if (shouldFetchProtected || att.fileId || att.drive_file_id) {
-        ;(async () => {
-          const blobUrl = await fetchProtectedUrlAndCreateObjectURL(att)
-          if (blobUrl) window.open(blobUrl, "_blank")
-        })()
-        return
-      }
-
-      // Otherwise open directly
       window.open(url, "_blank")
       return
     }
@@ -2407,66 +2041,8 @@ export default function CollaborationApp() {
 
   const downloadAttachment = async att => {
     if (!att) return
-    
-    // Handle Gmail attachments - download directly from Gmail API
-    if (att.source === 'gmail' && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
-      try {
-        const blobUrl = await GoogleService.getGmailAttachmentPreviewUrl(
-          googleAccessToken,
-          att.gmailMessageId,
-          att.gmailAttachmentId,
-          att.type || att.mimeType,
-          att.name
-        )
-        if (blobUrl) {
-          const a = document.createElement("a")
-          a.href = blobUrl
-          a.download = att.name || "attachment"
-          document.body.appendChild(a)
-          a.click()
-          a.remove()
-          URL.revokeObjectURL(blobUrl)
-          return
-        }
-      } catch (e) {
-        console.error("Failed to download Gmail attachment:", e)
-      }
-    }
-    
     const url = att.url || att.public_url
     if (url) {
-      // If URL is likely protected/internal, fetch and download via blob
-      let shouldFetchProtected = false
-      try {
-        const parsed = new URL(url, window.location.href)
-        const apiHost = (() => {
-          try { return new URL(API_BASE).host } catch(e) { return null }
-        })()
-        if (!parsed.protocol || parsed.origin === window.location.origin) shouldFetchProtected = true
-        if (apiHost && parsed.host && parsed.host.includes(apiHost)) shouldFetchProtected = true
-      } catch (e) {
-        shouldFetchProtected = true
-      }
-
-      if (shouldFetchProtected || att.fileId || att.drive_file_id) {
-        try {
-          const blobUrl = await fetchProtectedUrlAndCreateObjectURL(att)
-          if (blobUrl) {
-            const a = document.createElement("a")
-            a.href = blobUrl
-            a.download = att.name || "attachment"
-            document.body.appendChild(a)
-            a.click()
-            a.remove()
-            URL.revokeObjectURL(blobUrl)
-            return
-          }
-        } catch (e) {
-          console.error("downloadAttachment fetch failed", e)
-        }
-      }
-
-      // Fallback: open the url in a new tab for user to download
       window.open(url, "_blank")
       return
     }
@@ -3124,7 +2700,6 @@ export default function CollaborationApp() {
 
   // --- Authenticated App UI ---
   const activeMembers = getActiveMembers()
-  const { daysInMonth, firstDay } = getDaysInMonth(currentDate)
 
   return (
     <div className="flex h-screen overflow-hidden font-sans transition-colors duration-300 text-slate-900 bg-slate-50">
@@ -3168,238 +2743,48 @@ export default function CollaborationApp() {
           <div className="rounded-[2rem] p-6 w-full max-w-lg shadow-2xl bg-white ring-1 ring-slate-900/5">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-3xl font-bold text-slate-800">Start Video Call</h3>
-              <button
-                onClick={() => setShowVideoModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <button onClick={() => setShowVideoModal(false)} className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"><X className="w-6 h-6"/></button>
             </div>
 
             <div className="space-y-4">
-              <button
-                onClick={() => createMeetCall({ callEveryone: true })}
-                disabled={callCreating}
-                className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
-              >
-                Call Everyone
-              </button>
-              <button
-                onClick={() => setSelectedCallMembers([])}
-                className="py-3 px-4 rounded-2xl font-bold border bg-white"
-              >
-                Select Members
-              </button>
-            </div>
-
-            <div className="max-h-56 overflow-y-auto rounded-2xl border p-3 bg-slate-50 mt-4">
-              {getActiveMembers().map(m => (
-                <label
-                  key={m.id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer"
+                <button
+                  onClick={() => createMeetCall({callEveryone: true})}
+                  disabled={callCreating}
+                  className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedCallMembers.includes(m.id)}
-                    onChange={() => toggleCallMember(m.id)}
-                    disabled={m.id === currentUser?.id}
-                  />
-                  <div className="flex-1">
-                    <div className="font-bold text-sm">{m.name}</div>
-                    <div className="text-xs text-slate-500">{m.email || ''}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-3 justify-end mt-6">
-              <button
-                onClick={() => setShowVideoModal(false)}
-                className="px-4 py-2 rounded-2xl border"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => createMeetCall({ callEveryone: false })}
-                disabled={callCreating || selectedCallMembers.length === 0}
-                className="px-4 py-2 rounded-2xl bg-indigo-600 text-white disabled:opacity-60"
-              >
-                {activeView === 'dm' ? 'Start Call' : 'Create Call'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showProfileModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/30"
-            onClick={() => {
-              setAvatarPreview(null)
-              setSelectedPreset(null)
-              setShowProfileModal(false)
-            }}
-          ></div>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-[720px] max-w-full p-6 z-[75]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Edit Profile</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setAvatarPreview(null)
-                  setSelectedPreset(null)
-                  setShowProfileModal(false)
-                }}
-                className="p-2 rounded-full hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <div className="mb-3 text-sm font-semibold text-slate-600">Choose an avatar</div>
-                <div className="grid grid-cols-4 gap-3">
-                  {avatarPresets.map((preset, i) => {
-                    const isActive = Array.isArray(selectedPreset) &&
-                      selectedPreset.length === preset.length &&
-                      selectedPreset.every((clr, idx) => clr === preset[idx])
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPreset([...preset])
-                          setAvatarPreview(null)
-                        }}
-                        className={`w-16 h-16 rounded-full shadow-md flex items-center justify-center transition-all ${
-                          isActive ? "ring-4 ring-indigo-200 scale-105" : "ring-0"
-                        }`}
-                        style={{ background: `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)` }}
-                      >
-                        <span className="text-white font-bold">
-                          {(currentUser?.name || "?")[0]?.toUpperCase() || "?"}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <div className="mt-5">
-                  <div className="mb-2 text-sm font-semibold text-slate-600">Or upload your own</div>
-                  <label className="block">
-                    <span className="sr-only">Choose avatar image</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => {
-                        const f = e.target.files && e.target.files[0]
-                        if (!f) return
-                        const reader = new FileReader()
-                        reader.onload = () => {
-                          setAvatarPreview(reader.result)
-                          setSelectedPreset(null)
-                        }
-                        reader.readAsDataURL(f)
-                      }}
-                      className="block w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                  </label>
-                  {avatarPreview && (
-                    <div className="mt-3">
-                      <img
-                        src={avatarPreview}
-                        alt="preview"
-                        className="w-32 h-32 rounded-full object-cover border"
-                      />
-                    </div>
-                  )}
-                </div>
+                  Call Everyone
+                </button>
+                <button
+                  onClick={() => setSelectedCallMembers([])}
+                  className="py-3 px-4 rounded-2xl font-bold border bg-white"
+                >
+                  Select Members
+                </button>
               </div>
 
-              <div>
-                <div className="mb-3 text-sm font-semibold text-slate-600">Preview</div>
-                <div className="p-4 bg-slate-50 rounded-xl flex items-center gap-4">
-                  <div>
-                    {renderAvatar(
-                      {
-                        id: currentUser?.id,
-                        name: currentUser?.name,
-                        avatar_url: avatarPreview,
-                        avatar_preset: selectedPreset
-                      },
-                      64
-                    )}
-                  </div>
-                  <div>
-                    <div className="font-bold">{currentUser?.name}</div>
-                    <div className="text-xs text-slate-500">{currentUser?.email}</div>
-                  </div>
-                </div>
+                          
+              {/* Member selection */}
+              <div className="max-h-56 overflow-y-auto rounded-2xl border p-3 bg-slate-50">
+                {getActiveMembers().map(m => (
+                  <label key={m.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer">
+                    <input type="checkbox" checked={selectedCallMembers.includes(m.id)} onChange={() => toggleCallMember(m.id)} disabled={m.id === currentUser?.id} />
+                    <div className="flex-1">
+                      <div className="font-bold text-sm">{m.name}</div>
+                      <div className="text-xs text-slate-500">{m.email || ''}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
 
-                <div className="mt-6 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      try { e?.preventDefault?.() } catch(_){}
-                      if (isSavingProfile) return
-                      setIsSavingProfile(true)
-                      try {
-                        const stored = getStoredUser()
-                        const uid = getUserIdValue(stored)
-                        if (!uid) throw new Error("No user id")
-
-                        // Only send avatar-related fields to avoid overwriting other data
-                        const updates = {
-                          avatar_url: avatarPreview || null,
-                          avatar_preset: selectedPreset || null
-                        }
-
-                        const res = await Storage.updateUser(uid, updates)
-
-                        // Merge backend response (which may be partial) with local stored user
-                        const updatedFromRes = (res && typeof res === 'object') ? (res.user || res || {}) : {}
-                        const merged = { ...stored, ...updates, ...updatedFromRes }
-
-                        // Persist merged user locally and update state/collections
-                        saveAuth(merged, getToken())
-                        setCurrentUser(merged)
-                        syncUserCollections(merged)
-
-                        // Broadcast avatar update to friends/members via notification
-                        try {
-                          await Storage.broadcastAvatarUpdate(uid, {
-                            avatar_url: merged.avatar_url,
-                            avatar_preset: merged.avatar_preset,
-                            name: merged.name
-                          })
-                        } catch (e) {
-                          console.error('Failed to broadcast avatar update', e)
-                        }
-
-                        setShowProfileModal(false)
-                      } catch (err) {
-                        console.error("save profile failed", err)
-                      }
-                      setIsSavingProfile(false)
-                    }}
-                    disabled={isSavingProfile}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow disabled:opacity-60"
-                  >
-                    {isSavingProfile ? "Saving..." : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAvatarPreview(null)
-                      setSelectedPreset(null)
-                      setShowProfileModal(false)
-                    }}
-                    className="px-4 py-2 rounded-xl border"
-                  >
-                    Cancel
-                  </button>
-                </div>
+              <div className="flex items-center gap-3 justify-end">
+                <button onClick={() => setShowVideoModal(false)} className="px-4 py-2 rounded-2xl border">Cancel</button>
+                <button
+                  onClick={() => createMeetCall({callEveryone: false})}
+                  disabled={callCreating || selectedCallMembers.length === 0}
+                  className="px-4 py-2 rounded-2xl bg-indigo-600 text-white disabled:opacity-60"
+                >
+                  {activeView === 'dm' ? 'Start Call' : 'Create Call'}
+                </button>
               </div>
             </div>
           </div>
@@ -3572,7 +2957,7 @@ export default function CollaborationApp() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-6">
+                <>
                   <button
                     onClick={() => {
                       if (!googleCalendarToken) {
@@ -3793,7 +3178,7 @@ export default function CollaborationApp() {
                       )}
                     </div>
                   ))}
-                </div>
+                </>
               )}
             </div>
           ) : (
@@ -3991,13 +3376,17 @@ export default function CollaborationApp() {
                 ))}
               </div>
               <div className="grid grid-cols-7 gap-4 auto-rows-[140px]">
-                {Array.from({ length: firstDay }).map((_, i) => (
+                {Array.from({
+                  length: getDaysInMonth(currentDate).firstDay
+                }).map((_, i) => (
                   <div
                     key={`empty-${i}`}
                     className="rounded-3xl bg-slate-50/50"
                   ></div>
                 ))}
-                {Array.from({ length: daysInMonth }).map((_, i) => {
+                {Array.from({
+                  length: getDaysInMonth(currentDate).daysInMonth
+                }).map((_, i) => {
                   const day = i + 1
                   const dateStr = new Date(
                     currentDate.getFullYear(),
@@ -4077,8 +3466,8 @@ export default function CollaborationApp() {
                 {activeView === "dm" ? (
                   <div className="flex items-center gap-5">
                     <div className="relative">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 bg-gradient-to-br from-indigo-100 to-purple-100 border-white text-slate-700 overflow-hidden">
-                        {renderAvatar(getUser(activeDMUser), 48)}
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 bg-gradient-to-br from-indigo-100 to-purple-100 border-white text-slate-700">
+                        {getUser(activeDMUser)?.avatar}
                       </div>
                       <span
                         className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-white shadow-md ${
@@ -4246,10 +3635,10 @@ export default function CollaborationApp() {
                       </div>
                     </div>
                     <div className="relative">
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md bg-white border-2 border-white ring-2 ring-slate-100 overflow-hidden">
-                        {renderAvatar(currentUser, 44)}
+                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 border-2 border-white ring-2 ring-slate-100">
+                        {currentUser?.avatar}
                       </div>
-                      {currentUser?.notifications?.length ? (
+                      {currentUser?.notifications.length ? (
                         <span className="absolute -top-1 -right-1 flex h-4 w-4">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-4 w-4 bg-gradient-to-br from-red-500 to-rose-600 border-[3px] border-white shadow-lg"></span>
@@ -4286,6 +3675,97 @@ export default function CollaborationApp() {
                           </div>
                         </div>
                         <div className="p-2 space-y-1">
+                          {/* Profile Modal */}
+                          {showProfileModal && (
+                            <div className="fixed inset-0 z-60 flex items-center justify-center">
+                              <div className="absolute inset-0 bg-black/30" onClick={() => setShowProfileModal(false)}></div>
+                              <div className="relative bg-white rounded-2xl shadow-2xl w-[720px] max-w-full p-6 z-70">
+                                <h3 className="text-lg font-bold mb-4">Edit Profile</h3>
+                                <div className="grid grid-cols-2 gap-6">
+                                  <div>
+                                    <div className="mb-3">Choose an avatar</div>
+                                    <div className="grid grid-cols-4 gap-3">
+                                      {[
+                                        ['#ff9a9e','#fecfef'],
+                                        ['#a1c4fd','#c2e9fb'],
+                                        ['#f6d365','#fda085'],
+                                        ['#f093fb','#f5576c'],
+                                        ['#96fbc4','#f9f586'],
+                                        ['#c2e9fb','#a1c4fd'],
+                                        ['#fddb92','#d1fdff'],
+                                        ['#fbc2eb','#a6c1ee']
+                                      ].map((p, i) => (
+                                        <button key={i} onClick={() => { setSelectedPreset(p); setAvatarPreview(null) }} className={`w-16 h-16 rounded-full shadow-md flex items-center justify-center ${selectedPreset === p ? 'ring-4 ring-indigo-200' : ''}`} style={{ background: `linear-gradient(135deg, ${p[0]} 0%, ${p[1]} 100%)` }}>
+                                          <span className="text-white font-bold">{(currentUser?.name||'')[0]||'?'}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+
+                                    <div className="mt-4">
+                                      <div className="mb-2">Or upload your own</div>
+                                      <input type="file" accept="image/*" onChange={e => {
+                                        const f = e.target.files && e.target.files[0]
+                                        if (!f) return
+                                        const reader = new FileReader()
+                                        reader.onload = () => {
+                                          setAvatarPreview(reader.result)
+                                          setSelectedPreset(null)
+                                        }
+                                        reader.readAsDataURL(f)
+                                      }} />
+                                      {avatarPreview && (
+                                        <div className="mt-3">
+                                          <img src={avatarPreview} alt="preview" className="w-32 h-32 rounded-full object-cover" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div className="mb-3">Preview</div>
+                                    <div className="p-4 bg-slate-50 rounded-xl flex items-center gap-4">
+                                      <div>{renderAvatar({ id: currentUser?.id, name: currentUser?.name, avatar_url: avatarPreview, avatar_preset: selectedPreset }, 64)}</div>
+                                      <div>
+                                        <div className="font-bold">{currentUser?.name}</div>
+                                        <div className="text-xs text-slate-500">{currentUser?.email}</div>
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-6 flex gap-3">
+                                      <button onClick={async () => {
+                                        setIsSavingProfile(true)
+                                        try {
+                                          const stored = getStoredUser()
+                                          const uid = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
+                                          if (!uid) throw new Error('No user id')
+                                          const updates = {}
+                                          if (avatarPreview) updates.avatar_url = avatarPreview
+                                          else updates.avatar_url = null
+                                          if (selectedPreset) updates.avatar_preset = selectedPreset
+                                          else updates.avatar_preset = null
+
+                                          const res = await Storage.updateUser(uid, { ...stored, ...updates })
+                                          if (res && res.user) {
+                                            saveAuth(res.user, getToken())
+                                            setCurrentUser(res.user)
+                                          } else if (res && res.id) {
+                                            // some backends return the user object directly
+                                            const newUser = res
+                                            saveAuth(newUser, getToken())
+                                            setCurrentUser(newUser)
+                                          }
+                                          setShowProfileModal(false)
+                                        } catch (e) {
+                                          console.error('save profile failed', e)
+                                        }
+                                        setIsSavingProfile(false)
+                                      }} className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow">Save</button>
+                                      <button onClick={() => { setAvatarPreview(null); setSelectedPreset(null); setShowProfileModal(false) }} className="px-4 py-2 rounded-xl border">Cancel</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                           <button
                             onClick={() => {
                               // prepare modal
@@ -4310,9 +3790,9 @@ export default function CollaborationApp() {
                             <div className="flex items-center gap-3">
                               <Bell className="w-4 h-4" /> Notifications
                             </div>
-                            {currentUser?.notifications?.length ? (
+                            {currentUser?.notifications.length ? (
                               <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-red-500/30">
-                                {currentUser?.notifications?.length || 0}
+                                {currentUser.notifications.length}
                               </span>
                             ) : null}
                           </button>
@@ -4474,7 +3954,7 @@ export default function CollaborationApp() {
                         })()
 
                         return (
-                          <React.Fragment key={msg.id}>
+                          <>
                             {showDateSeparator && (
                               <div className="w-full flex justify-center mb-4">
                                 <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-white/90 border border-slate-100 text-slate-500">
@@ -4483,6 +3963,7 @@ export default function CollaborationApp() {
                               </div>
                             )}
                             <div
+                              key={msg.id}
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
                               className={`flex gap-4 ${
@@ -4596,17 +4077,15 @@ export default function CollaborationApp() {
                                       <div
                                         key={att.id}
                                         onClick={() => openAttachment(att)}
-                                        style={{ cursor: (att.url || att.previewUrl || att.source === 'gmail') ? "pointer" : "default" }}
+                                        style={{ cursor: (att.url || att.previewUrl) ? "pointer" : "default" }}
                                         className={`relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
-                                          att.source === 'gmail'
-                                            ? "bg-red-50 border border-red-100"
-                                            : ((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)
-                                              ? "bg-blue-50 border border-blue-100"
-                                              : "bg-black/5"
+                                          ((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)
+                                            ? "bg-blue-50 border border-blue-100"
+                                            : "bg-black/5"
                                         }`}
                                       >
                                         {/* Download overlay */}
-                                        {(att.url || att.previewUrl || att.source === 'gmail') && (
+                                        {(att.url || att.previewUrl) && (
                                           <button
                                             onClick={e => {
                                               e.stopPropagation()
@@ -4617,25 +4096,7 @@ export default function CollaborationApp() {
                                             Download
                                           </button>
                                         )}
-                                        {/* Gmail Attachment */}
-                                        {att.source === 'gmail' ? (
-                                          <div className="p-3 flex items-center gap-3 rounded-xl min-w-[200px]">
-                                            <div className="p-2 rounded-lg bg-white shadow-sm text-red-600">
-                                              <Mail className="w-6 h-6" />
-                                            </div>
-                                            <div className="overflow-hidden flex-1">
-                                              <span className="text-xs font-bold truncate block text-slate-800">
-                                                {att.name}
-                                              </span>
-                                              <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-[10px] text-slate-500">
-                                                  Gmail Attachment
-                                                </span>
-                                                <Download className="w-3 h-3 text-slate-400" />
-                                              </div>
-                                            </div>
-                                          </div>
-                                        ) : (((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)) ? (
+                                        {(((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)) ? (
                                           <div className="p-3 flex items-center gap-3 rounded-xl min-w-[200px]">
                                             <div className="p-2 rounded-lg bg-white shadow-sm text-blue-600">
                                               <img
@@ -4657,19 +4118,7 @@ export default function CollaborationApp() {
                                             </div>
                                           </div>
                                         ) : (() => {
-                                          // Construct server URL from fileId if url is not set
-                                          let serverUrl = att.url || att.public_url || att.webViewLink
-                                          // If the URL is a relative path (starts with /), make it absolute
-                                          if (serverUrl && typeof serverUrl === 'string' && serverUrl.startsWith('/') && !serverUrl.startsWith('//')) {
-                                            serverUrl = `${API_BASE}${serverUrl}`
-                                          }
-                                          if (!serverUrl && att.fileId) {
-                                            serverUrl = `${API_BASE}/upload/file/${att.fileId}/download`
-                                          } else if (!serverUrl && att.id && !String(att.id).startsWith('tmp-') && !String(att.id).startsWith('blob:')) {
-                                            serverUrl = `${API_BASE}/upload/file/${att.id}/download`
-                                          }
-                                          // Use previewUrl only as fallback for sender's local preview
-                                          const srcUrl = serverUrl || att.previewUrl
+                                          const srcUrl = att.url || att.previewUrl || att.public_url || att.webViewLink
                                           const mime = att.type || att.mimeType || att.mimetype || ''
                                           if (mime && mime.startsWith && mime.startsWith('image/') && srcUrl) {
                                             return (
@@ -4677,23 +4126,6 @@ export default function CollaborationApp() {
                                                 src={srcUrl}
                                                 alt={att.name}
                                                 className="max-w-[240px] max-h-[240px] object-cover"
-                                                onError={async (e) => {
-                                                  try {
-                                                    // Attempt to fetch protected URL and replace src
-                                                    const blobUrl = await fetchProtectedUrlAndCreateObjectURL(att)
-                                                    if (blobUrl) {
-                                                      // Update message attachment preview so UI persists
-                                                      updateMessageMeta(getActiveChatId(), msg.id, m => ({
-                                                        ...m,
-                                                        attachments: (m.attachments || []).map(a => (String(a.id) === String(att.id) ? { ...a, previewUrl: blobUrl } : a))
-                                                      }))
-                                                      // swap image src immediately
-                                                      e.currentTarget.src = blobUrl
-                                                    }
-                                                  } catch (err) {
-                                                    // ignore
-                                                  }
-                                                }}
                                               />
                                             )
                                           }
@@ -4753,7 +4185,7 @@ export default function CollaborationApp() {
                               </div>
                             </div>
                           </div>
-                          </React.Fragment>
+                          </>
                         )
                       })}
                     </>
@@ -4914,9 +4346,9 @@ export default function CollaborationApp() {
                   <div className="text-center mb-10">
                     <div className="inline-block relative mb-5">
                       {activeView === "dm" ? (
-                        <div className="drop-shadow-2xl filter">
-                          {renderAvatar(getUser(activeDMUser), 96)}
-                        </div>
+                        <span className="text-7xl drop-shadow-2xl filter text-slate-700">
+                          {getUser(activeDMUser)?.avatar}
+                        </span>
                       ) : (
                         <div className="w-24 h-24 rounded-[2rem] mx-auto flex items-center justify-center shadow-lg bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 shadow-inner">
                           <Hash className="w-10 h-10" />
@@ -4959,9 +4391,9 @@ export default function CollaborationApp() {
                     <div className="space-y-2">
                       {activeMembers.map(member => {
                         const isMe = member.id === currentUser?.id
-                        const isFriend = Array.isArray(currentUser?.friends)
-                          ? currentUser.friends.includes(member.id)
-                          : false
+                        const isFriend = currentUser?.friends.includes(
+                          member.id
+                        )
                         const isPending = (() => {
                           if (isMe || isFriend) return false
                           // Check if member has an outgoing friend request to current user
@@ -4978,8 +4410,8 @@ export default function CollaborationApp() {
                             className="flex items-center gap-3 p-3 rounded-2xl transition-colors cursor-default group border border-transparent hover:bg-slate-50 hover:border-slate-100"
                           >
                             <div className="relative">
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border bg-white border-slate-100 overflow-hidden">
-                                {renderAvatar(member, 40)}
+                              <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border bg-white border-slate-100">
+                                {member.avatar}
                               </div>
                               <span
                                 className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
@@ -5170,8 +4602,8 @@ export default function CollaborationApp() {
                 }`}
               >
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm bg-white border border-slate-100 overflow-hidden">
-                    {renderAvatar(friend, 40)}
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm bg-white border border-slate-100">
+                    {friend.avatar}
                   </div>
                   <span
                     className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
@@ -5517,9 +4949,9 @@ export default function CollaborationApp() {
                             }`}
                           >
                             <div className="flex items-center gap-3">
-                              <div className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50 overflow-hidden">
-                                {renderAvatar(u, 36)}
-                              </div>
+                              <span className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50">
+                                {u.avatar}
+                              </span>
                               <span className="font-bold text-slate-700">
                                 {u.name}
                               </span>
@@ -5656,9 +5088,9 @@ export default function CollaborationApp() {
                                 }`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <div className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50 overflow-hidden">
-                                    {renderAvatar(u, 36)}
-                                  </div>
+                                  <span className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50">
+                                    {u.avatar}
+                                  </span>
                                   <span className="font-bold text-slate-700">
                                     {u.name}
                                   </span>
@@ -5764,7 +5196,7 @@ export default function CollaborationApp() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
-              {(currentUser?.notifications?.length || 0) === 0 ? (
+              {currentUser?.notifications.length === 0 ? (
                 <div className="text-center py-16 text-slate-500">
                   <Bell className="w-16 h-16 mx-auto mb-4 opacity-20" />
                   <p className="font-medium">No new notifications</p>
@@ -5967,20 +5399,20 @@ export default function CollaborationApp() {
                   </div>
                 ) : (
                   <>
-                    {/* Filter Tabs - Compact */}
-                    <div className="flex flex-wrap gap-2 mb-4 pb-2 border-b border-slate-100">
+                    {/* Filter Tabs */}
+                    <div className="flex flex-wrap gap-3 mb-8 pb-2">
                       <button
                         onClick={() => {
                           setSelectedAppFilter('all')
                           loadGoogleDocs(googleAccessToken)
                         }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all ${
+                        className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all transform hover:scale-105 flex items-center justify-center gap-2.5 ${
                           selectedAppFilter === 'all'
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-200'
+                            : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 shadow-sm'
                         }`}
                       >
-                        All
+                        All Documents
                       </button>
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
                         <button
@@ -5988,13 +5420,13 @@ export default function CollaborationApp() {
                             setSelectedAppFilter('docs')
                             loadGoogleDocs(googleAccessToken, 'docs')
                           }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2.5 transform hover:scale-105 ${
                             selectedAppFilter === 'docs'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                              ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
+                              : 'bg-white text-blue-600 hover:bg-blue-50 border border-blue-200 hover:border-blue-300 shadow-sm'
                           }`}
                         >
-                          📄 Docs
+                          <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x16.png" alt="Docs" className="w-4 h-4 flex-shrink-0 object-contain" /> Docs
                         </button>
                       )}
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
@@ -6003,13 +5435,13 @@ export default function CollaborationApp() {
                             setSelectedAppFilter('sheets')
                             loadGoogleDocs(googleAccessToken, 'sheets')
                           }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2.5 transform hover:scale-105 ${
                             selectedAppFilter === 'sheets'
-                              ? 'bg-green-600 text-white'
-                              : 'bg-green-50 text-green-600 hover:bg-green-100'
+                              ? 'bg-green-600 text-white shadow-lg shadow-green-200'
+                              : 'bg-white text-green-600 hover:bg-green-50 border border-green-200 hover:border-green-300 shadow-sm'
                           }`}
                         >
-                          📊 Sheets
+                          <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x16.png" alt="Sheets" className="w-4 h-4 flex-shrink-0 object-contain" /> Sheets
                         </button>
                       )}
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
@@ -6018,13 +5450,13 @@ export default function CollaborationApp() {
                             setSelectedAppFilter('slides')
                             loadGoogleDocs(googleAccessToken, 'slides')
                           }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2.5 transform hover:scale-105 ${
                             selectedAppFilter === 'slides'
-                              ? 'bg-yellow-600 text-white'
-                              : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
+                              ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-200'
+                              : 'bg-white text-yellow-600 hover:bg-yellow-50 border border-yellow-200 hover:border-yellow-300 shadow-sm'
                           }`}
                         >
-                          📽️ Slides
+                          <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x16.png" alt="Slides" className="w-4 h-4 flex-shrink-0 object-contain" /> Slides
                         </button>
                       )}
                       {gmailAttachments.length > 0 && (
@@ -6033,13 +5465,13 @@ export default function CollaborationApp() {
                             setSelectedAppFilter('gmail')
                             loadGoogleDocs(googleAccessToken, 'gmail')
                           }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2.5 transform hover:scale-105 ${
                             selectedAppFilter === 'gmail'
-                              ? 'bg-red-600 text-white'
-                              : 'bg-red-50 text-red-600 hover:bg-red-100'
+                              ? 'bg-red-600 text-white shadow-lg shadow-red-200'
+                              : 'bg-white text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 shadow-sm'
                           }`}
                         >
-                          ✉️ Gmail
+                          <img src="https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico" alt="Gmail" className="w-4 h-4 flex-shrink-0 object-contain" /> Gmail
                         </button>
                       )}
                     </div>
@@ -6047,44 +5479,98 @@ export default function CollaborationApp() {
                     {/* Documents Grid */}
                     <div className="flex-1 overflow-y-auto pr-2">
                       {(selectedAppFilter === 'all' || selectedAppFilter !== 'gmail') && googleDocs.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
                           {googleDocs.map((doc) => {
                             const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
                             const appIcon = GoogleService.getAppIcon(appType)
+                            const appName = GoogleService.getAppDisplayName(appType)
                             
                             return (
                               <div
                                 key={doc.id}
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
-                                onClick={() => window.open(doc.webViewLink, '_blank')}
+                                className={`group relative rounded-2xl border overflow-hidden transition-all duration-300 hover:shadow-2xl hover:-translate-y-2 bg-white ${appIcon.border} hover:border-indigo-400 shadow-sm hover:scale-[1.02]`}
                               >
-                                {/* Icon */}
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${appIcon.color}`}>
-                                  <span className="text-xl">{appIcon.emoji}</span>
-                                </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-indigo-600">
-                                    {doc.name}
-                                  </h5>
-                                  <p className="text-[10px] text-slate-400">
-                                    {new Date(doc.modifiedTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </p>
-                                </div>
-                                
-                                {/* Add Button */}
-                                <button
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    addDocumentAsAttachment(doc)
-                                  }}
-                                  className="p-2 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors opacity-0 group-hover:opacity-100"
-                                  title="Add to message"
+                                {/* Document Preview/Thumbnail */}
+                                <a
+                                  href={doc.webViewLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block"
                                 >
-                                  <Plus className="w-4 h-4" />
-                                </button>
+                                  <div className={`h-32 flex items-center justify-center relative ${appIcon.color}`}>
+                                    {doc.thumbnailLink ? (
+                                      <img 
+                                        src={doc.thumbnailLink} 
+                                        alt={doc.name}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <>
+                                        <img 
+                                          src={appIcon.iconUrl} 
+                                          alt={appName}
+                                          className="w-16 h-16 object-contain"
+                                          onError={(e) => {
+                                            e.target.style.display = 'none'
+                                            e.target.nextElementSibling.style.display = 'flex'
+                                          }}
+                                        />
+                                        <span className="text-6xl hidden items-center justify-center">{appIcon.emoji}</span>
+                                      </>
+                                    )}
+                                    {/* App Badge */}
+                                    <div className="absolute top-2 right-2 px-2 py-1 rounded-lg text-[10px] font-bold bg-white/90 backdrop-blur-sm text-slate-700 shadow-sm">
+                                      {appName}
+                                    </div>
+                                  </div>
+                                </a>
+                                
+                                {/* Document Info */}
+                                <div className="p-4">
+                                  <a
+                                    href={doc.webViewLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block"
+                                  >
+                                    <h5 className="font-bold text-slate-800 truncate mb-1 group-hover:text-indigo-600 transition-colors">
+                                      {doc.name}
+                                    </h5>
+                                    <p className="text-xs text-slate-500 mb-2">
+                                      Modified {new Date(doc.modifiedTime).toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric',
+                                        year: 'numeric'
+                                      })}
+                                    </p>
+                                  </a>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                      {doc.mimeType?.split('/')[1]?.replace('vnd.google-apps.', '') || 'file'}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          addDocumentAsAttachment(doc)
+                                        }}
+                                        className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 transition-all shadow-md hover:shadow-lg transform hover:scale-110 active:scale-95"
+                                        title="Add to message"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                      <a
+                                        href={doc.webViewLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-slate-400 group-hover:text-indigo-600 transition-colors"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             )
                           })}
@@ -6096,51 +5582,39 @@ export default function CollaborationApp() {
                       {/* Shared Chat Documents */}
                       {sharedChatDocs.length > 0 && (
                         <div className="mb-6">
-                          <h4 className="text-sm font-bold mb-3 text-slate-600 flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-indigo-500" /> Shared in Chats
+                          <h4 className="text-lg font-bold mb-4 text-slate-800 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-indigo-600" /> Shared in Channels & Chats
                           </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {sharedChatDocs.map((attachment, idx) => (
-                              <div 
-                                key={attachment.id || `${attachment.name}-${idx}`} 
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
-                                onClick={() => openAttachment(attachment)}
-                              >
-                                {/* Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">📎</span>
+                              <div key={attachment.id || `${attachment.name}-${idx}`} className="group relative rounded-2xl border overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1 bg-white">
+                                <div className="h-28 flex items-center justify-center bg-slate-50 text-indigo-600 relative">
+                                  <div className="w-16 h-16 flex items-center justify-center text-3xl">📎</div>
+                                  <div className="absolute top-2 right-2 px-2 py-1 rounded-lg text-[10px] font-bold bg-white/90 backdrop-blur-sm text-slate-700 shadow-sm">
+                                    {attachment.source === 'drive' ? 'Drive' : 'Chat'}
+                                  </div>
                                 </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-indigo-600">
-                                    {attachment.name || 'Attachment'}
-                                  </h5>
-                                  <p className="text-[10px] text-slate-400 truncate">
-                                    {attachment.source === 'drive' ? 'Drive' : attachment.source === 'gmail' ? 'Gmail' : 'Chat'}
-                                  </p>
+                                <div className="p-4">
+                                  <h5 className="font-bold text-slate-800 truncate mb-1">{attachment.name || 'Attachment'}</h5>
+                                  <p className="text-xs text-slate-500 mb-2">Shared in {attachment.chatId}</p>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{attachment.mimeType ? (attachment.mimeType.split('/')[1] || '') : ''}</span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); addDocumentAsAttachment({ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, url: attachment.url || attachment.webViewLink, source: attachment.source || 'chat' }) }}
+                                        className="p-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-all"
+                                        title="Add to message"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                      {attachment.url || attachment.webViewLink ? (
+                                        <a href={attachment.url || attachment.webViewLink} target="_blank" rel="noopener noreferrer" className="text-slate-400">
+                                          <ExternalLink className="w-4 h-4" />
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  </div>
                                 </div>
-                                
-                                {/* Add Button */}
-                                <button
-                                  onClick={(e) => { 
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    addDocumentAsAttachment({ 
-                                      id: attachment.id, 
-                                      name: attachment.name, 
-                                      mimeType: attachment.mimeType, 
-                                      url: attachment.url || attachment.webViewLink, 
-                                      source: attachment.source || 'chat',
-                                      gmailMessageId: attachment.gmailMessageId,
-                                      gmailAttachmentId: attachment.gmailAttachmentId
-                                    }) 
-                                  }}
-                                  className="p-2 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors opacity-0 group-hover:opacity-100"
-                                  title="Add to message"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                </button>
                               </div>
                             ))}
                           </div>
@@ -6151,85 +5625,66 @@ export default function CollaborationApp() {
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
                         <div className="mb-6">
                           {selectedAppFilter === 'all' && googleDocs.length > 0 && (
-                            <h4 className="text-sm font-bold mb-3 text-slate-600 flex items-center gap-2">
-                              <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
+                            <h4 className="text-lg font-bold mb-4 text-slate-800 flex items-center gap-2">
+                              <Mail className="w-5 h-5 text-red-600" /> Gmail Attachments
                             </h4>
                           )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {gmailAttachments.map((attachment, idx) => (
                               <div
-                                key={`gmail-${attachment.messageId}-${attachment.id}-${idx}`}
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-red-100 bg-white hover:border-red-300 hover:shadow-md transition-all"
+                                key={idx}
+                                className="group relative rounded-2xl border-2 border-red-200 overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1 bg-white hover:border-red-300"
                               >
-                                {/* File Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">{attachment.fileIcon || '📎'}</span>
-                                </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-red-600">
-                                    {attachment.filename}
-                                  </h5>
-                                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                                    <span className="truncate max-w-[100px]">{attachment.senderName || 'Unknown'}</span>
-                                    <span>•</span>
-                                    <span>{attachment.size > 1048576 ? `${(attachment.size / 1048576).toFixed(1)}MB` : `${(attachment.size / 1024).toFixed(0)}KB`}</span>
+                                <div className="h-32 flex items-center justify-center bg-red-50 text-red-600 relative">
+                                  <img 
+                                    src="https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico"
+                                    alt="Gmail"
+                                    className="w-16 h-16 object-contain"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none'
+                                      e.target.nextElementSibling.style.display = 'block'
+                                    }}
+                                  />
+                                  <span className="text-6xl hidden">📧</span>
+                                  <div className="absolute top-2 right-2 px-2 py-1 rounded-lg text-[10px] font-bold bg-white/90 backdrop-blur-sm text-slate-700 shadow-sm">
+                                    Gmail
                                   </div>
                                 </div>
-                                
-                                {/* Action Buttons */}
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      addDocumentAsAttachment({
-                                        id: attachment.id,
-                                        name: attachment.filename,
-                                        mimeType: attachment.mimeType,
-                                        size: attachment.size,
-                                        source: 'gmail',
-                                        gmailMessageId: attachment.messageId,
-                                        gmailAttachmentId: attachment.id,
-                                        webViewLink: `https://mail.google.com/mail/u/0/#inbox/${attachment.messageId}`
-                                      })
-                                    }}
-                                    className="p-1.5 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
-                                    title="Add to chat"
-                                  >
-                                    <Plus className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={async (e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      try {
-                                        const blobUrl = await GoogleService.getGmailAttachmentPreviewUrl(
-                                          googleAccessToken,
-                                          attachment.messageId,
-                                          attachment.id,
-                                          attachment.mimeType,
-                                          attachment.filename
-                                        )
-                                        if (blobUrl) {
-                                          const a = document.createElement('a')
-                                          a.href = blobUrl
-                                          a.download = attachment.filename
-                                          document.body.appendChild(a)
-                                          a.click()
-                                          document.body.removeChild(a)
-                                          URL.revokeObjectURL(blobUrl)
-                                        }
-                                      } catch (err) {
-                                        console.error('Download failed:', err)
-                                      }
-                                    }}
-                                    className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
-                                    title="Download"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                  </button>
+                                <div className="p-4">
+                                  <h5 className="font-bold text-slate-800 truncate mb-1">
+                                    {attachment.filename}
+                                  </h5>
+                                  <p className="text-xs text-slate-500 mb-2">
+                                    {new Date(parseInt(attachment.date)).toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric',
+                                      year: 'numeric'
+                                    })}
+                                  </p>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                      {(attachment.size / 1024).toFixed(1)} KB
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          addDocumentAsAttachment({
+                                            id: attachment.id,
+                                            name: attachment.filename,
+                                            mimeType: attachment.mimeType,
+                                            webViewLink: `https://mail.google.com/mail/u/0/#inbox/${attachment.messageId}`
+                                          })
+                                        }}
+                                        className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                                        title="Add to message"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                      <Paperclip className="w-4 h-4 text-red-400" />
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             ))}

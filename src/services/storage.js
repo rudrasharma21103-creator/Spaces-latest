@@ -23,20 +23,25 @@ const ensureArray = data => {
   return []
 }
 
-import { getStoredUser } from "./auth"
+import { getStoredUser, logout as clearAuth } from "./auth"
 
 const authFetch = async (url, options = {}) => {
   const token = getToken()
   const storedUser = getStoredUser()
-
+  
+  // Normalize user id from possible shapes: `id`, `_id`, `_id.$oid`, or `userId`
+  const userId = storedUser
+    ? (storedUser.id || storedUser._id || (storedUser._id && storedUser._id.$oid) || storedUser.userId)
+    : null
   try {
     console.log("authFetch ->", url, options && options.method ? options.method : "GET")
+    console.log("authFetch headers ->", { token: !!token, userId: userId, extraHeaders: options && options.headers })
     const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(storedUser ? { "X-User-Id": String(storedUser.id) } : {}),
+        ...(userId ? { "X-User-Id": String(userId) } : {}),
         ...(options.headers || {})
       }
     })
@@ -44,12 +49,20 @@ const authFetch = async (url, options = {}) => {
     console.log("authFetch response status", res.status, "for", url)
 
     if (res.status === 401) {
-      localStorage.clear()
-      window.location.reload()
-      return Promise.reject("Unauthorized")
+      try {
+        clearAuth()
+      } catch (e) {
+        // ignore clear errors
+      }
+      return Promise.reject({ status: 401, message: "Unauthorized" })
     }
 
     if (res.status === 403) {
+      // Log response body for debugging before rejecting
+      try {
+        const text = await res.text()
+        console.warn("authFetch forbidden response body:", text)
+      } catch (e) {}
       // Surface forbidden errors to caller
       return Promise.reject({ status: 403, message: "Forbidden" })
     }
@@ -67,9 +80,40 @@ const authFetch = async (url, options = {}) => {
 // --------------------
 
 export const getUsers = async () => {
+  const cacheKey = "users_cache"
+  const cacheTimeKey = "users_cache_time"
+  const CACHE_TTL = 15000 // 15 seconds TTL
+  
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const cacheTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+    
+    if (Array.isArray(cached) && cached.length > 0) {
+      // Return cached data immediately, refresh in background if stale
+      if (Date.now() - cacheTime > CACHE_TTL) {
+        ;(async () => {
+          try {
+            const res = await authFetch(`${API_BASE}/users/`)
+            const data = await safeJson(res)
+            const arr = ensureArray(data)
+            localStorage.setItem(cacheKey, JSON.stringify(arr))
+            localStorage.setItem(cacheTimeKey, String(Date.now()))
+          } catch (e) {}
+        })()
+      }
+      return cached
+    }
+  } catch (e) {}
+
+  // No cache - fetch fresh
   const res = await authFetch(`${API_BASE}/users/`)
   const data = await safeJson(res)
-  return ensureArray(data)
+  const arr = ensureArray(data)
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(arr))
+    localStorage.setItem(cacheTimeKey, String(Date.now()))
+  } catch(e){}
+  return arr
 }
 
 export const saveUser = async user => {
@@ -148,9 +192,31 @@ export const searchUsersByName = async query => {
 // --------------------
 
 export const getSpaces = async () => {
+  // Return cached spaces immediately if available, then refresh in background
+  try {
+    const cached = JSON.parse(localStorage.getItem("spaces_cache") || "null")
+    if (Array.isArray(cached) && cached.length > 0) {
+      ;(async () => {
+        try {
+          const res = await authFetch(`${API_BASE}/spaces/`)
+          const data = await safeJson(res)
+          const arr = ensureArray(data)
+          localStorage.setItem("spaces_cache", JSON.stringify(arr))
+        } catch (e) {
+          // ignore background refresh failures
+        }
+      })()
+      return cached
+    }
+  } catch (e) {
+    // fall through to network fetch
+  }
+
   const res = await authFetch(`${API_BASE}/spaces/`)
   const data = await safeJson(res)
-  return ensureArray(data)
+  const arr = ensureArray(data)
+  try { localStorage.setItem("spaces_cache", JSON.stringify(arr)) } catch(e){}
+  return arr
 }
 
 export const saveSpace = async space => {
@@ -162,14 +228,52 @@ export const saveSpace = async space => {
 
 export const getSpacesForUser = async userSpaceIds => {
   if (!Array.isArray(userSpaceIds) || userSpaceIds.length === 0) return []
+  
+  // Use a general spaces cache (all spaces the user has seen)
+  const cacheKey = "spaces_cache"
+  
+  // Try cached spaces first - return immediately if available
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    if (Array.isArray(cached) && cached.length > 0) {
+      const filtered = cached.filter(s => userSpaceIds.includes(s.id))
+      // If we have matching spaces in cache, return them and refresh in background
+      if (filtered.length > 0) {
+        ;(async () => {
+          try {
+            const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
+              method: "POST",
+              body: JSON.stringify(userSpaceIds)
+            })
+            const data = await safeJson(res)
+            const arr = ensureArray(data)
+            // Merge with existing cache to preserve other spaces
+            const existingIds = new Set(arr.map(s => s.id))
+            const merged = [...arr, ...cached.filter(s => !existingIds.has(s.id))]
+            localStorage.setItem(cacheKey, JSON.stringify(merged))
+          } catch (e) {}
+        })()
+        return filtered
+      }
+    }
+  } catch (e) {}
 
+  // No cache hit - fetch from API
   const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
     method: "POST",
     body: JSON.stringify(userSpaceIds)
   })
 
   const data = await safeJson(res)
-  return ensureArray(data)
+  const arr = ensureArray(data)
+  try {
+    // Merge with existing cache
+    const existing = JSON.parse(localStorage.getItem(cacheKey) || "[]")
+    const existingIds = new Set(arr.map(s => s.id))
+    const merged = [...arr, ...(Array.isArray(existing) ? existing.filter(s => !existingIds.has(s.id)) : [])]
+    localStorage.setItem(cacheKey, JSON.stringify(merged))
+  } catch(e){}
+  return arr
 }
 
 // --------------------
@@ -178,12 +282,57 @@ export const getSpacesForUser = async userSpaceIds => {
 
 export const getMessages = async chatId => {
   if (!chatId) return []
-  const res = await authFetch(`${API_BASE}/messages/${chatId}`)
-  const data = await safeJson(res)
-  return ensureArray(data)
+  const cacheKey = `messages_cache_${chatId}`
+  const cacheTimeKey = `messages_cache_time_${chatId}`
+  const CACHE_TTL = 3000 // 3 seconds - only use very fresh cache
+  
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const cacheTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+    
+    // Only return cache if it's VERY fresh (within 3 seconds)
+    // Otherwise always fetch from server to ensure we have latest messages
+    if (Array.isArray(cached) && (Date.now() - cacheTime < CACHE_TTL)) {
+      return cached
+    }
+  } catch (e) {}
+
+  // Fetch fresh data from server
+  try {
+    const res = await authFetch(`${API_BASE}/messages/${chatId}`)
+    const data = await safeJson(res)
+    const arr = ensureArray(data)
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(arr))
+      localStorage.setItem(cacheTimeKey, String(Date.now()))
+    } catch(e){}
+    return arr
+  } catch (err) {
+    // On network error, fall back to cache if available
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+      if (Array.isArray(cached)) return cached
+    } catch (e) {}
+    if (err && err.status === 403) return []
+    throw err
+  }
 }
 
 export const saveMessage = async (chatId, message) => {
+  // Optimistically persist to local cache so refreshes and other tabs see it immediately
+  try {
+    const cacheKey = `messages_cache_${chatId}`
+    const cacheTimeKey = `messages_cache_time_${chatId}`
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const arr = Array.isArray(cached) ? cached : []
+    // Avoid duplicates by checking if message ID already exists
+    if (!arr.some(m => m.id === message.id)) {
+      arr.push(message)
+    }
+    localStorage.setItem(cacheKey, JSON.stringify(arr))
+    localStorage.setItem(cacheTimeKey, String(Date.now()))
+  } catch (e) {}
+
   await authFetch(`${API_BASE}/messages/${chatId}`, {
     method: "POST",
     body: JSON.stringify(message)
@@ -205,7 +354,12 @@ export const updateMessage = async (chatId, message) => {
 export const getFriends = async friendIds => {
   if (!Array.isArray(friendIds) || friendIds.length === 0) return []
   const users = await getUsers()
-  return users.filter(u => friendIds.includes(u.id))
+  // Normalize IDs to strings for comparison to handle type mismatches
+  const normalizedIds = friendIds.map(id => String(id))
+  return users.filter(u => {
+    const uId = String(u.id || u._id || '')
+    return normalizedIds.includes(uId)
+  })
 }
 
 export const sendFriendRequest = async (fromId, fromName, toUserId) => {
@@ -428,6 +582,29 @@ export const initiateCall = async (fromUser, toUserId) => {
   const calls = _readCalls()
   calls.push(call)
   _writeCalls(calls)
+
+  // Notify the recipient in real-time via backend so they receive an
+  // incoming-call pop-up immediately (DM calls should not rely on localStorage polling)
+  try {
+    const payload = {
+      organizerId: fromUser.id,
+      targetUserIds: [toUserId],
+      meetingLink: null,
+      meetingTitle: `${fromUser.name} is calling you`,
+      spaceId: null,
+      channelId: null
+    }
+    // fire-and-forget; don't block call initiation on network
+    authFetch(`${API_BASE}/actions/send-meet-invite`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }).catch(e => {
+      // log but ignore errors — fallback polling still exists
+      console.error('Failed to send realtime call notification', e)
+    })
+  } catch (e) {
+    console.error('Realtime call notification failed', e)
+  }
   return call
 }
 
@@ -485,4 +662,49 @@ export const rejectFriendRequest = async (friendId, notificationId) => {
 export const rejectInvite = async (userId, notificationId) => {
   // same as deleteNotification for invites
   return deleteNotification(userId, notificationId)
+}
+
+// --------------------
+// User update helper
+// --------------------
+export const updateUser = async (userId, updates) => {
+  if (!userId) return null
+  try {
+    const res = await authFetch(`${API_BASE}/users/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(updates)
+    })
+    return safeJson(res)
+  } catch (e) {
+    console.error("updateUser failed", e)
+    return null
+  }
+}
+
+// Notify backend to send Meet invites/notifications to users or a channel
+export const sendMeetInvite = async (payload) => {
+  try {
+    const res = await authFetch(`${API_BASE}/actions/send-meet-invite`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+    return safeJson(res)
+  } catch (e) {
+    console.error('sendMeetInvite failed', e)
+    return null
+  }
+}
+
+// Broadcast avatar update to friends and members
+export const broadcastAvatarUpdate = async (userId, avatarData) => {
+  try {
+    const res = await authFetch(`${API_BASE}/actions/broadcast-avatar-update`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, avatarData })
+    })
+    return safeJson(res)
+  } catch (e) {
+    console.error('broadcastAvatarUpdate failed', e)
+    return null
+  }
 }

@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.database import users_collection
+from app.database import files_collection
+from bson import ObjectId
 from app.auth import verify_password, identify_hash_scheme
 
 router = APIRouter(prefix="/debug")
@@ -56,3 +58,28 @@ def reset_password(data: dict):
 
     scheme = identify_hash_scheme(hashed)
     return {"status": "ok", "hash_scheme": scheme, "hash_len": len(hashed)}
+
+
+@router.get('/recent-files')
+def recent_files(limit: int = 20):
+    """Dev-only: return most recent file metadata documents.
+    This endpoint is intended for local debugging and should not be exposed
+    in production. It returns limited fields to help diagnose upload issues.
+    """
+    docs = []
+    for d in files_collection.find().sort('createdAt', -1).limit(int(limit)):
+        # Convert ObjectId to string and include only safe fields
+        docs.append({
+            'id': str(d.get('_id')),
+            'filename': d.get('filename'),
+            'mimetype': d.get('mimetype'),
+            'size': d.get('size'),
+            'status': d.get('status'),
+            'drive_file_id': d.get('drive_file_id'),
+            'url': d.get('url'),
+            'webViewLink': d.get('webViewLink'),
+            'webContentLink': d.get('webContentLink'),
+            'error': d.get('error'),
+            'createdAt': d.get('createdAt')
+        })
+    return {'files': docs}

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from app.auth import hash_password, verify_password, create_access_token
-from app.database import users_collection
+from app.database import users_collection, spaces_collection
+from app.ws_manager import manager
+import time
 
 router = APIRouter(prefix="/users")
 
@@ -110,13 +112,85 @@ def users_ping():
     return {"users_router": "alive"}
 
 @router.put("/{user_id}")
-def update_user(user_id: str, user: dict):
+async def update_user(user_id: str, user: dict):
     # Only allow updating existing users; avoid changing password here
     update_doc = {k: v for k, v in user.items() if k != "password"}
-    res = users_collection.update_one({"id": user_id}, {"$set": update_doc})
+    
+    # Handle type-flexible user lookup (id may be stored as string or int)
+    existing_user = users_collection.find_one({"id": user_id})
+    if not existing_user:
+        try:
+            existing_user = users_collection.find_one({"id": int(user_id)})
+        except (ValueError, TypeError):
+            pass
+    if not existing_user:
+        return {"error": "User not found"}
+    
+    # Use the actual id from the found document for update
+    actual_id = existing_user.get("id")
+    res = users_collection.update_one({"id": actual_id}, {"$set": update_doc})
     if res.matched_count == 0:
         return {"error": "User not found"}
-    updated = users_collection.find_one({"id": user_id}, {"_id": 0})
+    updated = users_collection.find_one({"id": actual_id}, {"_id": 0})
     if updated:
         updated.pop("password", None)
+    # If avatar fields were updated, broadcast to friends and space members
+    try:
+        if any(k in update_doc for k in ("avatar_url", "avatar_preset", "profileImage", "avatar")):
+            # Prepare avatar data with cache-busting timestamp
+            raw_url = updated.get("avatar_url")
+            ts = int(time.time() * 1000)
+            avatar_url = raw_url  # Default to raw URL
+            if isinstance(raw_url, str) and raw_url:
+                # Don't append cache-buster to data: or blob: URLs
+                if not (raw_url.startswith('data:') or raw_url.startswith('blob:')):
+                    sep = '&' if '?' in raw_url else '?'
+                    avatar_url = f"{raw_url}{sep}v={ts}"
+                    # Persist versioned URL so subsequent fetches reflect new version
+                    users_collection.update_one({"id": actual_id}, {"$set": {"avatar_url": avatar_url}})
+                    updated["avatar_url"] = avatar_url
+
+            avatar_data = {
+                "avatar_url": avatar_url,
+                "avatar_preset": updated.get("avatar_preset"),
+                "name": updated.get("name")
+            }
+
+            # Collect recipients: friends + members of spaces the user belongs to
+            recipients = set()
+            for fid in (updated.get("friends") or []):
+                if fid and str(fid) != str(actual_id):
+                    recipients.add(str(fid))
+            user_spaces = updated.get("spaces") or []
+            for space in spaces_collection.find({"id": {"$in": user_spaces}}):
+                for member_id in space.get("members", []):
+                    if member_id and str(member_id) != str(actual_id):
+                        recipients.add(str(member_id))
+
+            notif = {
+                "type": "avatar_updated",
+                "userId": str(actual_id),
+                "avatarData": avatar_data,
+                "timestamp": int(time.time())
+            }
+            # Send notification to recipients - use string IDs for WebSocket lookup
+            for rid in recipients:
+                try:
+                    await manager.send_to_user(str(rid), {"type": "notification", "notification": notif})
+                except Exception:
+                    pass
+            # Also broadcast a lightweight profileUpdated event to notifications group
+            # so only notification sockets receive it (avoids treating it as a chat message).
+            try:
+                await manager.broadcast("notifications", {
+                    "type": "profileUpdated",
+                    "userId": str(actual_id),
+                    "avatar_url": avatar_url,
+                    "avatar_preset": updated.get("avatar_preset")
+                })
+            except Exception:
+                pass
+    except Exception as e:
+        # Don't fail the request on broadcast errors
+        print(f"avatar broadcast failed: {e}")
     return updated

@@ -12,5 +12,10 @@ starlette==0.50.0
 anyio==4.12.0
 dnspython==2.8.0
 motor==3.7.1
+websockets
 rsa==4.9.1
 cryptography==46.0.3
+google-api-python-client==2.86.0
+google-auth==2.21.0
+google-auth-httplib2==0.1.0
+python-multipart==0.0.6
