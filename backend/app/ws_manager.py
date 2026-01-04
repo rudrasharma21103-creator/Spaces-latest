@@ -1,5 +1,6 @@
 from typing import Dict, List, Set
 from fastapi import WebSocket
+import asyncio
 
 class ConnectionManager:
     def __init__(self):
@@ -51,31 +52,48 @@ class ConnectionManager:
         """Sends a private real-time update to a specific user"""
         uid = str(user_id)
         if uid in self.user_connections:
-            # Make a copy to avoid modification during iteration
-            for ws in list(self.user_connections[uid]):
-                try:
-                    await ws.send_json(message)
-                except Exception:
-                    # ignore errors for now
-                    pass
+            connections = list(self.user_connections[uid])
+            print(f"[ws_manager] send_to_user: {uid} has {len(connections)} connection(s)")
+            # Send concurrently to avoid slow clients blocking others
+            tasks = [asyncio.create_task(self._safe_send(ws, message))
+                     for ws in connections]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            print(f"[ws_manager] send_to_user: {uid} not found in user_connections. Connected users: {list(self.user_connections.keys())[:10]}")
 
     async def broadcast(self, chat_id: str, message: dict):
-        for ws in self.active_connections.get(chat_id, []):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                # Ignore send errors for now
-                pass
+        # Send concurrently to all clients in the chat to reduce latency
+        tasks = [asyncio.create_task(self._safe_send(ws, message))
+                 for ws in list(self.active_connections.get(chat_id, []))]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def broadcast_presence(self):
         presence_msg = {"type": "presence_update", "online_users": list(self.online_users)}
-        # Send this list to every websocket across all chats
+        # Send this list to every websocket across all chats concurrently
+        tasks = []
         for chat_group in self.active_connections.values():
-            for ws in chat_group:
-                try:
-                    await ws.send_json(presence_msg)
-                except Exception:
-                    pass
+            for ws in list(chat_group):
+                tasks.append(asyncio.create_task(self._safe_send(ws, presence_msg)))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def send_to_all(self, message: dict):
+        """Send a message to every connected websocket across all chats/notifications."""
+        tasks = []
+        for chat_group in self.active_connections.values():
+            for ws in list(chat_group):
+                tasks.append(asyncio.create_task(self._safe_send(ws, message)))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _safe_send(self, ws: WebSocket, message: dict):
+        try:
+            await ws.send_json(message)
+        except Exception:
+            # ignore errors — connection may be closed or slow
+            pass
 
 manager = ConnectionManager()
 
