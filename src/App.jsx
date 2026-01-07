@@ -125,6 +125,7 @@ export default function CollaborationApp() {
 
   // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
+  const [debouncedInviteSearchQuery, setDebouncedInviteSearchQuery] = useState("")
   const [inviteSearchResults, setInviteSearchResults] = useState([])
   // Changed to array for bulk selection in Friend Modal
   const [selectedFriendInvitees, setSelectedFriendInvitees] = useState([])
@@ -440,16 +441,23 @@ export default function CollaborationApp() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery)
-    }, 300)
+    }, 150)
     return () => clearTimeout(handler)
   }, [searchQuery])
 
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedDmSearchQuery(dmSearchQuery)
-    }, 300)
+    }, 150)
     return () => clearTimeout(handler)
   }, [dmSearchQuery])
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedInviteSearchQuery(inviteSearchQuery)
+    }, 150)
+    return () => clearTimeout(handler)
+  }, [inviteSearchQuery])
 
   // --- Search Logic: Spaces ---
   useEffect(() => {
@@ -1202,9 +1210,9 @@ export default function CollaborationApp() {
   useEffect(() => {
     ;(async () => {
       // 1. "Add Friend" Modal: Global Search for NEW friends
-      if (showAddFriendModal && inviteSearchQuery.length > 0) {
+      if (showAddFriendModal && debouncedInviteSearchQuery.length > 0) {
         try {
-          const users = await Storage.searchUsersByName(inviteSearchQuery)
+          const users = await Storage.searchUsersByName(debouncedInviteSearchQuery)
           const safeUsers = Array.isArray(users) ? users : []
           const results = safeUsers.filter(
             u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
@@ -1236,6 +1244,7 @@ export default function CollaborationApp() {
       }
     })()
   }, [
+    debouncedInviteSearchQuery,
     inviteSearchQuery,
     showAddFriendModal,
     showAddToSpaceModal,
@@ -4789,13 +4798,13 @@ export default function CollaborationApp() {
                             key={file.id}
                             className="relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 bg-slate-50 border-slate-200"
                           >
-                            {file.source === "drive" ? (
+                            {file.source === "drive" || file.source === "gmail" ? (
                               <img
-                                src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg"
+                                src={file.iconLink || GoogleService.getAppIcon(GoogleService.getAppTypeFromMime(file.type)).iconUrl || "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png"}
                                 className="w-6 h-6"
-                                alt="Drive"
+                                alt={file.source === "gmail" ? "Gmail" : "Drive"}
                               />
-                            ) : file.type.startsWith("image/") && (file.previewUrl || file.url) ? (
+                            ) : file.type && file.type.startsWith("image/") && (file.previewUrl || file.url) ? (
                               <img
                                 src={file.url || file.previewUrl}
                                 className="w-10 h-10 rounded-xl object-cover"
@@ -6060,7 +6069,8 @@ export default function CollaborationApp() {
                               >
                                 {/* Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${appIcon.color}`}>
-                                  <span className="text-xl">{appIcon.emoji}</span>
+                                  <img src={doc.iconLink || appIcon.iconUrl} alt={appType} className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{appIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
@@ -6100,15 +6110,19 @@ export default function CollaborationApp() {
                             <FileText className="w-4 h-4 text-indigo-500" /> Shared in Chats
                           </h4>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {sharedChatDocs.map((attachment, idx) => (
+                            {sharedChatDocs.map((attachment, idx) => {
+                              const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
+                              const attAppIcon = GoogleService.getAppIcon(attAppType)
+                              return (
                               <div 
                                 key={attachment.id || `${attachment.name}-${idx}`} 
                                 className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
                                 onClick={() => openAttachment(attachment)}
                               >
                                 {/* Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">📎</span>
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
+                                  <img src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{attAppIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
@@ -6142,7 +6156,8 @@ export default function CollaborationApp() {
                                   <Plus className="w-4 h-4" />
                                 </button>
                               </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}
@@ -6156,14 +6171,18 @@ export default function CollaborationApp() {
                             </h4>
                           )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {gmailAttachments.map((attachment, idx) => (
+                            {gmailAttachments.map((attachment, idx) => {
+                              const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
+                              const gmailAppIcon = GoogleService.getAppIcon(gmailAppType)
+                              return (
                               <div
                                 key={`gmail-${attachment.messageId}-${attachment.id}-${idx}`}
                                 className="group flex items-center gap-3 p-3 rounded-xl border border-red-100 bg-white hover:border-red-300 hover:shadow-md transition-all"
                               >
                                 {/* File Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">{attachment.fileIcon || '📎'}</span>
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${gmailAppIcon.color}`}>
+                                  <img src={gmailAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{gmailAppIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
@@ -6232,7 +6251,8 @@ export default function CollaborationApp() {
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}
