@@ -2971,27 +2971,34 @@ export default function CollaborationApp() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-purple-50 text-slate-900">
-        <div className="w-full max-w-md animate-fade-in relative z-10">
+      <div className="min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 text-slate-900">
+        {/* Animated background elements */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-purple-400/30 to-pink-400/30 rounded-full blur-3xl animate-float"></div>
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-br from-indigo-400/30 to-blue-400/30 rounded-full blur-3xl animate-float" style={{animationDelay: '1s'}}></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-br from-violet-300/20 to-fuchsia-300/20 rounded-full blur-3xl"></div>
+        </div>
+        
+        <div className="w-full max-w-md animate-fade-in-up relative z-10">
           <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-105 hover:rotate-6 transition-all duration-300 bg-gradient-to-tr from-indigo-600 to-purple-600 shadow-indigo-200">
-              <Sparkles className="w-12 h-12 text-white" />
+            <div className="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-110 hover:rotate-6 transition-all duration-500 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50 animate-float">
+              <Sparkles className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h1 className="text-5xl font-extrabold mb-3 tracking-tight text-slate-900">
+            <h1 className="text-5xl font-extrabold mb-3 tracking-tight bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
               Spaces
             </h1>
-            <p className="text-lg font-medium text-slate-500">
+            <p className="text-lg font-medium text-slate-600">
               Where squads and pros collide.
             </p>
           </div>
 
-          <div className="rounded-[2rem] overflow-hidden p-1 bg-white/80 backdrop-blur-xl shadow-2xl border border-white/50">
-            <div className="flex p-1 rounded-[1.8rem] mb-2 bg-slate-100">
+          <div className="rounded-[2rem] overflow-hidden p-1 bg-white/70 backdrop-blur-2xl shadow-2xl shadow-purple-200/50 border border-white/60 hover:shadow-purple-300/60 transition-shadow duration-500">
+            <div className="flex p-1.5 rounded-[1.6rem] mb-2 bg-slate-100/80">
               <button
                 onClick={() => setAuthMode("login")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-3xl transition-all duration-300 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                   authMode === "login"
-                    ? "bg-white text-indigo-600 shadow-sm"
+                    ? "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
                     : "text-slate-400 hover:text-slate-600"
                 }`}
               >
@@ -2999,9 +3006,9 @@ export default function CollaborationApp() {
               </button>
               <button
                 onClick={() => setAuthMode("signup")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-3xl transition-all duration-300 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                   authMode === "signup"
-                    ? "bg-white text-indigo-600 shadow-sm"
+                    ? "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
                     : "text-slate-400 hover:text-slate-600"
                 }`}
               >
@@ -3087,7 +3094,7 @@ export default function CollaborationApp() {
               )}
               <button
                 type="submit"
-                className="w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 bg-indigo-600 hover:bg-indigo-700 text-white hover:shadow-lg hover:shadow-indigo-500/30"
+                className="w-full py-4 font-bold rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 text-white shadow-xl shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]"
               >
                 {authMode === "login" ? (
                   <>
@@ -3136,34 +3143,35 @@ export default function CollaborationApp() {
   const { daysInMonth, firstDay } = getDaysInMonth(currentDate)
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans transition-colors duration-300 text-slate-900 bg-slate-50">
+    <div className="flex h-screen overflow-hidden font-sans transition-colors duration-300 text-slate-900 bg-gradient-to-br from-slate-50 via-indigo-50/30 to-purple-50/40 mesh-gradient">
       {/* ... (Incoming Call Modal) ... */}
       {incomingCall && (
-        <div className="fixed inset-0 z-[60] backdrop-blur-xl flex flex-col items-center justify-center animate-fade-in bg-slate-900/80">
+        <div className="fixed inset-0 z-[60] backdrop-blur-2xl flex flex-col items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/90 via-purple-900/80 to-slate-900/90">
           <div className="text-center mb-12">
             <div className="relative inline-block mb-8">
-              <div className="absolute inset-0 bg-pink-500 rounded-full animate-ping opacity-50 blur-xl"></div>
-              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20">
+              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-xl"></div>
+              <div className="absolute inset-[-8px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full animate-pulse opacity-60 blur-lg"></div>
+              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20 shadow-purple-500/50">
                 {incomingCall.fromAvatar}
               </div>
             </div>
             <h2 className="text-4xl font-bold text-white mb-3 tracking-tight">
               {incomingCall.fromName}
             </h2>
-            <p className="text-pink-300 text-lg font-medium animate-pulse">
+            <p className="text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text text-lg font-medium animate-pulse">
               Incoming Video Call...
             </p>
           </div>
           <div className="flex items-center gap-10">
             <button
               onClick={declineCall}
-              className="w-20 h-20 rounded-full bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md transition-all hover:scale-110"
+              className="w-20 h-20 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-110 hover:shadow-red-500/40"
             >
               <PhoneOff className="w-8 h-8" />
             </button>
             <button
               onClick={answerCall}
-              className="w-24 h-24 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white flex items-center justify-center shadow-2xl shadow-emerald-500/30 transition-all hover:scale-110 animate-bounce"
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-2xl shadow-emerald-500/50 transition-all duration-300 hover:scale-110 animate-bounce"
             >
               <Video className="w-10 h-10" />
             </button>
@@ -3173,13 +3181,13 @@ export default function CollaborationApp() {
 
       {/* Video Call Modal */}
       {showVideoModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-6 w-full max-w-lg shadow-2xl bg-white ring-1 ring-slate-900/5">
+        <div className="fixed inset-0 backdrop-blur-xl flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/50">
+          <div className="rounded-[2rem] p-6 w-full max-w-lg shadow-2xl bg-white/95 backdrop-blur-2xl ring-1 ring-white/50 shadow-purple-200/30">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-3xl font-bold text-slate-800">Start Video Call</h3>
+              <h3 className="text-3xl font-bold bg-gradient-to-r from-slate-800 to-indigo-700 bg-clip-text text-transparent">Start Video Call</h3>
               <button
                 onClick={() => setShowVideoModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className="p-2 rounded-xl transition-all duration-200 hover:bg-slate-100 hover:shadow-md text-slate-500"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -3189,13 +3197,13 @@ export default function CollaborationApp() {
               <button
                 onClick={() => createMeetCall({ callEveryone: true })}
                 disabled={callCreating}
-                className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                className="flex-1 py-3 rounded-2xl font-bold bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 disabled:opacity-60 shadow-lg shadow-indigo-200/50 transition-all duration-300 hover:shadow-indigo-300/60 hover:scale-[1.02]"
               >
                 Call Everyone
               </button>
               <button
                 onClick={() => setSelectedCallMembers([])}
-                className="py-3 px-4 rounded-2xl font-bold border bg-white"
+                className="py-3 px-4 rounded-2xl font-bold border-2 border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/50 transition-all duration-200"
               >
                 Select Members
               </button>
@@ -3419,10 +3427,10 @@ export default function CollaborationApp() {
       <div
         className={`${
           sidebarCollapsed ? "w-20" : "w-80"
-        } flex flex-col transition-all duration-300 z-20 flex-shrink-0 bg-white border-r border-slate-200/60`}
+        } flex flex-col transition-all duration-300 z-20 flex-shrink-0 bg-white/80 backdrop-blur-xl border-r border-slate-200/60 shadow-xl shadow-slate-200/20`}
       >
         {/* ... (Sidebar Content) ... */}
-        <div className="p-6 flex items-center justify-between h-[80px] border-b border-slate-100">
+        <div className="p-6 flex items-center justify-between h-[80px] border-b border-slate-100/80">
           {!sidebarCollapsed && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -3435,7 +3443,7 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <div className="p-2 rounded-xl shadow-lg transition-all bg-indigo-600 shadow-indigo-200">
+              <div className="p-2.5 rounded-2xl shadow-lg transition-all bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-indigo-300/50 group-hover:shadow-indigo-400/60 group-hover:scale-105 animate-gradient">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
               <h1 className="font-extrabold text-xl tracking-tight text-slate-800">
@@ -3470,7 +3478,7 @@ export default function CollaborationApp() {
                 placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/50 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800"
+                className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/70 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 text-slate-800 hover:bg-slate-100 hover:border-slate-300 placeholder:text-slate-400"
               />
             </div>
           </div>
@@ -3591,17 +3599,17 @@ export default function CollaborationApp() {
                         setActiveSpace(null)
                       }
                     }}
-                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-200 mb-6 group ${
+                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
                       activeView === "calendar"
-                        ? "bg-white shadow-md shadow-indigo-100 border border-indigo-50 text-indigo-600"
-                        : "hover:bg-slate-100/80 border border-transparent text-slate-600"
+                        ? "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100 text-indigo-600"
+                        : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md text-slate-600"
                     }`}
                   >
                     <div
-                      className={`p-2.5 rounded-xl transition-colors ${
+                      className={`p-2.5 rounded-xl transition-all duration-300 ${
                         activeView === "calendar"
-                          ? "bg-indigo-500 text-white"
-                          : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                          ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50"
+                          : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600"
                       }`}
                     >
                       <Calendar className="w-5 h-5" />
@@ -3623,10 +3631,10 @@ export default function CollaborationApp() {
                   {spaces.map(space => (
                     <div key={space.id} className="mb-2">
                       <div
-                        className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 group ${
+                        className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 group hover-lift ${
                           activeView === "channel" && activeSpace === space.id
-                            ? "bg-white shadow-md shadow-indigo-100 border border-indigo-50"
-                            : "hover:bg-slate-100/80 border border-transparent"
+                            ? "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100"
+                            : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md"
                         }`}
                         onClick={() => {
                           setActiveSpace(space.id)
@@ -3636,16 +3644,16 @@ export default function CollaborationApp() {
                         }}
                       >
                         <div
-                          className={`p-2.5 rounded-xl transition-colors ${
+                          className={`p-2.5 rounded-xl transition-all duration-300 ${
                             activeSpace === space.id
-                              ? "bg-indigo-100 text-indigo-600"
-                              : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                              ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50"
+                              : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600"
                           }`}
                         >
                           {space.icon}
                         </div>
                         <span
-                          className={`font-semibold text-sm truncate flex-1 ${
+                          className={`font-semibold text-sm truncate flex-1 transition-colors ${
                             activeSpace === space.id
                               ? "text-slate-900"
                               : "text-slate-600"
@@ -3725,18 +3733,18 @@ export default function CollaborationApp() {
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-3 w-full px-3 py-2 rounded-xl text-[13px] font-medium transition-all ${
+                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
-                                    ? "bg-indigo-50 text-indigo-600"
-                                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                                    ? "bg-gradient-to-r from-indigo-50 to-purple-50/50 text-indigo-600 shadow-sm"
+                                    : "text-slate-500 hover:text-slate-800 hover:bg-white/80 hover:shadow-sm"
                                 }`}
                               >
                                 <Hash
-                                  className={`w-4 h-4 ${
+                                  className={`w-4 h-4 transition-colors ${
                                     activeChannel === channel.id
-                                      ? "text-indigo-400"
-                                      : "text-slate-300"
+                                      ? "text-indigo-500"
+                                      : "text-slate-300 group-hover/channel:text-indigo-400"
                                   }`}
                                 />
                                 <span className="truncate flex-1 text-left">
@@ -3975,7 +3983,7 @@ export default function CollaborationApp() {
                     setSelectedDate(new Date())
                     setShowEventModal(true)
                   }}
-                  className="px-6 py-3 rounded-2xl font-bold text-sm shadow-lg hover:scale-105 transition-all flex items-center gap-2 bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700"
+                  className="px-6 py-3 rounded-2xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-300 flex items-center gap-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white shadow-purple-300/40 hover:shadow-purple-400/50"
                 >
                   <Plus className="w-5 h-5" /> New Event
                 </button>
@@ -4077,11 +4085,11 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header */}
-            <div className="h-[90px] sticky top-0 z-30 flex items-center justify-between px-10 border-b bg-white backdrop-blur-xl border-slate-200 shadow-sm">
+            <div className="h-[90px] sticky top-0 z-30 flex items-center justify-between px-10 border-b bg-white/80 backdrop-blur-xl border-slate-200/60 shadow-sm shadow-slate-100/50">
               {/* ... (Header Content) ... */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className="flex items-center gap-5 cursor-pointer group py-2.5 px-4 -ml-4 rounded-2xl transition-all hover:bg-gradient-to-r hover:from-slate-50 hover:to-white hover:shadow-md"
+                className="flex items-center gap-5 cursor-pointer group py-2.5 px-4 -ml-4 rounded-2xl transition-all duration-300 hover:bg-gradient-to-r hover:from-slate-50 hover:to-indigo-50/50 hover:shadow-lg hover:shadow-indigo-100/30"
               >
                 {activeView === "dm" ? (
                   <div className="flex items-center gap-5">
@@ -4226,7 +4234,7 @@ export default function CollaborationApp() {
                       setSelectedInviteUsers([])
                       setShowAddToSpaceModal(true)
                     }}
-                    className="hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white hover:from-slate-800 hover:via-slate-700 hover:to-slate-800"
+                    className="hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]"
                   >
                     <UserPlus className="w-4 h-4" />
                     <span>Invite Members</span>
@@ -4504,10 +4512,10 @@ export default function CollaborationApp() {
                             <div className="flex-shrink-0 w-10 flex flex-col items-center">
                               {!isSequence ? (
                                 <div
-                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ${
+                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ring-white/50 ${
                                     isMe
-                                      ? "bg-indigo-50 border-white"
-                                      : "bg-white border-white text-sm"
+                                      ? "bg-gradient-to-br from-indigo-100 to-purple-100 border-white"
+                                      : "bg-gradient-to-br from-white to-slate-50 border-white text-sm"
                                   } ${isMe ? "text-indigo-600" : ""}`}
                                 >
                                   {renderAvatar(user, 36)}
@@ -4545,11 +4553,11 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative px-5 py-3 text-[15px] leading-relaxed break-words shadow-lg backdrop-blur-sm ${
+                              className={`relative px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 hover:scale-[1.01] ${
                                   isMe
-                                    ? "bg-indigo-600 text-white rounded-2xl rounded-tr-sm"
-                                    : "bg-white text-slate-800 rounded-2xl rounded-tl-sm"
-                                } ${pinnedMessageId === msg.id ? 'ring-2 ring-indigo-400 ring-offset-2' : ''}`}
+                                    ? "bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 text-white rounded-2xl rounded-tr-sm shadow-lg shadow-indigo-300/40"
+                                    : "bg-white/95 backdrop-blur-sm text-slate-800 rounded-2xl rounded-tl-sm shadow-lg shadow-slate-200/50 border border-slate-100/80"
+                                } ${pinnedMessageId === msg.id ? 'ring-2 ring-indigo-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 {msg.text && (
                                   <div>
@@ -4787,16 +4795,16 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className="p-6 pt-2 bg-slate-50/50 backdrop-blur-sm">
+                <div ref={messageInputRef} className="p-6 pt-2 bg-gradient-to-t from-slate-50/80 to-transparent backdrop-blur-sm">
                   {/* ... (Input UI) ... */}
-                  <div className="rounded-[2rem] p-2 relative transition-all focus-within:ring-2 bg-white shadow-xl shadow-slate-200/50 border border-slate-100 focus-within:ring-indigo-500/20 focus-within:border-indigo-400">
+                  <div className="rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 bg-white/95 backdrop-blur-xl shadow-xl shadow-slate-200/30 border border-slate-200/60 focus-within:ring-indigo-500/30 focus-within:border-indigo-400 focus-within:shadow-indigo-100/30 hover:shadow-2xl hover:shadow-slate-200/40">
                     {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
-                      <div className="flex gap-3 p-3 mb-2 overflow-x-auto border-b border-slate-100">
+                      <div className="flex gap-3 p-3 mb-2 overflow-x-auto border-b border-slate-100/80">
                         {selectedFiles.map(file => (
                           <div
                             key={file.id}
-                            className="relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 bg-slate-50 border-slate-200"
+                            className="relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 bg-gradient-to-br from-slate-50 to-white border-slate-200/80 hover:border-indigo-200 hover:shadow-md transition-all duration-200"
                           >
                             {file.source === "drive" || file.source === "gmail" ? (
                               <img
@@ -4889,7 +4897,7 @@ export default function CollaborationApp() {
                             selectedFiles.length === 0) ||
                           isUploading
                         }
-                        className="p-3 mb-1 rounded-2xl shadow-lg transition-all active:scale-90 transform bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white shadow-indigo-200"
+                        className="p-3.5 mb-1 rounded-2xl shadow-lg transition-all duration-300 active:scale-90 transform bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 text-white shadow-indigo-300/50 hover:shadow-indigo-400/60 hover:scale-105"
                       >
                         <Send className="w-5 h-5 ml-0.5" />
                       </button>
@@ -4903,17 +4911,17 @@ export default function CollaborationApp() {
 
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
-                className={`border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-30 border-slate-200 bg-white shadow-2xl ${
+                className={`border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-30 border-slate-200/60 bg-white/90 backdrop-blur-xl shadow-2xl shadow-slate-300/20 ${
                   showMemberDetails
                     ? "w-80 translate-x-0"
                     : "w-0 translate-x-full opacity-0 overflow-hidden"
                 }`}
               >
-                <div className="h-[80px] flex items-center justify-between px-6 border-b border-slate-100 bg-slate-50/50">
+                <div className="h-[80px] flex items-center justify-between px-6 border-b border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-indigo-50/30">
                   <h3 className="font-bold text-lg text-slate-800">Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
-                    className="p-2 rounded-full transition-colors hover:bg-slate-200 text-slate-500"
+                    className="p-2 rounded-xl transition-all duration-200 hover:bg-white hover:shadow-md text-slate-500 hover:text-slate-700"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -5063,16 +5071,16 @@ export default function CollaborationApp() {
       </div>
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className="hidden lg:flex flex-col w-80 border-l border-slate-200/60 bg-white z-20">
-        <div className="p-6 h-[80px] border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-extrabold text-lg text-slate-800">Friends</h3>
+      <div className="hidden lg:flex flex-col w-80 border-l border-slate-200/60 bg-white/80 backdrop-blur-xl z-20 shadow-xl shadow-slate-200/20">
+        <div className="p-6 h-[80px] border-b border-slate-100/80 flex items-center justify-between bg-gradient-to-r from-transparent to-purple-50/30">
+          <h3 className="font-extrabold text-lg bg-gradient-to-r from-slate-800 to-indigo-800 bg-clip-text text-transparent">Friends</h3>
           <button
             onClick={() => {
               setInviteSearchQuery("")
               setSelectedFriendInvitees([])
               setShowAddFriendModal(true)
             }}
-            className="p-2 rounded-xl transition-all hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+            className="p-2.5 rounded-xl transition-all duration-200 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600 hover:shadow-md"
           >
             <UserPlus className="w-5 h-5" />
           </button>
@@ -5086,7 +5094,7 @@ export default function CollaborationApp() {
               placeholder="Filter friends..."
               value={dmSearchQuery}
               onChange={e => setDmSearchQuery(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/50 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800"
+              className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/70 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 text-slate-800 hover:bg-slate-100 hover:border-slate-300 placeholder:text-slate-400"
             />
           </div>
         </div>
@@ -5172,21 +5180,21 @@ export default function CollaborationApp() {
                   setActiveView("dm")
                   justSwitchedThreadRef.current = true
                 }}
-                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
+                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 border hover-lift ${
                   activeView === "dm" && activeDMUser === friend.id
-                    ? "bg-indigo-50 border-indigo-100"
-                    : "bg-white border-transparent hover:bg-slate-50"
+                    ? "bg-gradient-to-r from-indigo-50 to-purple-50/50 border-indigo-100/80 shadow-md shadow-indigo-100/50 ring-1 ring-indigo-100"
+                    : "bg-white/80 border-transparent hover:bg-white hover:border-slate-200/50 hover:shadow-md"
                 }`}
               >
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm bg-white border border-slate-100 overflow-hidden">
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center text-lg shadow-md bg-gradient-to-br from-white to-slate-50 border-2 border-white overflow-hidden ring-2 ring-slate-100/50">
                     {renderAvatar(friend, 40)}
                   </div>
                   <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                    className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${
                       friend.status === "online"
-                        ? "bg-emerald-500"
-                        : "bg-slate-300"
+                        ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                        : "bg-gradient-to-br from-slate-300 to-slate-400"
                     }`}
                   ></span>
                 </div>
@@ -5194,7 +5202,7 @@ export default function CollaborationApp() {
                   <div className="text-sm font-bold truncate text-slate-700">
                     {friend.name}
                   </div>
-                  <div className="text-xs text-slate-400 truncate">
+                  <div className={`text-xs truncate ${friend.status === "online" ? "text-emerald-500 font-medium" : "text-slate-400"}`}>
                     {friend.status === "online" ? "Online" : "Offline"}
                   </div>
                 </div>
@@ -5894,15 +5902,15 @@ export default function CollaborationApp() {
 
       {/* Docs Modal */}
       {showDocsModal && (
-        <div className="fixed inset-0 backdrop-blur-lg flex items-center justify-center z-50 p-4 md:p-6 animate-fade-in bg-slate-900/50">
-          <div className="rounded-[2rem] p-6 md:p-8 w-full max-w-6xl max-h-[90vh] shadow-2xl bg-gradient-to-br from-white to-slate-50/50 ring-1 ring-slate-200/50 flex flex-col backdrop-blur-xl">
+        <div className="fixed inset-0 backdrop-blur-xl flex items-center justify-center z-50 p-4 md:p-6 animate-fade-in bg-slate-900/50">
+          <div className="rounded-[2rem] p-6 md:p-8 w-full max-w-6xl max-h-[90vh] shadow-2xl bg-white/95 backdrop-blur-2xl ring-1 ring-white/50 flex flex-col shadow-purple-200/30">
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-4">
-                <div className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-200">
+                <div className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-300/50">
                   <FileText className="w-7 h-7 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-3xl font-bold text-slate-800">
+                  <h3 className="text-3xl font-bold bg-gradient-to-r from-slate-800 to-indigo-700 bg-clip-text text-transparent">
                     My Documents
                   </h3>
                   <p className="text-sm text-slate-500 mt-0.5">Access your Google Drive files and Gmail attachments</p>
@@ -5910,7 +5918,7 @@ export default function CollaborationApp() {
                 {googleAccessToken && (
                   <button
                     onClick={() => setShowConnectAppsModal(true)}
-                    className="ml-auto px-5 py-2.5 text-sm font-bold rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 transition-all flex items-center gap-2 border border-indigo-100 shadow-sm hover:shadow-md"
+                    className="ml-auto px-5 py-2.5 text-sm font-bold rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 transition-all duration-300 flex items-center gap-2 border border-indigo-100 shadow-sm hover:shadow-lg hover:shadow-indigo-100/50 hover:scale-[1.02]"
                   >
                     <Plus className="w-4 h-4" />
                     Connect More Apps
@@ -5919,7 +5927,7 @@ export default function CollaborationApp() {
               </div>
               <button
                 onClick={() => setShowDocsModal(false)}
-                className="p-2.5 rounded-xl transition-all hover:bg-slate-100 text-slate-400 hover:text-slate-600 hover:rotate-90 duration-300"
+                className="p-2.5 rounded-xl transition-all duration-300 hover:bg-slate-100 text-slate-400 hover:text-slate-600 hover:rotate-90 hover:shadow-md"
               >
                 <X className="w-6 h-6" />
               </button>
