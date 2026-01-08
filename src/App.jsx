@@ -3372,33 +3372,39 @@ export default function CollaborationApp() {
                           avatar_preset: selectedPreset || null
                         }
 
-                        const res = await Storage.updateUser(uid, updates)
-
-                        // Merge backend response (which may be partial) with local stored user
-                        const updatedFromRes = (res && typeof res === 'object') ? (res.user || res || {}) : {}
-                        const merged = { ...stored, ...updates, ...updatedFromRes }
-
-                        // Persist merged user locally and update state/collections
-                        saveAuth(merged, getToken())
-                        setCurrentUser(merged)
-                        syncUserCollections(merged)
-
-                        // Broadcast avatar update to friends/members via notification
-                        try {
-                          await Storage.broadcastAvatarUpdate(uid, {
-                            avatar_url: merged.avatar_url,
-                            avatar_preset: merged.avatar_preset,
-                            name: merged.name
-                          })
-                        } catch (e) {
-                          console.error('Failed to broadcast avatar update', e)
-                        }
-
+                        // Optimistically update UI immediately for fast feedback
+                        const optimisticMerged = { ...stored, ...updates }
+                        saveAuth(optimisticMerged, getToken())
+                        setCurrentUser(optimisticMerged)
+                        syncUserCollections(optimisticMerged)
                         setShowProfileModal(false)
+                        setIsSavingProfile(false)
+
+                        // Perform backend save in background (non-blocking)
+                        Storage.updateUser(uid, updates).then(res => {
+                          // Merge backend response (which may be partial) with local stored user
+                          const updatedFromRes = (res && typeof res === 'object') ? (res.user || res || {}) : {}
+                          const merged = { ...optimisticMerged, ...updatedFromRes }
+                          saveAuth(merged, getToken())
+                          setCurrentUser(merged)
+                          syncUserCollections(merged)
+                        }).catch(err => {
+                          console.error('Backend save failed', err)
+                        })
+
+                        // Broadcast avatar update to friends/members via notification (non-blocking)
+                        Storage.broadcastAvatarUpdate(uid, {
+                          avatar_url: updates.avatar_url,
+                          avatar_preset: updates.avatar_preset,
+                          name: optimisticMerged.name
+                        }).catch(e => {
+                          console.error('Failed to broadcast avatar update', e)
+                        })
+
                       } catch (err) {
                         console.error("save profile failed", err)
+                        setIsSavingProfile(false)
                       }
-                      setIsSavingProfile(false)
                     }}
                     disabled={isSavingProfile}
                     className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow disabled:opacity-60"
@@ -4109,9 +4115,9 @@ export default function CollaborationApp() {
                       <h2 className="font-bold text-2xl leading-tight tracking-tight text-slate-800">
                         {getActiveViewName()}
                       </h2>
-                      <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-emerald-600 mt-0.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300"></span>{" "}
-                        Online
+                      <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : "text-slate-400"}`}>
+                        <span className={`w-2 h-2 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300" : "bg-slate-400"}`}></span>{" "}
+                        {getUser(activeDMUser)?.status === "online" ? "Online" : "Offline"}
                       </p>
                     </div>
                   </div>
@@ -5606,8 +5612,8 @@ export default function CollaborationApp() {
       {/* Add To Channel Modal - Invite Member logic */}
       {showAddToSpaceModal && (
         <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <div className="flex items-center justify-between mb-8">
+          <div className="rounded-[2rem] p-8 w-full max-w-md max-h-[90vh] shadow-2xl bg-white ring-1 ring-slate-900/5 flex flex-col">
+            <div className="flex items-center justify-between mb-8 flex-shrink-0">
               <h3 className="text-3xl font-bold text-slate-800">
                 Invite Members
               </h3>
@@ -5620,7 +5626,7 @@ export default function CollaborationApp() {
             </div>
 
             {!inviteSent ? (
-              <div className="space-y-6">
+              <div className="space-y-6 flex-1 overflow-hidden flex flex-col">
                 {friends.length === 0 ? (
                   <div className="text-center py-8">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
@@ -5690,7 +5696,7 @@ export default function CollaborationApp() {
                       )}
                     </div>
                     {selectedInviteUsers.length > 0 && (
-                      <div className="p-4 rounded-2xl border bg-indigo-50 border-indigo-100">
+                      <div className="p-4 rounded-2xl border bg-indigo-50 border-indigo-100 max-h-32 overflow-y-auto flex-shrink-0">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-500 mb-2">
                           Selected ({selectedInviteUsers.length})
                         </p>
@@ -5718,14 +5724,14 @@ export default function CollaborationApp() {
                     <button
                       onClick={addFriendsToChannel}
                       disabled={selectedInviteUsers.length === 0}
-                      className="w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200"
+                      className="w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 flex-shrink-0"
                     >
                       <UserPlus className="w-5 h-5" />
                       Add {selectedInviteUsers.length} Member
                       {selectedInviteUsers.length !== 1 ? "s" : ""}
                     </button>
 
-                    <div className="text-center mt-2">
+                    <div className="text-center mt-2 flex-shrink-0">
                       <button
                         onClick={() => {
                           setShowAddToSpaceModal(false)
