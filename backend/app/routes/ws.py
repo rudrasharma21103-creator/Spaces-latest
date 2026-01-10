@@ -88,7 +88,16 @@ async def websocket_notifications(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            # For notifications we route to the specific user id
+            # Handle WebRTC signaling - route to target user
+            msg_type = data.get('type', '')
+            if msg_type.startswith('webrtc-') or msg_type == 'ice-candidate':
+                target_user_id = data.get('targetUserId')
+                if target_user_id:
+                    logger.info(f"WebRTC signaling: {msg_type} from {user_id} to {target_user_id}")
+                    await manager.send_to_user(str(target_user_id), data)
+                continue
+            
+            # For other notifications we route to the specific user id
             if user_id:
                 await manager.send_to_user(user_id, data)
     except WebSocketDisconnect:
