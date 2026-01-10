@@ -42,7 +42,8 @@ import {
   Download,
   Clock,
   Sun,
-  Moon
+  Moon,
+  Monitor
 } from "lucide-react"
 import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
@@ -230,8 +231,25 @@ export default function CollaborationApp() {
   const [incomingCall, setIncomingCall] = useState(null)
   const videoRef = useRef(null)
   const incomingTimeoutRef = useRef(null)
-  // Feature flag to disable live video calls in channels and chats
-  const VIDEO_ENABLED = false
+  // Feature flag to enable live video calls in channels and chats
+  const VIDEO_ENABLED = true
+
+  // WebRTC Video Call State
+  const [showWebRTCCall, setShowWebRTCCall] = useState(false)
+  const [showAddFriendsToCall, setShowAddFriendsToCall] = useState(false)
+  const [webrtcCallStatus, setWebrtcCallStatus] = useState('idle') // 'idle' | 'calling' | 'ringing' | 'connected' | 'ended'
+  const [webrtcCallPartner, setWebrtcCallPartner] = useState(null)
+  const [localStream, setLocalStream] = useState(null)
+  const [remoteStream, setRemoteStream] = useState(null)
+  const [webrtcError, setWebrtcError] = useState(null)
+  const [isWebRTCMicOn, setIsWebRTCMicOn] = useState(true)
+  const [isWebRTCVideoOn, setIsWebRTCVideoOn] = useState(true)
+  const localVideoRef = useRef(null)
+  const remoteVideoRef = useRef(null)
+  const peerConnectionRef = useRef(null)
+  const pendingIceCandidatesRef = useRef([])
+  const callSocketRef = useRef(null)
+  const userSocketRef = useRef(null)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -939,6 +957,40 @@ export default function CollaborationApp() {
           userSocket = connectUserSocket(data => {
             if (!data || !data.type) return
 
+            // Handle WebRTC signaling messages via notification socket
+            if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
+              console.log('WebRTC signaling via user socket:', data.type, data)
+              
+              if (data.type === 'webrtc-call-request') {
+                // Incoming call - check if this message is for current user
+                if (String(data.targetUserId) === String(currentUser?.id)) {
+                  console.log('Incoming WebRTC call from:', data.fromUserName)
+                  // Clear any existing timeout
+                  if (incomingTimeoutRef.current) {
+                    clearTimeout(incomingTimeoutRef.current)
+                    incomingTimeoutRef.current = null
+                  }
+                  setIncomingCall({
+                    id: `webrtc-${Date.now()}`,
+                    fromId: data.fromUserId,
+                    fromName: data.fromUserName,
+                    fromAvatar: data.fromUserAvatar || '👤',
+                    webrtcOffer: data.offer,
+                    isWebRTC: true
+                  })
+                  // Auto-dismiss after 10 seconds if not answered
+                  incomingTimeoutRef.current = setTimeout(() => {
+                    setIncomingCall(null)
+                    incomingTimeoutRef.current = null
+                  }, 10000)
+                }
+              } else {
+                // Handle other WebRTC signaling (answer, ice-candidate, etc.)
+                handleWebRTCSignaling(data)
+              }
+              return
+            }
+
             // Handle global profile updates emitted by server
             if (data.type === 'profileUpdated' && data.userId) {
               const updatedUser = {
@@ -1041,6 +1093,8 @@ export default function CollaborationApp() {
 
             // Presence events and other types could be handled here in future
           })
+          // Store in ref for WebRTC signaling
+          userSocketRef.current = userSocket
         })
         .catch(e => {
           console.error('Failed to connect user socket', e)
@@ -1159,6 +1213,40 @@ export default function CollaborationApp() {
     const ws = connectChatSocket(chatId, data => {
       // Expect data to be a message object; ignore presence updates
       if (!data) return
+      
+      // Handle WebRTC signaling messages inline to avoid stale closure issues
+      if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
+        console.log('WebRTC signaling received:', data.type, data)
+        
+        // Process different signaling message types
+        if (data.type === 'webrtc-call-request') {
+          // Incoming call - check if this message is for current user
+          if (String(data.targetUserId) === String(currentUser?.id)) {
+            console.log('Incoming WebRTC call from:', data.fromUserName)
+            setIncomingCall({
+              id: `webrtc-${Date.now()}`,
+              fromId: data.fromUserId,
+              fromName: data.fromUserName,
+              fromAvatar: data.fromUserAvatar || '👤',
+              webrtcOffer: data.offer,
+              isWebRTC: true
+            })
+            // Auto-dismiss after 10 seconds if not answered
+            if (incomingTimeoutRef.current) {
+              clearTimeout(incomingTimeoutRef.current)
+            }
+            incomingTimeoutRef.current = setTimeout(() => {
+              setIncomingCall(null)
+              incomingTimeoutRef.current = null
+            }, 10000)
+          }
+        } else {
+          // For other signaling messages, delegate to handler
+          handleWebRTCSignaling(data)
+        }
+        return
+      }
+      
       const normalized = { ...data, status: "sent", optimistic: false }
 
       setMessages(prev => {
@@ -1852,6 +1940,48 @@ export default function CollaborationApp() {
         meetingTitle: ev.summary
       })
 
+      // Send a message in the channel/chat with the meeting link
+      if (meetLink) {
+        const chatId = getActiveChatId()
+        if (chatId) {
+          const tempId = `tmp-meet-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+          const meetMessage = {
+            id: tempId,
+            userId: currentUser.id,
+            text: `${currentUser.name} has started a meet: ${meetLink}`,
+            timestamp: new Date().toISOString(),
+            reactions: {},
+            thread: [],
+            attachments: [],
+            type: 'meet-invite',
+            meetLink: meetLink,
+            meetTitle: ev.summary,
+            status: "sending",
+            optimistic: true
+          }
+
+          // Add to local state
+          setMessages(prev => ({
+            ...prev,
+            [chatId]: [...(prev[chatId] || []), meetMessage]
+          }))
+
+          const payload = sanitizeMessagePayload(meetMessage)
+
+          // Send via WebSocket
+          try {
+            if (chatSocketRef.current) {
+              chatSocketRef.current.send(payload)
+            }
+          } catch (wsErr) {
+            console.warn('chat socket send failed', wsErr)
+          }
+
+          // Persist to database
+          persistMessageWithRetry(chatId, payload, tempId, 0)
+        }
+      }
+
       if (meetLink) window.open(meetLink, '_blank')
 
       setShowVideoModal(false)
@@ -1884,6 +2014,391 @@ export default function CollaborationApp() {
       meetingTitle: currentMeeting.event.summary
     })
   }
+
+  // ============================================
+  // WebRTC Video Call Functions
+  // ============================================
+  
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' }
+  ]
+
+  // Initialize WebRTC peer connection
+  const createPeerConnection = (partnerId) => {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const iceMessage = {
+          type: 'ice-candidate',
+          candidate: event.candidate,
+          fromUserId: currentUser?.id,
+          targetUserId: partnerId
+        }
+        // Prefer user socket for reliable delivery
+        if (userSocketRef.current) {
+          userSocketRef.current.send(iceMessage)
+        } else if (chatSocketRef.current) {
+          chatSocketRef.current.send(iceMessage)
+        }
+      }
+    }
+
+    pc.ontrack = (event) => {
+      console.log('Remote track received:', event.streams)
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0])
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState)
+      if (pc.iceConnectionState === 'connected') {
+        setWebrtcCallStatus('connected')
+      } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        endWebRTCCall()
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState)
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        endWebRTCCall()
+      }
+    }
+
+    return pc
+  }
+
+  // Start outgoing video call
+  const startWebRTCCall = async (targetUser) => {
+    if (!currentUser || !targetUser) return
+    
+    setWebrtcError(null)
+    setWebrtcCallPartner(targetUser)
+    setWebrtcCallStatus('calling')
+    setShowWebRTCCall(true)
+
+    try {
+      // Get local media stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      })
+      
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection(targetUser.id)
+      peerConnectionRef.current = pc
+
+      // Add local tracks to peer connection
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream)
+      })
+
+      // Create and send offer
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      // Send call request via user notification socket (works regardless of which chat is open)
+      const callRequest = {
+        type: 'webrtc-call-request',
+        fromUserId: currentUser.id,
+        fromUserName: currentUser.name,
+        fromUserAvatar: currentUser.avatar || currentUser.avatar_url,
+        targetUserId: targetUser.id,
+        offer: pc.localDescription
+      }
+      
+      if (userSocketRef.current) {
+        userSocketRef.current.send(callRequest)
+      } else if (chatSocketRef.current) {
+        // Fallback to chat socket
+        chatSocketRef.current.send(callRequest)
+      }
+
+      // Set timeout for unanswered call
+      setTimeout(() => {
+        if (webrtcCallStatus === 'calling') {
+          setWebrtcError('Call not answered')
+          endWebRTCCall()
+        }
+      }, 60000)
+
+    } catch (err) {
+      console.error('Failed to start video call:', err)
+      setWebrtcError(err.name === 'NotAllowedError' 
+        ? 'Camera/microphone access denied. Please allow access and try again.'
+        : 'Failed to start video call. Please check your camera and microphone.')
+      setWebrtcCallStatus('idle')
+    }
+  }
+
+  // Answer incoming video call
+  const answerWebRTCCall = async () => {
+    if (!incomingCall || !incomingCall.webrtcOffer) return
+
+    // Capture incoming call data before clearing state
+    const callerId = incomingCall.fromId
+    const callerName = incomingCall.fromName
+    const callerAvatar = incomingCall.fromAvatar
+    const offer = incomingCall.webrtcOffer
+
+    setWebrtcError(null)
+    setWebrtcCallPartner({
+      id: callerId,
+      name: callerName,
+      avatar: callerAvatar
+    })
+    setWebrtcCallStatus('connecting')
+    setShowWebRTCCall(true)
+    setIncomingCall(null)
+
+    try {
+      // Get local media stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      })
+      
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection(callerId)
+      peerConnectionRef.current = pc
+
+      // Add local tracks
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream)
+      })
+
+      // Set remote description from offer
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
+
+      // Process any pending ICE candidates
+      for (const candidate of pendingIceCandidatesRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      }
+      pendingIceCandidatesRef.current = []
+
+      // Create and send answer via user socket
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+
+      const answerMessage = {
+        type: 'webrtc-call-answer',
+        fromUserId: currentUser.id,
+        targetUserId: callerId,
+        answer: pc.localDescription
+      }
+      
+      if (userSocketRef.current) {
+        userSocketRef.current.send(answerMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(answerMessage)
+      }
+
+      setWebrtcCallStatus('connected')
+
+    } catch (err) {
+      console.error('Failed to answer video call:', err)
+      setWebrtcError(err.name === 'NotAllowedError'
+        ? 'Camera/microphone access denied.'
+        : 'Failed to answer video call.')
+      endWebRTCCall()
+    }
+  }
+
+  // Decline incoming video call
+  const declineWebRTCCall = () => {
+    if (incomingCall) {
+      const declineMessage = {
+        type: 'webrtc-call-declined',
+        fromUserId: currentUser?.id,
+        targetUserId: incomingCall.fromId
+      }
+      if (userSocketRef.current) {
+        userSocketRef.current.send(declineMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(declineMessage)
+      }
+    }
+    setIncomingCall(null)
+  }
+
+  // End video call
+  const endWebRTCCall = () => {
+    // Stop all local tracks
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop())
+    }
+    setLocalStream(null)
+    setRemoteStream(null)
+
+    // Close peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close()
+      peerConnectionRef.current = null
+    }
+
+    // Notify other party
+    if (webrtcCallPartner) {
+      const endMessage = {
+        type: 'webrtc-call-ended',
+        fromUserId: currentUser?.id,
+        targetUserId: webrtcCallPartner.id
+      }
+      if (userSocketRef.current) {
+        userSocketRef.current.send(endMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(endMessage)
+      }
+    }
+
+    // Reset state
+    setShowWebRTCCall(false)
+    setWebrtcCallStatus('idle')
+    setWebrtcCallPartner(null)
+    setWebrtcError(null)
+    setIsWebRTCMicOn(true)
+    setIsWebRTCVideoOn(true)
+    pendingIceCandidatesRef.current = []
+  }
+
+  // Toggle microphone
+  const toggleWebRTCMic = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0]
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled
+        setIsWebRTCMicOn(audioTrack.enabled)
+      }
+    }
+  }
+
+  // Toggle camera
+  const toggleWebRTCVideo = () => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0]
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled
+        setIsWebRTCVideoOn(videoTrack.enabled)
+      }
+    }
+  }
+
+  // Handle WebRTC signaling messages
+  const handleWebRTCSignaling = async (data) => {
+    console.log('WebRTC signaling:', data.type)
+    
+    switch (data.type) {
+      case 'webrtc-call-request':
+        // Incoming call - show notification
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          setIncomingCall({
+            id: `webrtc-${Date.now()}`,
+            fromId: data.fromUserId,
+            fromName: data.fromUserName,
+            fromAvatar: data.fromUserAvatar || '👤',
+            webrtcOffer: data.offer,
+            isWebRTC: true
+          })
+        }
+        break
+
+      case 'webrtc-call-answer':
+        // Call was answered - set remote description
+        if (peerConnectionRef.current && String(data.targetUserId) === String(currentUser?.id)) {
+          try {
+            await peerConnectionRef.current.setRemoteDescription(
+              new RTCSessionDescription(data.answer)
+            )
+            setWebrtcCallStatus('connected')
+            
+            // Process any pending ICE candidates
+            for (const candidate of pendingIceCandidatesRef.current) {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
+            }
+            pendingIceCandidatesRef.current = []
+          } catch (err) {
+            console.error('Failed to set remote description:', err)
+          }
+        }
+        break
+
+      case 'webrtc-call-declined':
+        // Call was declined
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          setWebrtcError('Call was declined')
+          endWebRTCCall()
+        }
+        break
+
+      case 'webrtc-call-ended':
+        // Other party ended the call
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          endWebRTCCall()
+        }
+        break
+
+      case 'ice-candidate':
+        // ICE candidate received
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+            try {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate))
+            } catch (err) {
+              console.error('Failed to add ICE candidate:', err)
+            }
+          } else {
+            // Queue candidates if remote description not set yet
+            pendingIceCandidatesRef.current.push(data.candidate)
+          }
+        }
+        break
+    }
+  }
+
+  // Attach the signaling handler to WebSocket messages
+  useEffect(() => {
+    if (chatSocketRef.current && chatSocketRef.current._wrapper) {
+      const existingHandler = chatSocketRef.current._wrapper._handlers?.onmessage
+      chatSocketRef.current._wrapper.setOnMessage((data) => {
+        // Handle WebRTC signaling messages
+        if (data && (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate')) {
+          handleWebRTCSignaling(data)
+          return
+        }
+        // Pass to existing handler for regular messages
+        if (existingHandler) existingHandler({ data: JSON.stringify(data) })
+      })
+    }
+  }, [chatSocketRef.current, currentUser?.id])
+
+  // Attach remote stream to video element when it changes
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      console.log('Attaching remote stream to video element')
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  // Attach local stream to video element when it changes
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      console.log('Attaching local stream to video element')
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
 
   // --- Helpers ---
   const formatTime = timestamp => {
@@ -2744,6 +3259,12 @@ export default function CollaborationApp() {
 
   const answerCall = async () => {
     if (incomingCall) {
+      // Handle WebRTC calls
+      if (incomingCall.isWebRTC) {
+        answerWebRTCCall()
+        return
+      }
+
       // If the incoming call has a Meet link (scheduled or meet invite), open it
       if (incomingCall.link) {
         try {
@@ -2770,6 +3291,12 @@ export default function CollaborationApp() {
 
   const declineCall = async () => {
     if (incomingCall) {
+      // Handle WebRTC calls
+      if (incomingCall.isWebRTC) {
+        declineWebRTCCall()
+        return
+      }
+
       // If scheduled event (has link) simply dismiss
       if (incomingCall.link) {
         // Clear any auto-dismiss timer
@@ -3279,37 +3806,41 @@ export default function CollaborationApp() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-all ease-in-out duration-500 ${isDarkMode ? 'dark bg-[var(--bg-primary)] text-[var(--text-primary)]' : 'text-slate-700 bg-[#f4f6fb]'} mesh-gradient`}>
-      {/* ... (Incoming Call Modal) ... */}
+      {/* Incoming Call Popup - Small banner at top */}
       {incomingCall && (
-        <div className="fixed inset-0 z-[60] backdrop-blur-2xl flex flex-col items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/90 via-purple-900/80 to-slate-900/90">
-          <div className="text-center mb-12">
-            <div className="relative inline-block mb-8">
-              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-xl"></div>
-              <div className="absolute inset-[-8px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full animate-pulse opacity-60 blur-lg"></div>
-              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20 shadow-purple-500/50">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
+          <div className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-gradient-to-r from-slate-900/95 via-purple-900/95 to-slate-900/95 backdrop-blur-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/30">
+            {/* Caller Avatar */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-md"></div>
+              <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 border-white/20">
                 {incomingCall.fromAvatar}
               </div>
             </div>
-            <h2 className="text-4xl font-bold text-white mb-3 tracking-tight">
-              {incomingCall.fromName}
-            </h2>
-            <p className="text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text text-lg font-medium animate-pulse">
-              Incoming Video Call...
-            </p>
-          </div>
-          <div className="flex items-center gap-10">
-            <button
-              onClick={declineCall}
-              className="w-20 h-20 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-110 hover:shadow-red-500/40"
-            >
-              <PhoneOff className="w-8 h-8" />
-            </button>
-            <button
-              onClick={answerCall}
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-2xl shadow-emerald-500/50 transition-all duration-300 hover:scale-110 animate-bounce"
-            >
-              <Video className="w-10 h-10" />
-            </button>
+            
+            {/* Caller Info */}
+            <div className="flex flex-col mr-4">
+              <span className="text-white font-bold text-lg">{incomingCall.fromName}</span>
+              <span className="text-purple-300 text-sm font-medium animate-pulse">Incoming Video Call...</span>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={declineCall}
+                className="w-12 h-12 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all duration-200 hover:scale-110"
+                title="Decline"
+              >
+                <PhoneOff className="w-5 h-5" />
+              </button>
+              <button
+                onClick={answerCall}
+                className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all duration-200 hover:scale-110"
+                title="Accept"
+              >
+                <Video className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3380,6 +3911,181 @@ export default function CollaborationApp() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* WebRTC Video Call Modal */}
+      {showWebRTCCall && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/95 via-purple-900/90 to-slate-900/95 backdrop-blur-2xl">
+          {/* In Call Indicator */}
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
+            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></span>
+            <span className="text-white font-bold text-sm uppercase tracking-wider">
+              {webrtcCallStatus === 'calling' ? 'Calling...' : 
+               webrtcCallStatus === 'connecting' ? 'Connecting...' : 
+               webrtcCallStatus === 'connected' ? 'In Call' : 'Call'}
+            </span>
+            <span className="text-white/60 text-sm">with {webrtcCallPartner?.name || 'Unknown'}</span>
+          </div>
+
+          {/* Video Containers */}
+          <div className="relative w-full h-full flex items-center justify-center p-8">
+            {/* Remote Video (Large) */}
+            <div className="relative w-full max-w-5xl aspect-video rounded-3xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-white/10 shadow-2xl shadow-purple-500/20">
+              <video 
+                ref={remoteVideoRef}
+                autoPlay 
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {!remoteStream && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-30 blur-xl"></div>
+                    <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20">
+                      {webrtcCallPartner?.avatar || '👤'}
+                    </div>
+                  </div>
+                  <h3 className="mt-6 text-2xl font-bold text-white">{webrtcCallPartner?.name || 'Unknown'}</h3>
+                  <p className="mt-2 text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
+                    {webrtcCallStatus === 'calling' ? 'Ringing...' : 
+                     webrtcCallStatus === 'connecting' ? 'Connecting...' : 
+                     'Waiting for video...'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Local Video (Small, Picture-in-Picture) */}
+            <div className="absolute bottom-12 right-12 w-64 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/20 shadow-2xl hover:scale-105 transition-transform cursor-move group">
+              <video 
+                ref={localVideoRef}
+                autoPlay 
+                playsInline 
+                muted
+                className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
+              />
+              {!isWebRTCVideoOn && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
+                  <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl">
+                    {currentUser?.avatar || '👤'}
+                  </div>
+                </div>
+              )}
+              <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/50 backdrop-blur-sm">
+                <span className="text-white text-xs font-medium">You</span>
+              </div>
+              {!isWebRTCMicOn && (
+                <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/90">
+                  <MicOff className="w-3 h-3 text-white" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Error Message */}
+          {webrtcError && (
+            <div className="absolute top-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl bg-red-500/20 border border-red-500/50 backdrop-blur-xl">
+              <p className="text-red-300 font-medium">{webrtcError}</p>
+            </div>
+          )}
+
+          {/* Call Controls */}
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6">
+            {/* Toggle Mic */}
+            <button
+              onClick={toggleWebRTCMic}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
+                isWebRTCMicOn 
+                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
+                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
+              }`}
+              title={isWebRTCMicOn ? 'Mute microphone' : 'Unmute microphone'}
+            >
+              {isWebRTCMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
+            </button>
+
+            {/* Toggle Video */}
+            <button
+              onClick={toggleWebRTCVideo}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
+                isWebRTCVideoOn 
+                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
+                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
+              }`}
+              title={isWebRTCVideoOn ? 'Turn off camera' : 'Turn on camera'}
+            >
+              {isWebRTCVideoOn ? <Video className="w-7 h-7" /> : <VideoOff className="w-7 h-7" />}
+            </button>
+
+            {/* End Call */}
+            <button
+              onClick={endWebRTCCall}
+              className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-2xl shadow-red-500/50 transition-all duration-300 hover:scale-110"
+              title="End call"
+            >
+              <PhoneOff className="w-9 h-9" />
+            </button>
+
+            {/* Screen Share (placeholder for future) */}
+            <button
+              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl opacity-50 cursor-not-allowed"
+              title="Screen share (coming soon)"
+              disabled
+            >
+              <Monitor className="w-7 h-7" />
+            </button>
+
+            {/* Add Friends Button */}
+            <button
+              onClick={() => setShowAddFriendsToCall(true)}
+              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl"
+              title="Add friends to call"
+            >
+              <UserPlus className="w-7 h-7" />
+            </button>
+          </div>
+
+          {/* Add Friends Modal */}
+          {showAddFriendsToCall && (
+            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-3xl p-6 shadow-2xl animate-fade-in">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-white">Add Friends to Call</h3>
+                  <button
+                    onClick={() => setShowAddFriendsToCall(false)}
+                    className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id).map(friend => (
+                    <button
+                      key={friend.id}
+                      onClick={() => {
+                        startWebRTCCall(friend)
+                        setShowAddFriendsToCall(false)
+                      }}
+                      className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-white/10 transition-all text-left"
+                    >
+                      <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl">
+                        {friend.avatar || friend.avatar_url || '👤'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-white">{friend.name}</div>
+                        <div className="text-sm text-white/60">{friend.email || ''}</div>
+                      </div>
+                      <Video className="w-5 h-5 text-emerald-400" />
+                    </button>
+                  ))}
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id).length === 0 && (
+                    <p className="text-center text-white/50 py-4">No other friends available</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4395,14 +5101,34 @@ export default function CollaborationApp() {
                   <div className="relative">
                     <button
                       onClick={() => {
-                        setSelectedCallMembers([])
-                        setShowVideoModal(true)
+                        if (activeView === 'dm' && activeDMUser) {
+                          // Start WebRTC call for DMs
+                          const partner = getUser(activeDMUser)
+                          if (partner) {
+                            startWebRTCCall(partner)
+                          }
+                        } else if (activeView === 'channel') {
+                          // For channels, directly create Meet link and send to channel
+                          createMeetCall({ callEveryone: true })
+                        } else {
+                          // Show video modal for other cases
+                          setSelectedCallMembers([])
+                          setShowVideoModal(true)
+                        }
                       }}
-                      className="p-3.5 rounded-2xl transition-all bg-slate-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-600 hover:text-indigo-600 hover:shadow-lg border border-transparent hover:border-indigo-200"
-                      title="Start video call"
+                      className={`p-3.5 rounded-2xl transition-all ${
+                        isDarkMode 
+                          ? 'bg-slate-800 hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400 border border-slate-700 hover:border-purple-600/50' 
+                          : 'bg-slate-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-600 hover:text-indigo-600 border border-transparent hover:border-indigo-200'
+                      } hover:shadow-lg group`}
+                      title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
-                      <Video className="w-5 h-5" />
+                      <Video className="w-5 h-5 group-hover:scale-110 transition-transform" />
                     </button>
+                    {/* In Call Indicator */}
+                    {showWebRTCCall && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse border-2 border-white shadow-lg shadow-red-500/50"></span>
+                    )}
                   </div>
                 )}
 
@@ -4619,16 +5345,34 @@ export default function CollaborationApp() {
 
                   {/* Video Call Icon */}
                   {VIDEO_ENABLED && (
-                    <button
-                      onClick={() => {
-                        setSelectedCallMembers([])
-                        setShowVideoModal(true)
-                      }}
-                      className="p-2.5 rounded-xl transition-all bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600"
-                      title="Video Call"
-                    >
-                      <Video className="w-4 h-4" />
-                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          if (activeView === 'dm' && activeDMUser) {
+                            // Start WebRTC call for DMs
+                            const partner = getUser(activeDMUser)
+                            if (partner) {
+                              startWebRTCCall(partner)
+                            }
+                          } else if (activeView === 'channel') {
+                            // For channels, directly create Meet link and send to channel
+                            createMeetCall({ callEveryone: true })
+                          } else {
+                            // Show video modal for other cases
+                            setSelectedCallMembers([])
+                            setShowVideoModal(true)
+                          }
+                        }}
+                        className="p-2.5 rounded-xl transition-all bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600"
+                        title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                      >
+                        <Video className="w-4 h-4" />
+                      </button>
+                      {/* In Call Indicator */}
+                      {showWebRTCCall && (
+                        <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white shadow-sm"></span>
+                      )}
+                    </div>
                   )}
 
                   {/* Invite Members (Channel only) */}
@@ -5027,7 +5771,36 @@ export default function CollaborationApp() {
                                       : "bg-white/95 backdrop-blur-sm text-slate-800 rounded-2xl rounded-tl-sm shadow-lg shadow-slate-200/50 border border-slate-100/80"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-violet-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-indigo-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
-                                {msg.text && (
+                                {/* Meet Invite Message */}
+                                {msg.type === 'meet-invite' && msg.meetLink && (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+                                        <Video className={`w-5 h-5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
+                                      </div>
+                                      <span className="font-bold">Video Call Started</span>
+                                    </div>
+                                    <p className={`text-sm ${isMe ? 'text-white/90' : isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                      {msg.meetTitle || 'Join the video meeting'}
+                                    </p>
+                                    <a
+                                      href={msg.meetLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all hover:scale-105 ${
+                                        isDarkMode 
+                                          ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/30' 
+                                          : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-200'
+                                      }`}
+                                    >
+                                      <Video className="w-4 h-4" />
+                                      Join Meeting
+                                    </a>
+                                  </div>
+                                )}
+                                
+                                {msg.text && msg.type !== 'meet-invite' && (
                                   <div>
                                     {renderWithHighlight(
                                       msg.text,
@@ -5061,7 +5834,7 @@ export default function CollaborationApp() {
                                     className={`absolute flex gap-1 p-2 rounded-xl shadow-lg z-20 animate-fade-in ${
                                       isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'
                                     }`}
-                                    style={{ left: '-72px', top: '50%', transform: 'translateY(-50%)' }}
+                                    style={{ left: '50%', top: '-48px', transform: 'translateX(-50%)' }}
                                   >
                                     {EMOJIS.map(e => (
                                       <button
