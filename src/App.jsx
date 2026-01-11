@@ -34,6 +34,7 @@ import {
   MicOff,
   VideoOff,
   PhoneOff,
+  Phone,
   Lock,
   ExternalLink,
   ShieldAlert,
@@ -244,12 +245,17 @@ export default function CollaborationApp() {
   const [webrtcError, setWebrtcError] = useState(null)
   const [isWebRTCMicOn, setIsWebRTCMicOn] = useState(true)
   const [isWebRTCVideoOn, setIsWebRTCVideoOn] = useState(true)
+  const [callStartTime, setCallStartTime] = useState(null)
+  const [callDuration, setCallDuration] = useState(0)
+  const [callParticipants, setCallParticipants] = useState([]) // Array of participants in the call
+  const [pendingCallParticipants, setPendingCallParticipants] = useState([]) // Friends being called
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const peerConnectionRef = useRef(null)
   const pendingIceCandidatesRef = useRef([])
   const callSocketRef = useRef(null)
   const userSocketRef = useRef(null)
+  const callTimerRef = useRef(null)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -826,8 +832,8 @@ export default function CollaborationApp() {
       }
     }
 
-    // Reduced polling frequency - WebSocket handles real-time updates
-    const interval = setInterval(pollData, 5000)
+    // Fast polling for real-time notifications
+    const interval = setInterval(pollData, 1000)
     return () => clearInterval(interval)
   }, [
     isAuthenticated,
@@ -956,6 +962,8 @@ export default function CollaborationApp() {
         .then(({ connectUserSocket }) => {
           userSocket = connectUserSocket(data => {
             if (!data || !data.type) return
+            
+            console.log('User socket received message:', data.type, data)
 
             // Handle WebRTC signaling messages via notification socket
             if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
@@ -1095,6 +1103,7 @@ export default function CollaborationApp() {
           })
           // Store in ref for WebRTC signaling
           userSocketRef.current = userSocket
+          console.log('User notification socket connected and stored in ref')
         })
         .catch(e => {
           console.error('Failed to connect user socket', e)
@@ -2116,11 +2125,17 @@ export default function CollaborationApp() {
         offer: pc.localDescription
       }
       
+      console.log('Sending WebRTC call request:', callRequest)
+      
       if (userSocketRef.current) {
+        console.log('Sending via userSocketRef, readyState:', userSocketRef.current.readyState)
         userSocketRef.current.send(callRequest)
       } else if (chatSocketRef.current) {
         // Fallback to chat socket
+        console.log('Sending via chatSocketRef (fallback)')
         chatSocketRef.current.send(callRequest)
+      } else {
+        console.error('No WebSocket available to send call request!')
       }
 
       // Set timeout for unanswered call
@@ -2235,8 +2250,73 @@ export default function CollaborationApp() {
     setIncomingCall(null)
   }
 
+  // Format call duration as mm:ss or hh:mm:ss
+  const formatCallDuration = (seconds) => {
+    const hrs = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Call timer effect
+  useEffect(() => {
+    if (webrtcCallStatus === 'connected' && !callStartTime) {
+      setCallStartTime(Date.now())
+    }
+    
+    if (callStartTime && webrtcCallStatus === 'connected') {
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(Math.floor((Date.now() - callStartTime) / 1000))
+      }, 1000)
+    }
+    
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current)
+        callTimerRef.current = null
+      }
+    }
+  }, [webrtcCallStatus, callStartTime])
+
+  // Add friend to ongoing call
+  const addFriendToCall = async (friend) => {
+    if (!currentUser || !friend) return
+    
+    // Add to pending participants with "calling" status
+    setPendingCallParticipants(prev => [...prev, { ...friend, status: 'calling' }])
+    setShowAddFriendsToCall(false)
+    
+    // Send call request to the friend
+    const callRequest = {
+      type: 'webrtc-call-request',
+      fromUserId: currentUser.id,
+      fromUserName: currentUser.name,
+      fromUserAvatar: currentUser.avatar || currentUser.avatar_url,
+      targetUserId: friend.id,
+      isGroupCall: true
+    }
+    
+    if (userSocketRef.current) {
+      userSocketRef.current.send(callRequest)
+    }
+    
+    // Remove from pending after 10 seconds if not answered
+    setTimeout(() => {
+      setPendingCallParticipants(prev => prev.filter(p => p.id !== friend.id))
+    }, 10000)
+  }
+
   // End video call
   const endWebRTCCall = () => {
+    // Clear call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current)
+      callTimerRef.current = null
+    }
+    
     // Stop all local tracks
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop())
@@ -2263,6 +2343,20 @@ export default function CollaborationApp() {
         chatSocketRef.current.send(endMessage)
       }
     }
+    
+    // Notify all participants in group call
+    callParticipants.forEach(participant => {
+      if (participant.id !== currentUser?.id) {
+        const endMessage = {
+          type: 'webrtc-call-ended',
+          fromUserId: currentUser?.id,
+          targetUserId: participant.id
+        }
+        if (userSocketRef.current) {
+          userSocketRef.current.send(endMessage)
+        }
+      }
+    })
 
     // Reset state
     setShowWebRTCCall(false)
@@ -2271,6 +2365,10 @@ export default function CollaborationApp() {
     setWebrtcError(null)
     setIsWebRTCMicOn(true)
     setIsWebRTCVideoOn(true)
+    setCallStartTime(null)
+    setCallDuration(0)
+    setCallParticipants([])
+    setPendingCallParticipants([])
     pendingIceCandidatesRef.current = []
   }
 
@@ -3917,7 +4015,7 @@ export default function CollaborationApp() {
       {/* WebRTC Video Call Modal */}
       {showWebRTCCall && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/95 via-purple-900/90 to-slate-900/95 backdrop-blur-2xl">
-          {/* In Call Indicator */}
+          {/* In Call Indicator with Timer */}
           <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
             <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></span>
             <span className="text-white font-bold text-sm uppercase tracking-wider">
@@ -3926,12 +4024,27 @@ export default function CollaborationApp() {
                webrtcCallStatus === 'connected' ? 'In Call' : 'Call'}
             </span>
             <span className="text-white/60 text-sm">with {webrtcCallPartner?.name || 'Unknown'}</span>
+            {webrtcCallStatus === 'connected' && (
+              <span className="text-emerald-400 font-mono text-sm ml-2 bg-emerald-500/20 px-3 py-1 rounded-full">
+                {formatCallDuration(callDuration)}
+              </span>
+            )}
           </div>
+          
+          {/* Pending Participants Being Called */}
+          {pendingCallParticipants.length > 0 && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/20 backdrop-blur-xl border border-yellow-500/30">
+              <Phone className="w-4 h-4 text-yellow-400 animate-pulse" />
+              <span className="text-yellow-300 text-sm">
+                Calling {pendingCallParticipants.map(p => p.name).join(', ')}...
+              </span>
+            </div>
+          )}
 
           {/* Video Containers */}
-          <div className="relative w-full h-full flex items-center justify-center p-8">
-            {/* Remote Video (Large) */}
-            <div className="relative w-full max-w-5xl aspect-video rounded-3xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-white/10 shadow-2xl shadow-purple-500/20">
+          <div className="relative w-full h-full">
+            {/* Remote Video (Full Screen) */}
+            <div className="absolute inset-0 bg-black">
               <video 
                 ref={remoteVideoRef}
                 autoPlay 
@@ -3939,15 +4052,15 @@ export default function CollaborationApp() {
                 className="w-full h-full object-cover"
               />
               {!remoteStream && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900/50 to-slate-900">
                   <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-30 blur-xl"></div>
-                    <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20">
+                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-2xl scale-150"></div>
+                    <div className="relative w-48 h-48 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-8xl shadow-2xl border-4 border-white/30">
                       {webrtcCallPartner?.avatar || '👤'}
                     </div>
                   </div>
-                  <h3 className="mt-6 text-2xl font-bold text-white">{webrtcCallPartner?.name || 'Unknown'}</h3>
-                  <p className="mt-2 text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
+                  <h3 className="mt-8 text-4xl font-bold text-white drop-shadow-lg">{webrtcCallPartner?.name || 'Unknown'}</h3>
+                  <p className="mt-3 text-xl text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
                     {webrtcCallStatus === 'calling' ? 'Ringing...' : 
                      webrtcCallStatus === 'connecting' ? 'Connecting...' : 
                      'Waiting for video...'}
@@ -3957,7 +4070,7 @@ export default function CollaborationApp() {
             </div>
 
             {/* Local Video (Small, Picture-in-Picture) */}
-            <div className="absolute bottom-12 right-12 w-64 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/20 shadow-2xl hover:scale-105 transition-transform cursor-move group">
+            <div className="absolute bottom-28 right-8 w-56 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/30 shadow-2xl hover:scale-105 transition-transform cursor-move group z-10">
               <video 
                 ref={localVideoRef}
                 autoPlay 
@@ -4060,13 +4173,10 @@ export default function CollaborationApp() {
                   </button>
                 </div>
                 <div className="max-h-64 overflow-y-auto space-y-2">
-                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id).map(friend => (
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).map(friend => (
                     <button
                       key={friend.id}
-                      onClick={() => {
-                        startWebRTCCall(friend)
-                        setShowAddFriendsToCall(false)
-                      }}
+                      onClick={() => addFriendToCall(friend)}
                       className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-white/10 transition-all text-left"
                     >
                       <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl">
@@ -4076,10 +4186,10 @@ export default function CollaborationApp() {
                         <div className="font-bold text-white">{friend.name}</div>
                         <div className="text-sm text-white/60">{friend.email || ''}</div>
                       </div>
-                      <Video className="w-5 h-5 text-emerald-400" />
+                      <Phone className="w-5 h-5 text-emerald-400" />
                     </button>
                   ))}
-                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id).length === 0 && (
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).length === 0 && (
                     <p className="text-center text-white/50 py-4">No other friends available</p>
                   )}
                 </div>
@@ -5554,7 +5664,7 @@ export default function CollaborationApp() {
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
             <div className={`flex-1 flex overflow-hidden ${isDarkMode ? 'bg-[var(--bg-tertiary)]' : 'bg-gradient-to-br from-slate-50/80 via-white/40 to-indigo-50/30'} relative`}>
-              <div className="flex-1 flex flex-col min-w-0">
+              <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
                 {/* Updated Container with Custom Pattern Background */}
                 {/* day label computed above via `messageDateLabel` */}
 
@@ -5585,7 +5695,7 @@ export default function CollaborationApp() {
                       }
                     } catch (e) {}
                   }}
-                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative ${isDarkMode ? 'chat-background' : 'chat-background'}`}
+                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
                       {getCurrentMessages().length === 0 ? (
@@ -6042,7 +6152,7 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={`p-6 pt-2 ${isDarkMode ? 'bg-gradient-to-t from-[var(--bg-tertiary)]/80 to-transparent' : 'bg-gradient-to-t from-slate-50/60 to-transparent'} backdrop-blur-sm ${isMobile ? "pb-20" : ""}`}>
+                <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
                   <div className={`rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 ${isDarkMode ? 'bg-slate-800/95 shadow-xl shadow-purple-900/20 border border-purple-600/20 focus-within:ring-purple-500/30 focus-within:border-purple-500 focus-within:shadow-purple-500/20 hover:shadow-purple-500/30' : 'bg-white/90 shadow-xl shadow-slate-200/40 border border-slate-200/50 focus-within:ring-indigo-500/20 focus-within:border-indigo-300 focus-within:shadow-indigo-100/30 hover:shadow-2xl hover:shadow-slate-200/50'} backdrop-blur-xl`}>
                     {/* Attachments Preview */}
