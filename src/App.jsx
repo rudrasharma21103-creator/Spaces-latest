@@ -130,6 +130,7 @@ export default function CollaborationApp() {
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(false)
 
   // Search State
   const [searchQuery, setSearchQuery] = useState("") // Spaces Search Input
@@ -4380,14 +4381,26 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {/* Mobile Sidebar Overlay */}
+      {isMobile && (mobileView === "spaces" || mobileView === "friends") && (
+        <div 
+          className="mobile-sidebar-overlay"
+          onClick={() => setMobileView("chat")}
+        />
+      )}
+
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
           sidebarCollapsed ? "w-20" : "w-80"
-        } ${isMobile ? (mobileView === "spaces" ? "flex absolute inset-y-0 left-0 w-full max-w-[320px]" : "hidden") : "flex"} flex-col transition-all ease-in-out duration-500 z-20 flex-shrink-0 ${isDarkMode ? 'bg-[var(--bg-secondary)]/95 border-[var(--border-light)]' : 'bg-white/70 border-slate-200/40'} backdrop-blur-2xl border-r shadow-xl ${isDarkMode ? 'shadow-purple-900/10' : 'shadow-indigo-200/20'}`}
+        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-y-0 left-0 w-[85%] max-w-[320px] mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 ${isDarkMode ? 'bg-[var(--bg-secondary)]/98 border-[var(--border-light)]' : 'bg-white/95 border-slate-200/40'} backdrop-blur-2xl border-r shadow-2xl ${isDarkMode ? 'shadow-purple-900/20' : 'shadow-slate-300/30'}`}
       >
+        {/* Mobile Swipe Indicator */}
+        {isMobile && mobileView === "spaces" && (
+          <div className="swipe-indicator mt-2" />
+        )}
         {/* ... (Sidebar Content) ... */}
-        <div className={`p-6 flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
+        <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           {!sidebarCollapsed && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -5390,49 +5403,61 @@ export default function CollaborationApp() {
 
             {/* Header - Mobile */}
             {isMobile && (
-              <div className="h-[70px] sticky top-0 z-30 flex items-center justify-between px-4 border-b bg-white/90 backdrop-blur-xl border-slate-200/60 shadow-sm shadow-slate-100/50">
+              <div className={`h-[70px] sticky top-0 z-30 flex items-center justify-between px-4 border-b backdrop-blur-xl shadow-sm safe-area-top ${
+                isDarkMode 
+                  ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/30' 
+                  : 'bg-white/95 border-slate-200/60 shadow-slate-100/50'
+              }`}>
                 {/* Left: Profile & Context */}
                 <div 
                   onClick={() => setShowMemberDetails(prev => !prev)}
-                  className="flex items-center gap-3 cursor-pointer"
+                  className="flex items-center gap-3 cursor-pointer touch-active"
                 >
                   {activeView === "dm" ? (
                     <div className="flex items-center gap-3">
                       <div className="relative">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base shadow-md border-2 bg-gradient-to-br from-indigo-100 to-purple-100 border-white overflow-hidden">
-                          {renderAvatar(getUser(activeDMUser), 40)}
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-base shadow-md border-2 overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600' 
+                            : 'bg-gradient-to-br from-indigo-100 to-purple-100 border-white'
+                        }`}>
+                          {renderAvatar(getUser(activeDMUser), 44)}
                         </div>
                         <span
-                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white shadow-sm ${
+                          className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
                             getUser(activeDMUser)?.status === "online"
-                              ? "bg-emerald-500"
+                              ? "bg-emerald-500 shadow-emerald-300/50"
                               : "bg-slate-400"
-                          }`}
+                          } ${isDarkMode ? 'border-slate-900' : 'border-white'}`}
                         ></span>
                       </div>
-                      <div className="max-w-[120px]">
-                        <h2 className="font-bold text-sm leading-tight truncate text-slate-800">
+                      <div className="max-w-[130px]">
+                        <h2 className={`font-bold text-[15px] leading-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                           {getActiveViewName()}
                         </h2>
-                        <p className={`text-[10px] font-semibold flex items-center gap-1 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : "text-slate-400"}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500" : "bg-slate-400"}`}></span>
+                        <p className={`text-[11px] font-semibold flex items-center gap-1.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-500" : isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                          <span className={`w-2 h-2 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`}></span>
                           {getUser(activeDMUser)?.status === "online" ? "Online" : "Offline"}
                         </p>
                       </div>
                     </div>
                   ) : (
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border border-slate-200/50 shadow-sm">
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-sm ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-300 border border-slate-600' 
+                          : 'bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border border-slate-200/50'
+                      }`}>
                         <Hash className="w-5 h-5" />
                       </div>
                       <div className="max-w-[140px]">
-                        <h2 className="font-bold text-sm leading-tight truncate text-slate-800 flex items-center gap-1">
-                          <span className="text-slate-400 font-medium text-xs truncate max-w-[60px]">{getCurrentSpace()?.name}</span>
-                          <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                        <h2 className={`font-bold text-[15px] leading-tight truncate flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          <span className={`font-medium text-xs truncate max-w-[60px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{getCurrentSpace()?.name}</span>
+                          <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
                           <span className="truncate">{getActiveViewName().replace("#", "")}</span>
                         </h2>
-                        <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                          <Users className="w-3 h-3" /> {activeMembers.length}
+                        <p className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                          <Users className="w-3 h-3" /> {activeMembers.length} members
                         </p>
                       </div>
                     </div>
@@ -5440,16 +5465,20 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Right: Action Icons & Menu */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   {/* Docs Icon */}
                   <button
                     onClick={handleDocsClick}
-                    className="p-2.5 rounded-xl transition-all bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 relative"
+                    className={`p-2.5 rounded-xl transition-all relative touch-active ${
+                      isDarkMode 
+                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                    }`}
                     title="Documents"
                   >
-                    <FileText className="w-4 h-4" />
+                    <FileText className="w-5 h-5" />
                     {googleAccessToken && (
-                      <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full border border-white"></span>
+                      <span className={`absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
                     )}
                   </button>
 
@@ -5473,14 +5502,18 @@ export default function CollaborationApp() {
                             setShowVideoModal(true)
                           }
                         }}
-                        className="p-2.5 rounded-xl transition-all bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600"
+                        className={`p-2.5 rounded-xl transition-all touch-active ${
+                          isDarkMode 
+                            ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                            : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                        }`}
                         title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                       >
-                        <Video className="w-4 h-4" />
+                        <Video className="w-5 h-5" />
                       </button>
                       {/* In Call Indicator */}
                       {showWebRTCCall && (
-                        <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white shadow-sm"></span>
+                        <span className={`absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 shadow-sm ${isDarkMode ? 'border-slate-900' : 'border-white'}`}></span>
                       )}
                     </div>
                   )}
@@ -5493,20 +5526,28 @@ export default function CollaborationApp() {
                         setSelectedInviteUsers([])
                         setShowAddToSpaceModal(true)
                       }}
-                      className="p-2.5 rounded-xl transition-all bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-200/50"
+                      className={`p-2.5 rounded-xl transition-all text-white shadow-md touch-active ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/30 active:from-violet-500 active:to-purple-500' 
+                          : 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-indigo-200/50 active:from-indigo-600 active:to-purple-600'
+                      }`}
                       title="Invite Members"
                     >
-                      <UserPlus className="w-4 h-4" />
+                      <UserPlus className="w-5 h-5" />
                     </button>
                   )}
 
                   {/* Mobile Menu Button */}
                   <button
                     onClick={() => setShowMobileDrawer(true)}
-                    className="p-2.5 rounded-xl transition-all bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600"
+                    className={`p-2.5 rounded-xl transition-all touch-active ${
+                      isDarkMode 
+                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                    }`}
                     title="Menu"
                   >
-                    <Menu className="w-4 h-4" />
+                    <Menu className="w-5 h-5" />
                   </button>
                 </div>
               </div>
@@ -5522,30 +5563,42 @@ export default function CollaborationApp() {
                 ></div>
                 
                 {/* Drawer */}
-                <div className="fixed top-0 right-0 bottom-0 w-[280px] z-50 bg-white/95 backdrop-blur-xl shadow-2xl shadow-slate-500/20 border-l border-slate-200/60 animate-slide-in-right">
+                <div className={`fixed top-0 right-0 bottom-0 w-[280px] z-50 backdrop-blur-xl shadow-2xl border-l mobile-slide-in-right ${
+                  isDarkMode 
+                    ? 'bg-slate-900/98 border-slate-700/60 shadow-slate-950/50' 
+                    : 'bg-white/98 border-slate-200/60 shadow-slate-500/20'
+                }`}>
                   {/* Drawer Header */}
-                  <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-white to-indigo-50/30">
+                  <div className={`p-5 border-b ${isDarkMode ? 'border-slate-800 bg-gradient-to-r from-slate-900 to-violet-900/20' : 'border-slate-100 bg-gradient-to-r from-white to-indigo-50/30'}`}>
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-bold text-lg text-slate-800">Menu</h3>
+                      <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Menu</h3>
                       <button
                         onClick={() => setShowMobileDrawer(false)}
-                        className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                        className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-slate-300' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}
                       >
                         <X className="w-5 h-5" />
                       </button>
                     </div>
                     
                     {/* User Profile Card */}
-                    <div className="flex items-center gap-3 p-3 rounded-2xl bg-white shadow-sm border border-slate-100">
+                    <div className={`flex items-center gap-3 p-3 rounded-2xl shadow-sm border ${
+                      isDarkMode 
+                        ? 'bg-slate-800/80 border-slate-700' 
+                        : 'bg-white border-slate-100'
+                    }`}>
                       <div className="relative">
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-md bg-white border-2 border-white ring-2 ring-slate-100 overflow-hidden">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-md border-2 ring-2 overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-slate-700 border-slate-700 ring-slate-700/50' 
+                            : 'bg-white border-white ring-slate-100'
+                        }`}>
                           {renderAvatar(currentUser, 48)}
                         </div>
-                        <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
                       </div>
                       <div className="flex-1 overflow-hidden">
-                        <div className="font-bold text-sm truncate text-slate-800">{currentUser?.name}</div>
-                        <div className="text-[10px] font-semibold text-emerald-600 flex items-center gap-1">
+                        <div className={`font-bold text-sm truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{currentUser?.name}</div>
+                        <div className="text-[10px] font-semibold text-emerald-500 flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                           Available
                         </div>
@@ -5563,10 +5616,14 @@ export default function CollaborationApp() {
                         setShowProfileModal(true)
                         setShowMobileDrawer(false)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
                     >
-                      <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
-                        <UserPlus className="w-4 h-4" />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <UserPlus className="w-5 h-5" />
                       </div>
                       Edit Profile
                     </button>
@@ -5577,16 +5634,20 @@ export default function CollaborationApp() {
                         setShowNotificationsModal(true)
                         setShowMobileDrawer(false)
                       }}
-                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
-                          <Bell className="w-4 h-4" />
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                          <Bell className="w-5 h-5" />
                         </div>
                         Notifications
                       </div>
                       {currentUser?.notifications?.length ? (
-                        <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        <span className="bg-red-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-sm shadow-red-500/30">
                           {currentUser?.notifications?.length}
                         </span>
                       ) : null}
@@ -5598,10 +5659,14 @@ export default function CollaborationApp() {
                         setShowGoogleAppsMenu(true)
                         setShowMobileDrawer(false)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
                     >
-                      <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
-                        <Grid3x3 className="w-4 h-4" />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <Grid3x3 className="w-5 h-5" />
                       </div>
                       Google Apps
                     </button>
@@ -5617,10 +5682,14 @@ export default function CollaborationApp() {
                         }
                         setShowMobileDrawer(false)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
                     >
-                      <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
-                        <Calendar className="w-4 h-4" />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <Calendar className="w-5 h-5" />
                       </div>
                       Calendar
                     </button>
@@ -5628,11 +5697,15 @@ export default function CollaborationApp() {
                     {/* Theme Toggle */}
                     <button
                       onClick={() => setIsDarkMode(!isDarkMode)}
-                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-500'}`}>
-                          {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-500'}`}>
+                          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                         </div>
                         {isDarkMode ? 'Light Mode' : 'Dark Mode'}
                       </div>
@@ -5641,7 +5714,7 @@ export default function CollaborationApp() {
                       </div>
                     </button>
 
-                    <div className="h-px my-3 bg-slate-100"></div>
+                    <div className={`h-px my-3 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}></div>
 
                     {/* Sign Out */}
                     <button
@@ -5649,10 +5722,14 @@ export default function CollaborationApp() {
                         handleLogout()
                         setShowMobileDrawer(false)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-all"
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-red-400 hover:bg-red-900/30 active:bg-red-900/50' 
+                          : 'text-red-600 hover:bg-red-50 active:bg-red-100'
+                      }`}
                     >
-                      <div className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center text-red-500">
-                        <LogIn className="w-4 h-4" />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-50 text-red-500'}`}>
+                        <LogIn className="w-5 h-5" />
                       </div>
                       Sign Out
                     </button>
@@ -6428,8 +6505,12 @@ export default function CollaborationApp() {
       </div>
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className={`${isMobile ? (mobileView === "friends" ? "flex absolute inset-y-0 right-0 w-full max-w-[320px]" : "hidden") : "hidden lg:flex"} flex-col w-80 border-l ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/80 shadow-xl shadow-purple-900/10' : 'border-slate-200/40 bg-white/60 shadow-xl shadow-slate-200/30'} backdrop-blur-2xl z-20`}>
-        <div className={`p-6 h-[80px] border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-purple-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-indigo-50/30'}`}>
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-y-0 right-0 w-[85%] max-w-[320px] mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} border-l transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/98 shadow-2xl shadow-purple-900/20' : 'border-slate-200/40 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-2xl z-40`}>
+        {/* Mobile Swipe Indicator */}
+        {isMobile && mobileView === "friends" && (
+          <div className="swipe-indicator mt-2" />
+        )}
+        <div className={`p-6 ${isMobile ? 'pt-4' : ''} h-[80px] border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-purple-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-indigo-50/30'}`}>
           {isMobile && (
             <button
               onClick={() => setMobileView("chat")}
@@ -6438,150 +6519,235 @@ export default function CollaborationApp() {
               <X className="w-5 h-5" />
             </button>
           )}
-          <h3 className={`font-extrabold text-lg bg-gradient-to-r ${isDarkMode ? 'from-white to-purple-300' : 'from-slate-700 to-indigo-700'} bg-clip-text text-transparent`}>Friends</h3>
-          <button
-            onClick={() => {
-              setInviteSearchQuery("")
-              setSelectedFriendInvitees([])
-              setShowAddFriendModal(true)
-            }}
-            className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400' : 'hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600'} hover:shadow-md ml-auto`}
-          >
-            <UserPlus className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="px-5 pt-6 pb-2">
-          <div className="relative group">
-            <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-purple-400' : 'text-slate-400 group-focus-within:text-indigo-500'}`} />
-            <input
-              type="text"
-              placeholder="Filter friends..."
-              value={dmSearchQuery}
-              onChange={e => setDmSearchQuery(e.target.value)}
-              className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
-            />
+          {!friendsSidebarCollapsed && (
+            <h3 className={`font-extrabold text-lg bg-gradient-to-r ${isDarkMode ? 'from-white to-purple-300' : 'from-slate-700 to-indigo-700'} bg-clip-text text-transparent animate-fade-in`}>Friends</h3>
+          )}
+          <div className="flex gap-2 ml-auto">
+            {!friendsSidebarCollapsed && !isMobile && (
+              <button
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
+                className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400' : 'hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600'} hover:shadow-md`}
+              >
+                <UserPlus className="w-5 h-5" />
+              </button>
+            )}
+            {isMobile && (
+              <button
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
+                className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400' : 'hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600'} hover:shadow-md`}
+              >
+                <UserPlus className="w-5 h-5" />
+              </button>
+            )}
+            {!isMobile && (
+              <button
+                onClick={() => setFriendsSidebarCollapsed(!friendsSidebarCollapsed)}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
-          {dmSearchResults.length > 0 ? (
-            dmSearchResults.map(result => (
-              <div
-                key={result.id}
-                onClick={() => {
-                  if (result.userId) {
-                    setActiveDMUser(result.userId)
-                    setActiveView("dm")
-                    if (isMobile) setMobileView("chat")
-                    if (result.messageId) {
-                      // Scroll to the message and pin it for review
-                      setTargetMessageId(result.messageId)
-                      setPinnedMessageId(result.messageId)
-                      setHighlightTerm(debouncedDmSearchQuery)
-                    } else {
-                      // Navigating to a DM without a specific message should clear any pinned result
-                      setPinnedMessageId(null)
-                    }
-                  }
-                }}
-                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
-                  activeView === "dm" && activeDMUser === result.userId
-                    ? isDarkMode ? "bg-purple-900/30 border-purple-600/30" : "bg-indigo-50/80 border-indigo-100/60 shadow-sm"
-                    : isDarkMode ? "bg-slate-800/50 border-transparent hover:bg-slate-800" : "bg-white/60 border-transparent hover:bg-white/90 hover:shadow-sm"
-                }`}
-              >
-                <div className="relative">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
-                    {result.icon}
-                  </div>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex justify-between items-center">
-                    <span
-                      className={`text-sm font-bold truncate ${
-                        activeView === "dm" && activeDMUser === result.userId
-                          ? isDarkMode ? "text-purple-300" : "text-indigo-900"
-                          : isDarkMode ? "text-slate-200" : "text-slate-700"
-                      }`}
-                    >
-                      {result.title}
-                    </span>
-                    {result.timestamp && (
-                      <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {formatTime(result.timestamp)}
-                      </span>
-                    )}
-                  </div>
-                  <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {renderWithHighlight(
-                      result.subtitle,
-                      debouncedDmSearchQuery
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : friends.length === 0 ? (
-            <div className="text-center py-10 px-4">
-              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-slate-100/80 text-slate-400'}`}>
-                <Users className="w-8 h-8" />
-              </div>
-              <p className={`text-sm font-medium mb-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                No friends yet.
-              </p>
-              <button
-                onClick={() => setShowAddFriendModal(true)}
-                className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`}
-              >
-                Find people
-              </button>
+        {!friendsSidebarCollapsed && (
+          <div className="px-5 pt-6 pb-2 animate-fade-in">
+            <div className="relative group">
+              <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-purple-400' : 'text-slate-400 group-focus-within:text-indigo-500'}`} />
+              <input
+                type="text"
+                placeholder="Filter friends..."
+                value={dmSearchQuery}
+                onChange={e => setDmSearchQuery(e.target.value)}
+                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
+              />
             </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
+          {!friendsSidebarCollapsed ? (
+            <>
+              {dmSearchResults.length > 0 ? (
+                dmSearchResults.map(result => (
+                  <div
+                    key={result.id}
+                    onClick={() => {
+                      if (result.userId) {
+                        setActiveDMUser(result.userId)
+                        setActiveView("dm")
+                        if (isMobile) setMobileView("chat")
+                        if (result.messageId) {
+                          // Scroll to the message and pin it for review
+                          setTargetMessageId(result.messageId)
+                          setPinnedMessageId(result.messageId)
+                          setHighlightTerm(debouncedDmSearchQuery)
+                        } else {
+                          // Navigating to a DM without a specific message should clear any pinned result
+                          setPinnedMessageId(null)
+                        }
+                      }
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
+                      activeView === "dm" && activeDMUser === result.userId
+                        ? isDarkMode ? "bg-purple-900/30 border-purple-600/30" : "bg-indigo-50/80 border-indigo-100/60 shadow-sm"
+                        : isDarkMode ? "bg-slate-800/50 border-transparent hover:bg-slate-800" : "bg-white/60 border-transparent hover:bg-white/90 hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="relative">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
+                        {result.icon}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className="flex justify-between items-center">
+                        <span
+                          className={`text-sm font-bold truncate ${
+                            activeView === "dm" && activeDMUser === result.userId
+                              ? isDarkMode ? "text-purple-300" : "text-indigo-900"
+                              : isDarkMode ? "text-slate-200" : "text-slate-700"
+                          }`}
+                        >
+                          {result.title}
+                        </span>
+                        {result.timestamp && (
+                          <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {formatTime(result.timestamp)}
+                          </span>
+                        )}
+                      </div>
+                      <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {renderWithHighlight(
+                          result.subtitle,
+                          debouncedDmSearchQuery
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : friends.length === 0 ? (
+                <div className="text-center py-10 px-4">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-slate-100/80 text-slate-400'}`}>
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <p className={`text-sm font-medium mb-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                    No friends yet.
+                  </p>
+                  <button
+                    onClick={() => setShowAddFriendModal(true)}
+                    className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`}
+                  >
+                    Find people
+                  </button>
+                </div>
+              ) : (
+                friends.map(friend => (
+                  <div
+                    key={friend.id}
+                    onClick={() => {
+                      setActiveDMUser(friend.id)
+                      setActiveView("dm")
+                      justSwitchedThreadRef.current = true
+                      if (isMobile) setMobileView("chat")
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 border hover-lift ${
+                      activeView === "dm" && activeDMUser === friend.id
+                        ? isDarkMode 
+                          ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
+                          : "bg-gradient-to-r from-indigo-50/80 to-purple-50/50 border-indigo-100/60 shadow-md shadow-indigo-100/40 ring-1 ring-indigo-100/50"
+                        : isDarkMode 
+                          ? "bg-slate-800/50 border-transparent hover:bg-slate-800 hover:border-slate-700"
+                          : "bg-white/60 border-transparent hover:bg-white/90 hover:border-slate-200/40 hover:shadow-md"
+                    }`}
+                  >
+                    <div className="relative">
+                      <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg shadow-md border-2 overflow-hidden ring-2 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-700/50' : 'bg-gradient-to-br from-white to-slate-50 border-white ring-slate-100/50'}`}>
+                        {renderAvatar(friend, 40)}
+                      </div>
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                          friend.status === "online"
+                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                            : "bg-gradient-to-br from-slate-300 to-slate-400"
+                        } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
+                      ></span>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className={`text-sm font-bold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
+                        {friend.name}
+                      </div>
+                      <div className={`text-xs truncate ${friend.status === "online" ? "text-emerald-500 font-medium" : isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                        {friend.status === "online" ? "Online" : "Offline"}
+                      </div>
+                    </div>
+                    <div className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-slate-700 hover:text-purple-400 text-slate-500' : 'hover:bg-white hover:text-indigo-600 text-slate-300'}`}>
+                      <MessageSquare className="w-4 h-4" />
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
           ) : (
-            friends.map(friend => (
-              <div
-                key={friend.id}
-                onClick={() => {
-                  setActiveDMUser(friend.id)
-                  setActiveView("dm")
-                  justSwitchedThreadRef.current = true
-                  if (isMobile) setMobileView("chat")
-                }}
-                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 border hover-lift ${
-                  activeView === "dm" && activeDMUser === friend.id
-                    ? isDarkMode 
-                      ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
-                      : "bg-gradient-to-r from-indigo-50/80 to-purple-50/50 border-indigo-100/60 shadow-md shadow-indigo-100/40 ring-1 ring-indigo-100/50"
-                    : isDarkMode 
-                      ? "bg-slate-800/50 border-transparent hover:bg-slate-800 hover:border-slate-700"
-                      : "bg-white/60 border-transparent hover:bg-white/90 hover:border-slate-200/40 hover:shadow-md"
-                }`}
-              >
-                <div className="relative">
-                  <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg shadow-md border-2 overflow-hidden ring-2 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-700/50' : 'bg-gradient-to-br from-white to-slate-50 border-white ring-slate-100/50'}`}>
-                    {renderAvatar(friend, 40)}
-                  </div>
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
-                      friend.status === "online"
-                        ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
-                        : "bg-gradient-to-br from-slate-300 to-slate-400"
-                    } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
-                  ></span>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className={`text-sm font-bold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
-                    {friend.name}
-                  </div>
-                  <div className={`text-xs truncate ${friend.status === "online" ? "text-emerald-500 font-medium" : isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-                    {friend.status === "online" ? "Online" : "Offline"}
-                  </div>
-                </div>
-                <div className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-slate-700 hover:text-purple-400 text-slate-500' : 'hover:bg-white hover:text-indigo-600 text-slate-300'}`}>
-                  <MessageSquare className="w-4 h-4" />
-                </div>
-              </div>
-            ))
+            /* Collapsed view - only friend icons */
+            <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
+              {friends.length === 0 ? (
+                <button
+                  onClick={() => setShowAddFriendModal(true)}
+                  className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-purple-500 hover:text-purple-400' : 'border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500'}`}
+                  title="Add Friend"
+                >
+                  <UserPlus className="w-5 h-5" />
+                </button>
+              ) : (
+                <>
+                  {friends.map(friend => (
+                    <button
+                      key={friend.id}
+                      className={`relative w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300 overflow-hidden ${
+                        activeView === "dm" && activeDMUser === friend.id
+                          ? isDarkMode 
+                            ? "ring-2 ring-purple-500 shadow-lg shadow-purple-500/30" 
+                            : "ring-2 ring-indigo-500 shadow-lg shadow-indigo-500/30"
+                          : isDarkMode
+                            ? "hover:ring-2 hover:ring-slate-600 hover:shadow-md"
+                            : "hover:ring-2 hover:ring-slate-200 hover:shadow-md"
+                      }`}
+                      title={friend.name}
+                      onClick={() => {
+                        setActiveDMUser(friend.id)
+                        setActiveView("dm")
+                        justSwitchedThreadRef.current = true
+                        if (isMobile) setMobileView("chat")
+                      }}
+                    >
+                      {renderAvatar(friend, 48)}
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                          friend.status === "online"
+                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                            : "bg-gradient-to-br from-slate-300 to-slate-400"
+                        } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
+                      ></span>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowAddFriendModal(true)}
+                    className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-purple-500 hover:text-purple-400' : 'border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500'}`}
+                    title="Add Friend"
+                  >
+                    <UserPlus className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -6608,7 +6774,7 @@ export default function CollaborationApp() {
             <div className="flex gap-4">
               <button
                 onClick={() => setShowAddFriendConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 No
               </button>
@@ -6618,7 +6784,7 @@ export default function CollaborationApp() {
                     sendFriendRequest(showAddFriendConfirm)
                   setShowAddFriendConfirm(null)
                 }}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'}`}
               >
                 Yes
               </button>
@@ -6629,15 +6795,15 @@ export default function CollaborationApp() {
 
       {/* Access Denied Modal */}
       {showAccessDeniedModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border ${isDarkMode ? 'bg-slate-800/95 border-slate-700/50' : 'bg-white border-slate-100'}`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'}`}>
               <ShieldAlert className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Access Restricted
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               The admin has not allowed you to view/message this channel. Please
               ask for an invite.
             </p>
@@ -6647,7 +6813,7 @@ export default function CollaborationApp() {
                 // Switch to a different view or channel to avoid repeated access attempts
                 setActiveView("calendar")
               }}
-              className="w-full py-3.5 px-6 rounded-2xl font-bold bg-slate-900 text-white shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+              className={`w-full py-3.5 px-6 rounded-2xl font-bold shadow-lg transition-all active:scale-95 ${isDarkMode ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-500/20' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
             >
               Understood
             </button>
@@ -6657,14 +6823,14 @@ export default function CollaborationApp() {
 
       {/* Rename Modal */}
       {showRenameModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-sm shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <h3 className="text-xl font-bold mb-6 text-slate-900">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`rounded-[2rem] p-8 w-full max-w-sm shadow-2xl ring-1 ${isDarkMode ? 'bg-slate-800/95 ring-slate-700/50' : 'bg-white ring-slate-900/5'}`}>
+            <h3 className={`text-xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Rename {showRenameModal.type === "space" ? "Space" : "Channel"}
             </h3>
             <input
               type="text"
-              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl mb-6 outline-none focus:ring-2 focus:ring-indigo-500"
+              className={`w-full p-4 rounded-2xl mb-6 outline-none focus:ring-2 ${isDarkMode ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500 border' : 'bg-slate-50 border border-slate-200 focus:ring-indigo-500'}`}
               placeholder={showRenameModal.currentName}
               defaultValue={showRenameModal.currentName}
               onChange={e => setNewNameInput(e.target.value)}
@@ -6676,13 +6842,13 @@ export default function CollaborationApp() {
                   setShowRenameModal(null)
                   setNewNameInput("")
                 }}
-                className="flex-1 py-3 rounded-2xl font-bold text-slate-500 border border-slate-200 hover:bg-slate-50"
+                className={`flex-1 py-3 rounded-2xl font-bold border transition-colors ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleRename}
-                className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
+                className={`flex-1 py-3 rounded-2xl font-bold text-white shadow-lg ${isDarkMode ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'}`}
               >
                 Save
               </button>
@@ -6693,28 +6859,28 @@ export default function CollaborationApp() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 mx-auto">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border ${isDarkMode ? 'bg-slate-800/95 border-slate-700/50' : 'bg-white border-slate-100'}`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'}`}>
               <Trash2 className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Are you sure?
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               You are about to delete this {showDeleteConfirm.type}. This action
               cannot be undone.
             </p>
             <div className="flex gap-4">
               <button
                 onClick={() => setShowDeleteConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-red-600 shadow-red-200 hover:bg-red-700'}`}
               >
                 Delete
               </button>
@@ -6725,27 +6891,27 @@ export default function CollaborationApp() {
 
       {/* Remove Member Confirmation Modal */}
       {showRemoveMemberConfirm && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mb-6 mx-auto">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border ${isDarkMode ? 'bg-slate-800/95 border-slate-700/50' : 'bg-white border-slate-100'}`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto ${isDarkMode ? 'bg-yellow-900/40 text-yellow-400' : 'bg-yellow-100 text-yellow-600'}`}>
               <Trash2 className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Remove member?
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
-              You are about to remove <strong>{showRemoveMemberConfirm.name}</strong> from <strong>{getActiveViewName().replace('# ', '')}</strong>. They will receive a notification about this.
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              You are about to remove <strong className={isDarkMode ? 'text-slate-200' : ''}>{showRemoveMemberConfirm.name}</strong> from <strong className={isDarkMode ? 'text-slate-200' : ''}>{getActiveViewName().replace('# ', '')}</strong>. They will receive a notification about this.
             </p>
             <div className="flex gap-4">
               <button
                 onClick={() => setShowRemoveMemberConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmRemoveMember}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-red-600 shadow-red-200 hover:bg-red-700'}`}
               >
                 Remove
               </button>
@@ -6887,18 +7053,20 @@ export default function CollaborationApp() {
 
       {/* Google Apps Menu - Mobile Full Screen Modal */}
       {isMobile && showGoogleAppsMenu && (
-        <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-          <div className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl shadow-2xl animate-slide-in-up p-6 max-h-[80vh] overflow-y-auto">
+        <div className={`fixed inset-0 z-[60] backdrop-blur-sm animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'}`}>
+          <div className={`fixed inset-x-0 bottom-0 rounded-t-3xl shadow-2xl mobile-slide-in-bottom p-6 max-h-[80vh] overflow-y-auto ${isDarkMode ? 'bg-slate-800/98 border-t border-slate-700/50' : 'bg-white'}`}>
+            {/* Handle bar */}
+            <div className={`w-10 h-1 rounded-full mx-auto mb-4 ${isDarkMode ? 'bg-slate-600' : 'bg-slate-300'}`}></div>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+              <h3 className={`text-xl font-bold flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-violet-600 to-purple-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
                   <Grid3x3 className="w-5 h-5 text-white" />
                 </div>
                 Google Apps
               </h3>
               <button
                 onClick={() => setShowGoogleAppsMenu(false)}
-                className="p-2 rounded-xl hover:bg-slate-100 text-slate-400"
+                className={`p-2.5 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
               >
                 <X className="w-6 h-6" />
               </button>
@@ -6910,7 +7078,7 @@ export default function CollaborationApp() {
                   href={app.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-2 p-3 rounded-2xl hover:bg-slate-50 transition-all"
+                  className={`flex flex-col items-center gap-2 p-3 rounded-2xl transition-all touch-active ${isDarkMode ? 'hover:bg-slate-700/50 active:bg-slate-700' : 'hover:bg-slate-50 active:bg-slate-100'}`}
                   onClick={() => setShowGoogleAppsMenu(false)}
                 >
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${app.color} shadow-sm`}>
@@ -6924,7 +7092,7 @@ export default function CollaborationApp() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px] font-semibold text-slate-600 text-center">{app.name}</span>
+                  <span className={`text-[10px] font-semibold text-center ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{app.name}</span>
                 </a>
               ))}
             </div>
@@ -6934,43 +7102,43 @@ export default function CollaborationApp() {
 
       {/* Mobile Bottom Navigation Bar */}
       {isMobile && (
-        <div className={`fixed bottom-0 left-0 right-0 z-50 backdrop-blur-xl border-t shadow-lg safe-area-bottom ${
+        <div className={`mobile-bottom-nav ${
           isDarkMode 
-            ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/40' 
-            : 'bg-white/95 border-slate-200/60 shadow-slate-200/20'
+            ? 'bg-slate-900/95 border-slate-700/60' 
+            : 'bg-white/95 border-slate-200/60'
         }`}>
           <div className="flex items-center justify-around h-16 px-2">
             <button
               onClick={() => setMobileView("spaces")}
-              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+              className={`mobile-nav-item ${mobileView === "spaces" ? "active" : ""} ${
                 mobileView === "spaces"
                   ? isDarkMode ? "text-violet-400" : "text-indigo-600"
-                  : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <Sparkles className={`w-5 h-5 ${mobileView === "spaces" ? "scale-110" : ""} transition-transform`} />
+              <Sparkles className={`w-5 h-5 transition-transform duration-200`} />
               <span className="text-[10px] font-semibold">Spaces</span>
             </button>
             <button
               onClick={() => setMobileView("chat")}
-              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+              className={`mobile-nav-item ${mobileView === "chat" ? "active" : ""} ${
                 mobileView === "chat"
                   ? isDarkMode ? "text-violet-400" : "text-indigo-600"
-                  : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <MessageCircle className={`w-5 h-5 ${mobileView === "chat" ? "scale-110" : ""} transition-transform`} />
+              <MessageCircle className={`w-5 h-5 transition-transform duration-200`} />
               <span className="text-[10px] font-semibold">Chat</span>
             </button>
             <button
               onClick={() => setMobileView("friends")}
-              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+              className={`mobile-nav-item ${mobileView === "friends" ? "active" : ""} ${
                 mobileView === "friends"
                   ? isDarkMode ? "text-violet-400" : "text-indigo-600"
-                  : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <Users className={`w-5 h-5 ${mobileView === "friends" ? "scale-110" : ""} transition-transform`} />
+              <Users className={`w-5 h-5 transition-transform duration-200`} />
               <span className="text-[10px] font-semibold">Friends</span>
             </button>
           </div>
