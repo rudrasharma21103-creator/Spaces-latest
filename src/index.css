@@ -1056,7 +1056,7 @@ body {
   background-color: #e7ebee;
   background-image: url('/doodle-light.png');
   background-repeat: repeat;
-  background-size: 400px auto;
+  background-size: 350px auto;
   background-position: center;
   background-attachment: fixed;
 }
@@ -1128,7 +1128,7 @@ body {
 }
 
 /* ============================================
-   📱 RESPONSIVE & MOBILE
+   📱 RESPONSIVE & MOBILE - Enhanced for Premium UX
    ============================================ */
 
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
@@ -1138,34 +1138,57 @@ body {
   .safe-area-top {
     padding-top: env(safe-area-inset-top);
   }
+  .safe-area-left {
+    padding-left: env(safe-area-inset-left);
+  }
+  .safe-area-right {
+    padding-right: env(safe-area-inset-right);
+  }
 }
 
+/* Mobile-first responsive design */
 @media (max-width: 768px) {
   :root {
     --radius-xl: 1.25rem;
     --radius-2xl: 1.5rem;
+    --glass-blur: 16px;
   }
   
+  /* Faster animations on mobile */
   .animate-fade-in,
   .animate-fade-in-up,
   .animate-slide-in-right,
   .animate-slide-in-left {
-    animation-duration: 0.3s;
+    animation-duration: 0.25s;
   }
   
-  button, a {
+  /* Touch-friendly sizing */
+  button, a, .touchable {
     min-height: 44px;
+    min-width: 44px;
   }
   
-  .mobile-nav {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  
+  /* Smooth scrolling */
   * {
     -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
   }
   
+  /* Prevent text selection on interactive elements */
+  .mobile-nav,
+  button,
+  .touchable {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Remove tap highlight on iOS */
+  input, textarea, select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Modal styles for mobile */
   .modal-mobile {
     width: 100% !important;
     max-width: 100% !important;
@@ -1176,7 +1199,238 @@ body {
   
   /* Add padding for bottom nav */
   .mobile-content-area {
-    padding-bottom: 4rem;
+    padding-bottom: 5rem;
+  }
+  
+  /* Smaller shadows on mobile for performance */
+  .shadow-lg {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+  
+  .shadow-xl {
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+  }
+  
+  /* Reduce blur for better performance */
+  .backdrop-blur-xl {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  
+  .backdrop-blur-2xl {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  
+  /* Mobile typography adjustments */
+  h1 { font-size: 1.75rem; }
+  h2 { font-size: 1.5rem; }
+  h3 { font-size: 1.25rem; }
+  
+  /* Message bubble adjustments */
+  .message-bubble {
+    max-width: 85%;
+  }
+  
+  /* Input adjustments */
+  .chat-input {
+    padding: 0.75rem 1rem;
+  }
+  
+  /* Scrollbar hidden on mobile */
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+  
+  * {
+    scrollbar-width: none;
+  }
+}
+
+/* Small mobile devices */
+@media (max-width: 375px) {
+  :root {
+    --radius-xl: 1rem;
+    --radius-2xl: 1.25rem;
+  }
+  
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.125rem; }
+  
+  .message-bubble {
+    max-width: 90%;
+  }
+}
+
+/* Landscape mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+  .mobile-content-area {
+    padding-bottom: 3.5rem;
+  }
+}
+
+/* Tablet styles */
+@media (min-width: 769px) and (max-width: 1024px) {
+  :root {
+    --glass-blur: 20px;
+  }
+}
+
+/* Mobile drawer/slide panel animations */
+@keyframes mobile-slide-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-slide-in-bottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mobile-slide-in-left {
+  animation: mobile-slide-in-left 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.mobile-slide-in-right {
+  animation: mobile-slide-in-right 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.mobile-slide-in-bottom {
+  animation: mobile-slide-in-bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.mobile-fade-in {
+  animation: mobile-fade-in 0.25s ease-out forwards;
+}
+
+/* Bottom sheet modal style */
+.bottom-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 1.5rem 1.5rem 0 0;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: mobile-slide-in-bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.bottom-sheet::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 4px;
+  background: rgba(128, 128, 128, 0.3);
+  border-radius: 2px;
+  margin: 8px auto 16px;
+}
+
+/* iOS-style rubber band effect placeholder */
+.overscroll-bounce {
+  overscroll-behavior-y: auto;
+}
+
+/* Mobile sidebar overlay */
+.mobile-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 40;
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+/* Touch feedback */
+.touch-active:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
+
+/* Pull to refresh indicator placeholder */
+.pull-indicator {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+/* Mobile navigation bar styles */
+.mobile-nav-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Mobile header with notch support */
+.mobile-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Swipe indicator for panels */
+.swipe-indicator {
+  width: 36px;
+  height: 5px;
+  background: rgba(128, 128, 128, 0.25);
+  border-radius: 3px;
+  margin: 8px auto;
+}
+
+.dark .swipe-indicator {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Mobile card styles */
+@media (max-width: 768px) {
+  .card-modern {
+    border-radius: var(--radius-xl);
+  }
+  
+  .glass-card {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 }
 
@@ -1188,6 +1442,288 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   📱 MOBILE BOTTOM NAVIGATION
+   ============================================ */
+
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.dark .mobile-bottom-nav {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  gap: 4px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.mobile-nav-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 40px;
+  height: 3px;
+  background: var(--gradient-primary);
+  border-radius: 0 0 4px 4px;
+  transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.mobile-nav-item.active::before {
+  transform: translateX(-50%) scaleX(1);
+}
+
+.mobile-nav-item.active svg {
+  transform: scale(1.15);
+}
+
+.mobile-nav-item svg {
+  transition: transform 0.2s ease;
+}
+
+/* ============================================
+   📱 MOBILE SIDEBAR STYLES  
+   ============================================ */
+
+.mobile-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 85%;
+  max-width: 320px;
+  z-index: 45;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.mobile-sidebar-left {
+  left: 0;
+  animation: mobile-slide-in-left 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.mobile-sidebar-right {
+  right: 0;
+  animation: mobile-slide-in-right 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+/* ============================================
+   📱 MOBILE MODAL STYLES
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* Full-screen modals on mobile */
+  .modal-fullscreen-mobile {
+    position: fixed !important;
+    inset: 0 !important;
+    border-radius: 0 !important;
+    max-height: 100vh !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+  
+  /* Bottom sheet style modals */
+  .modal-bottom-sheet {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: auto !important;
+    border-radius: 1.5rem 1.5rem 0 0 !important;
+    max-height: 85vh !important;
+    animation: mobile-slide-in-bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  }
+  
+  /* Center modals become bottom sheets on mobile */
+  .modal-adaptive {
+    border-radius: 1.5rem 1.5rem 0 0;
+    margin-top: auto;
+    max-height: 90vh;
+  }
+}
+
+/* ============================================
+   📱 MOBILE MESSAGE INPUT
+   ============================================ */
+
+@media (max-width: 768px) {
+  .message-input-mobile {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 64px; /* Above bottom nav */
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+    z-index: 30;
+  }
+  
+  .message-input-container {
+    border-radius: 1.5rem;
+    padding: 0.5rem;
+  }
+  
+  .message-input-textarea {
+    max-height: 120px;
+    min-height: 40px;
+  }
+}
+
+/* ============================================
+   📱 MOBILE CHAT LIST
+   ============================================ */
+
+@media (max-width: 768px) {
+  .chat-message {
+    padding: 0.5rem 0.75rem;
+  }
+  
+  .chat-message-bubble {
+    max-width: 85%;
+    padding: 0.75rem 1rem;
+  }
+  
+  .chat-avatar {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+}
+
+/* ============================================
+   📱 MOBILE TOUCH OPTIMIZATIONS
+   ============================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  /* Touch device optimizations */
+  .hover-lift:hover {
+    transform: none;
+  }
+  
+  .hover-scale:hover {
+    transform: none;
+  }
+  
+  .hover-glow:hover {
+    box-shadow: none;
+  }
+  
+  /* Active states for touch */
+  .hover-lift:active {
+    transform: scale(0.98);
+  }
+  
+  .hover-scale:active {
+    transform: scale(0.97);
+  }
+  
+  /* Larger touch targets */
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  /* Remove hover states that don't work on touch */
+  .sidebar-item:hover::before {
+    opacity: 0;
+  }
+  
+  .sidebar-item:active {
+    background: var(--bg-active);
+  }
+}
+
+/* ============================================
+   📱 MOBILE HEADER STYLES
+   ============================================ */
+
+@media (max-width: 768px) {
+  .mobile-header-compact {
+    height: 60px;
+    padding: 0 1rem;
+  }
+  
+  .mobile-header-title {
+    font-size: 1rem;
+    font-weight: 700;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .mobile-header-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  
+  .mobile-header-actions button {
+    padding: 0.5rem;
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+/* ============================================
+   📱 MOBILE FRIEND LIST / DM LIST
+   ============================================ */
+
+@media (max-width: 768px) {
+  .friend-list-item {
+    padding: 0.75rem 1rem;
+    border-radius: 1rem;
+  }
+  
+  .friend-avatar {
+    width: 44px;
+    height: 44px;
+  }
+  
+  .friend-status-indicator {
+    width: 12px;
+    height: 12px;
+    border-width: 2px;
+  }
+}
+
+/* ============================================
+   📱 MOBILE SPACE/CHANNEL LIST
+   ============================================ */
+
+@media (max-width: 768px) {
+  .space-list-item {
+    padding: 0.875rem 1rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .channel-list-item {
+    padding: 0.625rem 0.875rem;
+    min-height: 44px;
+  }
+  
+  .channel-icon {
+    width: 18px;
+    height: 18px;
   }
 }
 
@@ -1519,5 +2055,270 @@ body {
   }
   66% {
     transform: translate(-30px, 50px) scale(0.9);
+  }
+}
+
+/* ============================================
+   📱 ENHANCED MOBILE EXPERIENCE
+   ============================================ */
+
+/* Mobile-optimized touch interactions */
+@media (max-width: 768px) {
+  /* Smooth page transitions */
+  .page-transition {
+    transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  
+  /* Better touch response for buttons */
+  .btn-mobile {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .btn-mobile::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  
+  .btn-mobile:active::after {
+    opacity: 0.1;
+  }
+  
+  /* Mobile-optimized cards */
+  .card-mobile {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+  
+  .card-mobile:active {
+    transform: scale(0.98) translateZ(0);
+  }
+  
+  /* Smooth list item press effect */
+  .list-item-mobile {
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
+  
+  .list-item-mobile:active {
+    background-color: rgba(99, 102, 241, 0.08);
+  }
+  
+  /* Mobile message bubble improvements */
+  .message-mobile {
+    transition: transform 0.15s ease;
+  }
+  
+  .message-mobile:active {
+    transform: scale(0.99);
+  }
+  
+  /* Improved mobile input focus */
+  input:focus,
+  textarea:focus {
+    outline: none;
+    transform: translateZ(0);
+  }
+  
+  /* Mobile dropdown animation */
+  .dropdown-mobile {
+    transform-origin: top center;
+    animation: dropdownSlide 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  
+  @keyframes dropdownSlide {
+    from {
+      opacity: 0;
+      transform: translateY(-8px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  
+  /* Mobile modal backdrop */
+  .modal-backdrop-mobile {
+    animation: backdropFadeIn 0.25s ease-out;
+  }
+  
+  @keyframes backdropFadeIn {
+    from {
+      opacity: 0;
+      backdrop-filter: blur(0);
+    }
+    to {
+      opacity: 1;
+      backdrop-filter: blur(12px);
+    }
+  }
+  
+  /* Mobile toast notifications */
+  .toast-mobile {
+    animation: toastSlideUp 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  
+  @keyframes toastSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  
+  /* Floating action button */
+  .fab-mobile {
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .fab-mobile:active {
+    transform: scale(0.92);
+    box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+  }
+  
+  /* Mobile header glass effect */
+  .header-glass-mobile {
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+  
+  /* Pull-to-refresh visual feedback */
+  .pull-refresh-indicator {
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  
+  /* Mobile skeleton loading */
+  .skeleton-mobile {
+    background: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.06) 25%,
+      rgba(0, 0, 0, 0.1) 50%,
+      rgba(0, 0, 0, 0.06) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeletonShimmer 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes skeletonShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  
+  .dark .skeleton-mobile {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.05) 25%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(255, 255, 255, 0.05) 75%
+    );
+    background-size: 200% 100%;
+  }
+}
+
+/* ============================================
+   📱 MOBILE GESTURE HINTS
+   ============================================ */
+
+/* Swipe hint animation */
+.swipe-hint {
+  animation: swipeHint 2s ease-in-out infinite;
+}
+
+@keyframes swipeHint {
+  0%, 100% {
+    transform: translateX(0);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateX(-10px);
+    opacity: 1;
+  }
+}
+
+/* Tap hint pulse */
+.tap-hint {
+  animation: tapPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tapPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   📱 MOBILE PERFORMANCE OPTIMIZATIONS  
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* GPU acceleration for smooth scrolling */
+  .scroll-container {
+    -webkit-overflow-scrolling: touch;
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+  
+  /* Reduce paint on fixed elements */
+  .fixed-element {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+  
+  /* Optimize images */
+  img {
+    content-visibility: auto;
+  }
+  
+  /* Reduce motion for battery saving */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ============================================
+   📱 DARK MODE MOBILE ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+  .dark .mobile-bottom-nav {
+    background: rgba(10, 9, 24, 0.95);
+    border-top-color: rgba(139, 92, 246, 0.15);
+  }
+  
+  .dark .mobile-sidebar {
+    background: rgba(17, 14, 36, 0.98);
+  }
+  
+  .dark .mobile-header {
+    background: rgba(10, 9, 24, 0.95);
+  }
+  
+  .dark .skeleton-mobile {
+    background: linear-gradient(
+      90deg,
+      rgba(139, 92, 246, 0.05) 25%,
+      rgba(139, 92, 246, 0.1) 50%,
+      rgba(139, 92, 246, 0.05) 75%
+    );
+    background-size: 200% 100%;
   }
 }
