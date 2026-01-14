@@ -527,9 +527,10 @@ export default function CollaborationApp() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedInviteSearchQuery(inviteSearchQuery)
-    }, 150)
+    }, 100)
     return () => clearTimeout(handler)
   }, [inviteSearchQuery])
+
 
   // --- Search Logic: Spaces ---
   useEffect(() => {
@@ -1357,15 +1358,33 @@ export default function CollaborationApp() {
       // 1. "Add Friend" Modal: Global Search for NEW friends
       if (showAddFriendModal && debouncedInviteSearchQuery.length > 0) {
         try {
-          const users = await Storage.searchUsersByName(debouncedInviteSearchQuery)
-          const safeUsers = Array.isArray(users) ? users : []
-          const results = safeUsers.filter(
-            u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
-          )
-          setInviteSearchResults(results)
+          const q = debouncedInviteSearchQuery.toLowerCase()
+          // Fast client-side matches from cached `users` for immediate responsiveness
+          const localMatches = Array.isArray(users)
+            ? users.filter(
+                u =>
+                  u.name &&
+                  u.name.toLowerCase().includes(q) &&
+                  u.id !== currentUser?.id &&
+                  !currentUser?.friends?.includes(u.id)
+              )
+            : []
+          // show a limited set immediately to avoid UI jank
+          setInviteSearchResults(localMatches.slice(0, 50))
+
+          // For longer queries, fetch server-side results to improve coverage
+          if (q.length >= 3) {
+            const remote = await Storage.searchUsersByName(debouncedInviteSearchQuery)
+            const safeUsers = Array.isArray(remote) ? remote : []
+            const results = safeUsers.filter(
+              u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
+            )
+            setInviteSearchResults(results)
+          }
         } catch (e) {
           console.error("searchUsersByName failed", e)
-          setInviteSearchResults([])
+          // keep local matches if available, otherwise clear
+          setInviteSearchResults(prev => (Array.isArray(prev) && prev.length ? prev : []))
         }
       }
       // 2. "Invite to Channel" Modal: Filter EXISTING friends only
@@ -3464,10 +3483,10 @@ export default function CollaborationApp() {
 
   const toggleFriendSelection = userId => {
     setSelectedFriendInvitees(prev =>
-      prev.includes(userId)
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
     )
+    // Hide the dropdown after a selection to reveal the Send button and avoid overlay issues
+    setInviteSearchResults([])
   }
 
   const addFriendsToChannel = async () => {
