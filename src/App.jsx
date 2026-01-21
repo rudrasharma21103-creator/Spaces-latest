@@ -50,6 +50,9 @@ import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
+import TaskModal from "./components/TaskModal"
+import * as TasksService from "./services/tasks"
+import * as RolesService from "./services/roles"
 
 // Backend API base used for uploads and metadata fetches
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
@@ -159,6 +162,8 @@ export default function CollaborationApp() {
   const [showMemberDetails, setShowMemberDetails] = useState(false)
   const [showEventModal, setShowEventModal] = useState(false)
   const [showNewEventForm, setShowNewEventForm] = useState(false)
+  const [showTaskModal, setShowTaskModal] = useState(false)
+  const [tasksList, setTasksList] = useState([])
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -962,6 +967,13 @@ export default function CollaborationApp() {
         setUsers(Array.isArray(allUsers) ? allUsers : [])
         setFriends(Array.isArray(friendsList) ? friendsList : [])
         setEvents(evts || [])
+        // Load tasks for current user (assigned or created)
+        try {
+          const t = await TasksService.getTasksForUser(currentUser.id)
+          setTasksList(Array.isArray(t) ? t : [])
+        } catch (e) {
+          console.warn('Failed to load tasks', e)
+        }
 
         return enrichedSpaces
       }
@@ -1014,9 +1026,48 @@ export default function CollaborationApp() {
       import("./services/ws")
         .then(({ connectUserSocket }) => {
           userSocket = connectUserSocket(data => {
-            if (!data || !data.type) return
+              if (!data || !data.type) return
             
-            console.log('User socket received message:', data.type, data)
+              console.log('User socket received message:', data.type, data)
+
+              // Real-time channel role updates
+              if (data.type === 'channel_roles_updated') {
+                try {
+                  setSpaces(prev => {
+                    if (!Array.isArray(prev)) return prev
+                    return prev.map(s => {
+                      if (String(s.id) !== String(data.space_id)) return s
+                      const newChannels = (s.channels || []).map(ch => {
+                        if (String(ch.id) === String(data.channel_id)) {
+                          return { ...ch, roles: data.roles }
+                        }
+                        return ch
+                      })
+                      return { ...s, channels: newChannels }
+                    })
+                  })
+                } catch (e) { console.error('Failed applying channel_roles_updated', e) }
+                return
+              }
+
+              if (data.type === 'channel_member_changed') {
+                try {
+                  setSpaces(prev => {
+                    if (!Array.isArray(prev)) return prev
+                    return prev.map(s => {
+                      if (String(s.id) !== String(data.space_id)) return s
+                      const newChannels = (s.channels || []).map(ch => {
+                        if (String(ch.id) === String(data.channel_id)) {
+                          return { ...ch, members: data.members, roles: data.roles }
+                        }
+                        return ch
+                      })
+                      return { ...s, channels: newChannels }
+                    })
+                  })
+                } catch (e) { console.error('Failed applying channel_member_changed', e) }
+                return
+              }
 
             // Handle WebRTC signaling messages via notification socket
             if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
@@ -1050,6 +1101,20 @@ export default function CollaborationApp() {
                 handleWebRTCSignaling(data)
               }
               return
+            }
+
+            // Handle task notifications
+            if (data.type === 'task_created' || data.type === 'task_updated') {
+              const t = data.task
+              if (t) {
+                setTasksList(prev => {
+                  try {
+                    const exists = (prev || []).find(p => String(p.id) === String(t.id) || (p.timestamp && t.timestamp && String(p.timestamp) === String(t.timestamp)))
+                    if (exists) return (prev || []).map(p => (String(p.id) === String(t.id) ? t : p))
+                    return [t, ...(prev || [])]
+                  } catch (e) { return prev }
+                })
+              }
             }
 
             // Handle global profile updates emitted by server
@@ -1309,6 +1374,32 @@ export default function CollaborationApp() {
         return
       }
       
+      // Convert server-side task broadcasts into chat messages
+      if (data.type === 'task' && data.task) {
+        try {
+          const t = data.task
+          const msg = {
+            id: t.id || (t._id ? String(t._id) : `task-${Date.now()}`),
+            userId: t.created_by,
+            text: t.message,
+            timestamp: t.timestamp,
+            type: 'task',
+            assigned_to: t.assigned_to || [],
+            status: t.status || 'pending'
+          }
+          const normalized = { ...msg, status: 'sent', optimistic: false }
+          setMessages(prev => {
+            const key = chatId
+            const existing = prev[key] || []
+            const filtered = normalized.id
+              ? existing.filter(m => m.id !== normalized.id)
+              : existing
+            return { ...prev, [key]: [...filtered, normalized] }
+          })
+        } catch (e) { console.warn('failed to normalize task broadcast', e) }
+        return
+      }
+
       const normalized = { ...data, status: "sent", optimistic: false }
 
       setMessages(prev => {
@@ -2773,6 +2864,13 @@ export default function CollaborationApp() {
     return []
   }
 
+  const getChannelRole = (memberId) => {
+    const channel = getCurrentChannels().find(c => c.id === activeChannel)
+    if (!channel) return 'member'
+    const roles = channel.roles || {}
+    return roles[String(memberId)] || 'member'
+  }
+
   const MAX_MESSAGE_SEND_RETRIES = 3
 
   const sanitizeMessagePayload = message => {
@@ -3070,6 +3168,35 @@ export default function CollaborationApp() {
     }
   }
 
+  const handleSetRole = async (memberId, role) => {
+    if (!activeSpace || !activeChannel) return
+    try {
+      await RolesService.setChannelRole({ space_id: activeSpace, channel_id: activeChannel, user_id: memberId, role })
+      // Refresh local spaces to reflect change
+      try {
+        const sps = await Storage.getSpacesForUser(currentUser.spaces)
+        const enrichedSpaces = sps.map(s => ({
+          ...s,
+          icon:
+            s.iconType === "graduation" ? (
+              <GraduationCap className="w-5 h-5" />
+            ) : s.iconType === "briefcase" ? (
+              <Briefcase className="w-5 h-5" />
+            ) : (
+              <UserIcon className="w-5 h-5" />
+            )
+        }))
+        setSpaces(enrichedSpaces)
+      } catch (e) {
+        console.error('Failed to refresh spaces after role change', e)
+      }
+    } catch (e) {
+      console.error('Failed to set role', e)
+      // Optionally show an access denied modal
+      if (e && e.status === 403) setShowAccessDeniedModal(true)
+    }
+  }
+
   const sendMessage = async () => {
     if ((!messageInput.trim() && selectedFiles.length === 0) || !currentUser)
       return
@@ -3278,19 +3405,26 @@ export default function CollaborationApp() {
           id: Date.now() + 1,
           name: "general",
           type: "public",
-          members: [currentUser.id]
+          members: [currentUser.id],
+          roles: { [String(currentUser.id)]: 'owner' }
         },
         {
           id: Date.now() + 2,
           name: "random",
           type: "public",
-          members: [currentUser.id]
+          members: [currentUser.id],
+          roles: { [String(currentUser.id)]: 'owner' }
         }
       ],
       expanded: true,
       ownerId: currentUser.id
     }
     await Storage.saveSpace(newSpace)
+    // Reflect owner role locally so creator sees Owner badge immediately
+    setSpaces(prev => {
+      const arr = Array.isArray(prev) ? [...prev] : []
+      return [...arr, newSpace]
+    })
     const updatedUser = {
       ...currentUser,
       spaces: [...currentUser.spaces, newSpace.id]
@@ -3308,7 +3442,8 @@ export default function CollaborationApp() {
       id: Date.now(),
       name: newChannelName.toLowerCase().replace(/\s+/g, "-"),
       type: "public", // Defaulted
-      members: [currentUser.id]
+      members: [currentUser.id],
+      roles: { [String(currentUser.id)]: 'owner' }
     }
     const space = spaces.find(s => s.id === activeSpace)
     if (space) {
@@ -3316,6 +3451,8 @@ export default function CollaborationApp() {
         ...space,
         channels: [...space.channels, newChannel]
       }
+      // Reflect owner role locally immediately so creator sees Owner badge without waiting for broadcast
+      setSpaces(prev => prev.map(s => (s.id === activeSpace ? updatedSpace : s)))
       await Storage.saveSpace(updatedSpace)
       setSpaces(prev =>
         prev.map(s => (s.id === activeSpace ? updatedSpace : s))
@@ -4020,8 +4157,8 @@ export default function CollaborationApp() {
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <h3 className="text-2xl font-extrabold">Register your company with Spaces</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">Secure your company domain and invite employees.</p>
-                  </div>
+
+                ) : activeView === "calendar" ? (
                   <button onClick={() => setShowOrgModal(false)} className="p-2 rounded-full hover:bg-white/20">
                     <X className="w-5 h-5" />
                   </button>
@@ -4173,6 +4310,7 @@ export default function CollaborationApp() {
 
               </div>
             </div>
+          </div>
           </div>
         )}
 
@@ -4662,6 +4800,42 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {showTaskModal && (
+        <TaskModal
+          visible={showTaskModal}
+          onClose={() => setShowTaskModal(false)}
+          members={getActiveMembers()}
+          currentUser={currentUser}
+          spaceId={activeSpace}
+          onTaskCreated={(payload) => {
+            // optimistic UI: add a task message to current chat and add to tasks list
+            try {
+              const chatId = getActiveChatId()
+              const tempId = `tmp-task-${Date.now()}-${Math.floor(Math.random()*1000)}`
+              const newMsg = {
+                id: tempId,
+                userId: currentUser?.id,
+                text: payload.message,
+                timestamp: payload.timestamp || new Date().toISOString(),
+                type: 'task',
+                assigned_to: payload.assigned_to,
+                status: 'sent',
+                optimistic: false
+              }
+              if (chatId) {
+                setMessages(prev => ({
+                  ...prev,
+                  [chatId]: [...(prev[chatId] || []), newMsg]
+                }))
+              }
+              setTasksList(prev => [payload, ...(prev || [])])
+            } catch (e) {
+              console.warn('optimistic task create failed', e)
+            }
+          }}
+        />
+      )}
+
       {showOrgModal && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/30" onClick={() => setShowOrgModal(false)}></div>
@@ -4935,6 +5109,15 @@ export default function CollaborationApp() {
                 className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
               >
                 <Plus className="w-5 h-5" />
+              </button>
+            )}
+            {!sidebarCollapsed && !isMobile && (
+              <button
+                onClick={() => { setActiveView('tasks'); setActiveSpace(null) }}
+                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                title="Tasks"
+              >
+                <FileText className="w-5 h-5" />
               </button>
             )}
             {/* Admin dashboard access - visible to org admins of verified org */}
@@ -5612,6 +5795,54 @@ export default function CollaborationApp() {
               </div>
             </div>
           </div>
+        ) : activeView === "tasks" ? (
+          <div className={`flex-1 flex flex-col overflow-auto p-6 ${isDarkMode ? 'bg-[var(--bg-tertiary)]' : 'bg-white'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Tasks</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 border rounded bg-white/50">
+                <h3 className="font-bold mb-2">Assigned to me</h3>
+                {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
+                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
+                    <div>
+                      <div className="font-bold">{t.message}</div>
+                      <div className="text-xs text-slate-500">{t.timestamp}</div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
+                      {t.status !== 'completed' && (
+                        <button className="text-sm text-indigo-600" onClick={async () => {
+                          const id = t.id || t.timestamp
+                          setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
+                          try {
+                            await TasksService.updateTask(id, { status: 'completed' })
+                          } catch (e) {
+                            console.warn('task update failed', e)
+                          }
+                        }}>Mark complete</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 border rounded bg-white/50">
+                <h3 className="font-bold mb-2">Created by me</h3>
+                {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
+                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
+                    <div>
+                      <div className="font-bold">{t.message}</div>
+                      <div className="text-xs text-slate-500">{t.timestamp}</div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : (
           /* VIEW: CHANNEL / DM */
           <>
@@ -5777,19 +6008,25 @@ export default function CollaborationApp() {
                   </div>
                 )}
 
-                {activeView === "channel" && (
-                  <button
-                    onClick={() => {
-                      setInviteSearchQuery("")
-                      setSelectedInviteUsers([])
-                      setShowAddToSpaceModal(true)
-                    }}
-                    className="hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Invite Members</span>
-                  </button>
-                )}
+                {activeView === "channel" && (() => {
+                  const role = getChannelRole(currentUser?.id)
+                  const canInvite = role === 'owner' || role === 'admin'
+                  return (
+                    <button
+                      onClick={() => {
+                        if (!canInvite) return
+                        setInviteSearchQuery("")
+                        setSelectedInviteUsers([])
+                        setShowAddToSpaceModal(true)
+                      }}
+                      disabled={!canInvite}
+                      className={`hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 ${canInvite ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]' : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Invite Members</span>
+                    </button>
+                  )
+                })()}
 
                 <div className={`h-10 w-px mx-2 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
 
@@ -6036,23 +6273,25 @@ export default function CollaborationApp() {
                   )}
 
                   {/* Invite Members (Channel only) */}
-                  {activeView === "channel" && (
-                    <button
-                      onClick={() => {
-                        setInviteSearchQuery("")
-                        setSelectedInviteUsers([])
-                        setShowAddToSpaceModal(true)
-                      }}
-                      className={`p-2.5 rounded-xl transition-all text-white shadow-md touch-active ${
-                        isDarkMode 
-                          ? 'bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/30 active:from-violet-500 active:to-purple-500' 
-                          : 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-indigo-200/50 active:from-indigo-600 active:to-purple-600'
-                      }`}
-                      title="Invite Members"
-                    >
-                      <UserPlus className="w-5 h-5" />
-                    </button>
-                  )}
+                  {activeView === "channel" && (() => {
+                    const role = getChannelRole(currentUser?.id)
+                    const canInvite = role === 'owner' || role === 'admin'
+                    return (
+                      <button
+                        onClick={() => {
+                          if (!canInvite) return
+                          setInviteSearchQuery("")
+                          setSelectedInviteUsers([])
+                          setShowAddToSpaceModal(true)
+                        }}
+                        disabled={!canInvite}
+                        className={`p-2.5 rounded-xl transition-all shadow-md touch-active ${canInvite ? (isDarkMode ? 'text-white bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/30 active:from-violet-500 active:to-purple-500' : 'text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-indigo-200/50 active:from-indigo-600 active:to-purple-600') : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
+                        title="Invite Members"
+                      >
+                        <UserPlus className="w-5 h-5" />
+                      </button>
+                    )
+                  })()}
 
                   {/* Mobile Menu Button */}
                   <button
@@ -6501,6 +6740,19 @@ export default function CollaborationApp() {
                                     </a>
                                   </div>
                                 )}
+
+                                {/* Task Message */}
+                                {msg.type === 'task' && (
+                                  <div className="flex items-start gap-3">
+                                    <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-yellow-700/20' : 'bg-yellow-50'}`}>
+                                      <FileText className={`w-5 h-5 ${isDarkMode ? 'text-yellow-300' : 'text-yellow-600'}`} />
+                                    </div>
+                                    <div>
+                                      <div className={`font-bold ${isMe ? 'text-white' : isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{msg.text || (msg.task && msg.task.message)}</div>
+                                      <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{msg.timestamp}</div>
+                                    </div>
+                                  </div>
+                                )}
                                 
                                 {msg.text && msg.type !== 'meet-invite' && (
                                   <div>
@@ -6799,6 +7051,14 @@ export default function CollaborationApp() {
                           <span className="text-lg">😀</span>
                         </button>
 
+                        <button
+                          onClick={() => setShowTaskModal(true)}
+                          title="Create Task"
+                          className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
+                        >
+                          <FileText className="w-5 h-5" />
+                        </button>
+
                         {showEmojiPickerFor === 'input' && (
                           <div className={`absolute left-0 top-12 flex gap-1 p-2 rounded-xl shadow-lg z-30 ${isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`}>
                             {EMOJIS.map(e => (
@@ -6862,8 +7122,8 @@ export default function CollaborationApp() {
               <div
                 className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-purple-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
-                    ? "w-80 translate-x-0 opacity-100"
-                    : "w-80 translate-x-full opacity-0 pointer-events-none"
+                    ? "w-96 translate-x-0 opacity-100"
+                      : "w-96 translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
                 <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-purple-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-indigo-50/30'}`}>
@@ -6964,47 +7224,67 @@ export default function CollaborationApp() {
                               </div>
                             </div>
                             {isMe ? (
-                              <span className={`text-[10px] px-2 py-1 rounded-md font-bold tracking-wide ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                                YOU
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] px-2 py-1 rounded-md font-bold tracking-wide ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                                  YOU
+                                </span>
+                                <span className={`text-[10px] px-2 py-1 rounded-md font-semibold ${isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                  {getChannelRole(member.id).toUpperCase()}
+                                </span>
+                              </div>
                             ) : (
                               <div className="flex items-center gap-2">
-                                {!isFriend && (
-                                  <button
-                                    onClick={() =>
-                                      !isPending &&
-                                      setShowAddFriendConfirm(member.id)
-                                    }
-                                    disabled={isPending}
-                                    className={`p-1.5 rounded-lg transition-all ${
-                                      isPending
-                                        ? isDarkMode ? "text-slate-600 cursor-default" : "text-slate-300 cursor-default"
-                                        : isDarkMode ? "hover:bg-purple-900/50 text-slate-400 hover:text-purple-400" : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
-                                    }`}
-                                    title={
-                                      isPending
-                                        ? "Request Sent"
-                                        : "Add to friends"
-                                    }
-                                  >
-                                    {isPending ? (
-                                      <Check className="w-4 h-4" />
-                                    ) : (
-                                      <Plus className="w-4 h-4" />
-                                    )}
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  {!isFriend && (
+                                    <button
+                                      onClick={() =>
+                                        !isPending &&
+                                        setShowAddFriendConfirm(member.id)
+                                      }
+                                      disabled={isPending}
+                                      className={`p-1.5 rounded-lg transition-all ${
+                                        isPending
+                                          ? isDarkMode ? "text-slate-600 cursor-default" : "text-slate-300 cursor-default"
+                                          : isDarkMode ? "hover:bg-purple-900/50 text-slate-400 hover:text-purple-400" : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
+                                      }`}
+                                      title={
+                                        isPending
+                                          ? "Request Sent"
+                                          : "Add to friends"
+                                      }
+                                    >
+                                      {isPending ? (
+                                        <Check className="w-4 h-4" />
+                                      ) : (
+                                        <Plus className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  )}
 
-                                {/* Remove member (visible to main space or channel creator) */}
-                                {(currentUser?.id === getCurrentSpace()?.ownerId || currentUser?.id === (getCurrentChannels().find(c => c.id === activeChannel)?.ownerId)) && !isMe && (
-                                  <button
-                                    onClick={() => handleRemoveMember(member.id)}
-                                    className="p-1.5 rounded-lg transition-all hover:bg-red-100 text-red-500 hover:text-red-600"
-                                    title="Remove member"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] px-2 py-1 rounded-md font-semibold ${isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                      {getChannelRole(member.id).toUpperCase()}
+                                    </span>
+                                    {currentUser?.id === getCurrentSpace()?.ownerId && !isMe && (
+                                      <select value={getChannelRole(member.id)} onChange={e => handleSetRole(member.id, e.target.value)} className="text-sm rounded-md p-1 bg-transparent border">
+                                        <option value="owner">Owner</option>
+                                        <option value="admin">Admin</option>
+                                        <option value="member">Member</option>
+                                      </select>
+                                    )}
+                                  </div>
+
+                                  {/* Remove member (visible to main space or channel creator) */}
+                                  {(currentUser?.id === getCurrentSpace()?.ownerId || currentUser?.id === (getCurrentChannels().find(c => c.id === activeChannel)?.ownerId)) && !isMe && (
+                                    <button
+                                      onClick={() => handleRemoveMember(member.id)}
+                                      className="p-1.5 rounded-lg transition-all hover:bg-red-100 text-red-500 hover:text-red-600"
+                                      title="Remove member"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>
