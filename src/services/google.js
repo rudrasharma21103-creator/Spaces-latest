@@ -7,35 +7,35 @@ const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY
 export const GOOGLE_APPS = [
   {
     name: 'Gmail',
-    icon: 'https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico',
+    icon: '/gmail.png',
     url: 'https://mail.google.com',
     color: 'bg-red-50 text-red-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Drive',
-    icon: 'https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png',
+    icon: '/google-drive.png',
     url: 'https://drive.google.com',
     color: 'bg-blue-50 text-blue-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Docs',
-    icon: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x128.png',
+    icon: '/google-docs.png',
     url: 'https://docs.google.com',
     color: 'bg-blue-50 text-blue-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Sheets',
-    icon: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x128.png',
+    icon: '/google-sheets.png',
     url: 'https://sheets.google.com',
     color: 'bg-green-50 text-green-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Slides',
-    icon: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x128.png',
+    icon: '/slides.png',
     url: 'https://slides.google.com',
     color: 'bg-yellow-50 text-yellow-600',
     iconSize: 'w-8 h-8'
@@ -200,7 +200,11 @@ export const fetchGoogleDriveFiles = async (accessToken, appType = 'all') => {
         }
       }
     )
-    return response.data.files || []
+    const files = response.data.files || []
+    try {
+      localStorage.setItem('google_drive_cache', JSON.stringify({ time: Date.now(), files }))
+    } catch (e) {}
+    return files
   } catch (error) {
     if (error.response?.status === 403) {
       throw new Error('Access denied. Please ensure Drive permissions are granted.')
@@ -258,13 +262,19 @@ export const getAppIcon = (appType) => {
       emoji: '📧', 
       color: 'bg-red-50 text-red-600', 
       border: 'border-red-200',
-      iconUrl: 'https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico'
+      iconUrl: '/gmail.png'
     },
     drive: { 
       emoji: '📁', 
       color: 'bg-blue-50 text-blue-600', 
       border: 'border-blue-200',
-      iconUrl: 'https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png'
+      iconUrl: '/google-drive.png'
+    },
+    shared: {
+      emoji: '📂',
+      color: 'bg-slate-50 text-slate-700',
+      border: 'border-slate-200',
+      iconUrl: '/google-drive.png'
     },
     pdf: { 
       emoji: '📕', 
@@ -426,7 +436,11 @@ export const fetchGmailAttachments = async (accessToken) => {
     // Sort by date (newest first)
     attachments.sort((a, b) => parseInt(b.date) - parseInt(a.date))
 
-    return attachments
+      try {
+        localStorage.setItem('google_gmail_cache', JSON.stringify({ time: Date.now(), attachments }))
+      } catch (e) {}
+
+      return attachments
   } catch (error) {
     if (error.response?.status === 403) {
       throw new Error('Gmail access denied. Please ensure Gmail permissions are granted.')

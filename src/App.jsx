@@ -34,23 +34,73 @@ import {
   MicOff,
   VideoOff,
   PhoneOff,
+  Phone,
   Lock,
   ExternalLink,
   ShieldAlert,
   Grid3x3,
   FileText,
   Download,
-  Clock
+  Clock,
+  Sun,
+  Moon,
+  Monitor
 } from "lucide-react"
 import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
-import { connectChatSocket } from "./services/ws"
+import { connectChatSocket, connectUserSocket } from "./services/ws"
 
 // Backend API base used for uploads and metadata fetches
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
+// Custom hook to detect window size for responsive design
+function useWindowSize() {
+  const [windowSize, setWindowSize] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  })
+
+  useEffect(() => {
+    function handleResize() {
+      setWindowSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      })
+    }
+    
+    window.addEventListener('resize', handleResize)
+    handleResize() // Call on mount
+    
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  return windowSize
+}
+
 export default function CollaborationApp() {
+  // Mobile responsive detection
+  const { width: windowWidth } = useWindowSize()
+  const isMobile = windowWidth < 768
+  const [mobileView, setMobileView] = useState("chat") // "spaces" | "chat" | "friends"
+  const [showMobileDrawer, setShowMobileDrawer] = useState(false) // Mobile drawer menu
+
+  // Dark Mode State - persisted to localStorage
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('spacexyz-dark-mode')
+    return saved ? JSON.parse(saved) : false
+  })
+
+  // Apply dark mode class to document when it changes
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    localStorage.setItem('spacexyz-dark-mode', JSON.stringify(isDarkMode))
+  }, [isDarkMode])
+
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [authMode, setAuthMode] = useState("login")
@@ -80,6 +130,7 @@ export default function CollaborationApp() {
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(false)
 
   // Search State
   const [searchQuery, setSearchQuery] = useState("") // Spaces Search Input
@@ -114,6 +165,58 @@ export default function CollaborationApp() {
   const [avatarPreview, setAvatarPreview] = useState(null)
   const [selectedPreset, setSelectedPreset] = useState(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  // Organization registration modal state
+  const [showOrgModal, setShowOrgModal] = useState(false)
+  const [orgForm, setOrgForm] = useState({ name: "", adminEmail: "", domain: "", logoUrl: "" })
+  const [orgStage, setOrgStage] = useState("form") // form | otp | dns | verified
+  const [orgError, setOrgError] = useState("")
+  const [orgMessage, setOrgMessage] = useState("")
+  const [orgOtp, setOrgOtp] = useState("")
+  const [orgOtpExpiresAt, setOrgOtpExpiresAt] = useState(null)
+  const [orgDnsStatus, setOrgDnsStatus] = useState(null)
+  // Admin dashboard state
+  const [orgInfo, setOrgInfo] = useState(null)
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false)
+  const [adminUsers, setAdminUsers] = useState([])
+  const [adminSearch, setAdminSearch] = useState("")
+  const adminSocketRef = useRef(null)
+  const [adminOnlineSet, setAdminOnlineSet] = useState(new Set())
+
+  // Load organization info when currentUser changes (by domain)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!currentUser || !currentUser.email) { setOrgInfo(null); return }
+        const m = (currentUser.email.match(/@([A-Za-z0-9.-]+)$/) || [])
+        const domain = m[1]
+        if (!domain) { setOrgInfo(null); return }
+        const res = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(domain)}`)
+        if (res.ok) {
+          const j = await res.json()
+          setOrgInfo(j)
+        } else {
+          setOrgInfo(null)
+        }
+      } catch (e) {
+        setOrgInfo(null)
+      }
+    })()
+  }, [currentUser])
+
+  // When admin dashboard opens, connect to notifications socket to receive presence updates
+  useEffect(() => {
+    if (!showAdminDashboard) return
+    const sock = connectUserSocket(data => {
+      if (!data) return
+      if (data.type === 'presence_update') {
+        setAdminOnlineSet(new Set(data.online_users || []))
+      }
+    })
+    adminSocketRef.current = sock
+    return () => {
+      try { sock.close(); adminSocketRef.current = null } catch (e) {}
+    }
+  }, [showAdminDashboard])
   const [showAccessDeniedModal, setShowAccessDeniedModal] = useState(false)
   const [showAddFriendConfirm, setShowAddFriendConfirm] = useState(null) // ID of user to add
 
@@ -125,6 +228,7 @@ export default function CollaborationApp() {
 
   // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
+  const [debouncedInviteSearchQuery, setDebouncedInviteSearchQuery] = useState("")
   const [inviteSearchResults, setInviteSearchResults] = useState([])
   // Changed to array for bulk selection in Friend Modal
   const [selectedFriendInvitees, setSelectedFriendInvitees] = useState([])
@@ -169,7 +273,7 @@ export default function CollaborationApp() {
     title: "",
     description: "",
     time: "09:00",
-    type: "meeting"
+    type: "event"
   })
   const [selectedDate, setSelectedDate] = useState(new Date())
 
@@ -181,8 +285,30 @@ export default function CollaborationApp() {
   const [incomingCall, setIncomingCall] = useState(null)
   const videoRef = useRef(null)
   const incomingTimeoutRef = useRef(null)
-  // Feature flag to disable live video calls in channels and chats
-  const VIDEO_ENABLED = false
+  // Feature flag to enable live video calls in channels and chats
+  const VIDEO_ENABLED = true
+
+  // WebRTC Video Call State
+  const [showWebRTCCall, setShowWebRTCCall] = useState(false)
+  const [showAddFriendsToCall, setShowAddFriendsToCall] = useState(false)
+  const [webrtcCallStatus, setWebrtcCallStatus] = useState('idle') // 'idle' | 'calling' | 'ringing' | 'connected' | 'ended'
+  const [webrtcCallPartner, setWebrtcCallPartner] = useState(null)
+  const [localStream, setLocalStream] = useState(null)
+  const [remoteStream, setRemoteStream] = useState(null)
+  const [webrtcError, setWebrtcError] = useState(null)
+  const [isWebRTCMicOn, setIsWebRTCMicOn] = useState(true)
+  const [isWebRTCVideoOn, setIsWebRTCVideoOn] = useState(true)
+  const [callStartTime, setCallStartTime] = useState(null)
+  const [callDuration, setCallDuration] = useState(0)
+  const [callParticipants, setCallParticipants] = useState([]) // Array of participants in the call
+  const [pendingCallParticipants, setPendingCallParticipants] = useState([]) // Friends being called
+  const localVideoRef = useRef(null)
+  const remoteVideoRef = useRef(null)
+  const peerConnectionRef = useRef(null)
+  const pendingIceCandidatesRef = useRef([])
+  const callSocketRef = useRef(null)
+  const userSocketRef = useRef(null)
+  const callTimerRef = useRef(null)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -284,7 +410,6 @@ export default function CollaborationApp() {
         </div>
       )
     }
-
     // fallback: emoji avatar or letter avatar with generated gradient
     const colors = ["#ff9a9e","#fad0c4","#f6d365","#f093fb","#a1c4fd","#c2e9fb","#d4fc79","#96fbc4"]
     const idx = (String(user.id || user._id || name).length) % colors.length
@@ -440,16 +565,24 @@ export default function CollaborationApp() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery)
-    }, 300)
+    }, 150)
     return () => clearTimeout(handler)
   }, [searchQuery])
 
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedDmSearchQuery(dmSearchQuery)
-    }, 300)
+    }, 150)
     return () => clearTimeout(handler)
   }, [dmSearchQuery])
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedInviteSearchQuery(inviteSearchQuery)
+    }, 100)
+    return () => clearTimeout(handler)
+  }, [inviteSearchQuery])
+
 
   // --- Search Logic: Spaces ---
   useEffect(() => {
@@ -752,8 +885,8 @@ export default function CollaborationApp() {
       }
     }
 
-    // Reduced polling frequency - WebSocket handles real-time updates
-    const interval = setInterval(pollData, 5000)
+    // Fast polling for real-time notifications
+    const interval = setInterval(pollData, 1000)
     return () => clearInterval(interval)
   }, [
     isAuthenticated,
@@ -882,6 +1015,42 @@ export default function CollaborationApp() {
         .then(({ connectUserSocket }) => {
           userSocket = connectUserSocket(data => {
             if (!data || !data.type) return
+            
+            console.log('User socket received message:', data.type, data)
+
+            // Handle WebRTC signaling messages via notification socket
+            if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
+              console.log('WebRTC signaling via user socket:', data.type, data)
+              
+              if (data.type === 'webrtc-call-request') {
+                // Incoming call - check if this message is for current user
+                if (String(data.targetUserId) === String(currentUser?.id)) {
+                  console.log('Incoming WebRTC call from:', data.fromUserName)
+                  // Clear any existing timeout
+                  if (incomingTimeoutRef.current) {
+                    clearTimeout(incomingTimeoutRef.current)
+                    incomingTimeoutRef.current = null
+                  }
+                  setIncomingCall({
+                    id: `webrtc-${Date.now()}`,
+                    fromId: data.fromUserId,
+                    fromName: data.fromUserName,
+                    fromAvatar: data.fromUserAvatar || '👤',
+                    webrtcOffer: data.offer,
+                    isWebRTC: true
+                  })
+                  // Auto-dismiss after 10 seconds if not answered
+                  incomingTimeoutRef.current = setTimeout(() => {
+                    setIncomingCall(null)
+                    incomingTimeoutRef.current = null
+                  }, 10000)
+                }
+              } else {
+                // Handle other WebRTC signaling (answer, ice-candidate, etc.)
+                handleWebRTCSignaling(data)
+              }
+              return
+            }
 
             // Handle global profile updates emitted by server
             if (data.type === 'profileUpdated' && data.userId) {
@@ -985,6 +1154,9 @@ export default function CollaborationApp() {
 
             // Presence events and other types could be handled here in future
           })
+          // Store in ref for WebRTC signaling
+          userSocketRef.current = userSocket
+          console.log('User notification socket connected and stored in ref')
         })
         .catch(e => {
           console.error('Failed to connect user socket', e)
@@ -1103,6 +1275,40 @@ export default function CollaborationApp() {
     const ws = connectChatSocket(chatId, data => {
       // Expect data to be a message object; ignore presence updates
       if (!data) return
+      
+      // Handle WebRTC signaling messages inline to avoid stale closure issues
+      if (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate') {
+        console.log('WebRTC signaling received:', data.type, data)
+        
+        // Process different signaling message types
+        if (data.type === 'webrtc-call-request') {
+          // Incoming call - check if this message is for current user
+          if (String(data.targetUserId) === String(currentUser?.id)) {
+            console.log('Incoming WebRTC call from:', data.fromUserName)
+            setIncomingCall({
+              id: `webrtc-${Date.now()}`,
+              fromId: data.fromUserId,
+              fromName: data.fromUserName,
+              fromAvatar: data.fromUserAvatar || '👤',
+              webrtcOffer: data.offer,
+              isWebRTC: true
+            })
+            // Auto-dismiss after 10 seconds if not answered
+            if (incomingTimeoutRef.current) {
+              clearTimeout(incomingTimeoutRef.current)
+            }
+            incomingTimeoutRef.current = setTimeout(() => {
+              setIncomingCall(null)
+              incomingTimeoutRef.current = null
+            }, 10000)
+          }
+        } else {
+          // For other signaling messages, delegate to handler
+          handleWebRTCSignaling(data)
+        }
+        return
+      }
+      
       const normalized = { ...data, status: "sent", optimistic: false }
 
       setMessages(prev => {
@@ -1202,17 +1408,35 @@ export default function CollaborationApp() {
   useEffect(() => {
     ;(async () => {
       // 1. "Add Friend" Modal: Global Search for NEW friends
-      if (showAddFriendModal && inviteSearchQuery.length > 0) {
+      if (showAddFriendModal && debouncedInviteSearchQuery.length > 0) {
         try {
-          const users = await Storage.searchUsersByName(inviteSearchQuery)
-          const safeUsers = Array.isArray(users) ? users : []
-          const results = safeUsers.filter(
-            u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
-          )
-          setInviteSearchResults(results)
+          const q = debouncedInviteSearchQuery.toLowerCase()
+          // Fast client-side matches from cached `users` for immediate responsiveness
+          const localMatches = Array.isArray(users)
+            ? users.filter(
+                u =>
+                  u.name &&
+                  u.name.toLowerCase().includes(q) &&
+                  u.id !== currentUser?.id &&
+                  !currentUser?.friends?.includes(u.id)
+              )
+            : []
+          // show a limited set immediately to avoid UI jank
+          setInviteSearchResults(localMatches.slice(0, 50))
+
+          // For longer queries, fetch server-side results to improve coverage
+          if (q.length >= 3) {
+            const remote = await Storage.searchUsersByName(debouncedInviteSearchQuery)
+            const safeUsers = Array.isArray(remote) ? remote : []
+            const results = safeUsers.filter(
+              u => u.id !== currentUser?.id && !currentUser?.friends?.includes(u.id)
+            )
+            setInviteSearchResults(results)
+          }
         } catch (e) {
           console.error("searchUsersByName failed", e)
-          setInviteSearchResults([])
+          // keep local matches if available, otherwise clear
+          setInviteSearchResults(prev => (Array.isArray(prev) && prev.length ? prev : []))
         }
       }
       // 2. "Invite to Channel" Modal: Filter EXISTING friends only
@@ -1236,6 +1460,7 @@ export default function CollaborationApp() {
       }
     })()
   }, [
+    debouncedInviteSearchQuery,
     inviteSearchQuery,
     showAddFriendModal,
     showAddToSpaceModal,
@@ -1366,6 +1591,8 @@ export default function CollaborationApp() {
 
   // --- Google OAuth Handlers ---
   const handleGoogleLogin = () => {
+    // Ensure org modal is closed if present before starting Google flow
+    try { setShowOrgModal(false); setOrgStage('form') } catch (e) {}
     GoogleService.handleGoogleSignIn(
       async (userInfo, credential) => {
         setAuthError("")
@@ -1441,6 +1668,8 @@ export default function CollaborationApp() {
           setActiveSpace(defaultSpace.id)
           setActiveChannel(defaultSpace.channels[0].id)
           setAuthSuccess("Account created with Google successfully!")
+          // Make sure org modal remains closed after Google signup
+          try { setShowOrgModal(false); setOrgStage('form') } catch (e) {}
         }
       },
       (error) => {
@@ -1463,7 +1692,19 @@ export default function CollaborationApp() {
         GoogleService.setGoogleAccessToken(accessToken)
         // Mark initial apps as connected
         setConnectedApps(['drive', 'gmail'])
-        // Automatically load docs after connection
+        // Load cached docs quickly for immediate UI responsiveness
+        try {
+          const cachedDrive = JSON.parse(localStorage.getItem('google_drive_cache') || 'null')
+          if (cachedDrive && Array.isArray(cachedDrive.files)) {
+            setGoogleDocs(cachedDrive.files)
+          }
+          const cachedGmail = JSON.parse(localStorage.getItem('google_gmail_cache') || 'null')
+          if (cachedGmail && Array.isArray(cachedGmail.attachments)) {
+            setGmailAttachments(cachedGmail.attachments)
+            setGmailLastCheckTime(cachedGmail.time || Date.now())
+          }
+        } catch (e) {}
+        // Automatically load fresh docs after connection (background)
         loadGoogleDocs(accessToken)
       },
       (error) => {
@@ -1552,7 +1793,12 @@ export default function CollaborationApp() {
       })
     })
 
-    return collected
+    // Sort by timestamp descending (most recent first)
+    return collected.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0
+      return timeB - timeA
+    })
   }
 
   const handleDocsClick = () => {
@@ -1613,7 +1859,7 @@ export default function CollaborationApp() {
       name: doc.name,
       size: doc.size || 0,
       type: doc.mimeType,
-      url: doc.webViewLink,
+      url: doc.source === 'gmail' ? null : (doc.webViewLink || doc.url || doc.public_url),
       source: doc.source || "drive",
       thumbnailLink: doc.thumbnailLink,
       iconLink: doc.iconLink,
@@ -1790,6 +2036,48 @@ export default function CollaborationApp() {
         meetingTitle: ev.summary
       })
 
+      // Send a message in the channel/chat with the meeting link
+      if (meetLink) {
+        const chatId = getActiveChatId()
+        if (chatId) {
+          const tempId = `tmp-meet-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+          const meetMessage = {
+            id: tempId,
+            userId: currentUser.id,
+            text: `${currentUser.name} has started a meet: ${meetLink}`,
+            timestamp: new Date().toISOString(),
+            reactions: {},
+            thread: [],
+            attachments: [],
+            type: 'meet-invite',
+            meetLink: meetLink,
+            meetTitle: ev.summary,
+            status: "sending",
+            optimistic: true
+          }
+
+          // Add to local state
+          setMessages(prev => ({
+            ...prev,
+            [chatId]: [...(prev[chatId] || []), meetMessage]
+          }))
+
+          const payload = sanitizeMessagePayload(meetMessage)
+
+          // Send via WebSocket
+          try {
+            if (chatSocketRef.current) {
+              chatSocketRef.current.send(payload)
+            }
+          } catch (wsErr) {
+            console.warn('chat socket send failed', wsErr)
+          }
+
+          // Persist to database
+          persistMessageWithRetry(chatId, payload, tempId, 0)
+        }
+      }
+
       if (meetLink) window.open(meetLink, '_blank')
 
       setShowVideoModal(false)
@@ -1822,6 +2110,480 @@ export default function CollaborationApp() {
       meetingTitle: currentMeeting.event.summary
     })
   }
+
+  // ============================================
+  // WebRTC Video Call Functions
+  // ============================================
+  
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' }
+  ]
+
+  // Initialize WebRTC peer connection
+  const createPeerConnection = (partnerId) => {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const iceMessage = {
+          type: 'ice-candidate',
+          candidate: event.candidate,
+          fromUserId: currentUser?.id,
+          targetUserId: partnerId
+        }
+        // Prefer user socket for reliable delivery
+        if (userSocketRef.current) {
+          userSocketRef.current.send(iceMessage)
+        } else if (chatSocketRef.current) {
+          chatSocketRef.current.send(iceMessage)
+        }
+      }
+    }
+
+    pc.ontrack = (event) => {
+      console.log('Remote track received:', event.streams)
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0])
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState)
+      if (pc.iceConnectionState === 'connected') {
+        setWebrtcCallStatus('connected')
+      } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        endWebRTCCall()
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState)
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        endWebRTCCall()
+      }
+    }
+
+    return pc
+  }
+
+  // Start outgoing video call
+  const startWebRTCCall = async (targetUser) => {
+    if (!currentUser || !targetUser) return
+    
+    setWebrtcError(null)
+    setWebrtcCallPartner(targetUser)
+    setWebrtcCallStatus('calling')
+    setShowWebRTCCall(true)
+
+    try {
+      // Get local media stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      })
+      
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection(targetUser.id)
+      peerConnectionRef.current = pc
+
+      // Add local tracks to peer connection
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream)
+      })
+
+      // Create and send offer
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      // Send call request via user notification socket (works regardless of which chat is open)
+      const callRequest = {
+        type: 'webrtc-call-request',
+        fromUserId: currentUser.id,
+        fromUserName: currentUser.name,
+        fromUserAvatar: currentUser.avatar || currentUser.avatar_url,
+        targetUserId: targetUser.id,
+        offer: pc.localDescription
+      }
+      
+      console.log('Sending WebRTC call request:', callRequest)
+      
+      if (userSocketRef.current) {
+        console.log('Sending via userSocketRef, readyState:', userSocketRef.current.readyState)
+        userSocketRef.current.send(callRequest)
+      } else if (chatSocketRef.current) {
+        // Fallback to chat socket
+        console.log('Sending via chatSocketRef (fallback)')
+        chatSocketRef.current.send(callRequest)
+      } else {
+        console.error('No WebSocket available to send call request!')
+      }
+
+      // Set timeout for unanswered call
+      setTimeout(() => {
+        if (webrtcCallStatus === 'calling') {
+          setWebrtcError('Call not answered')
+          endWebRTCCall()
+        }
+      }, 60000)
+
+    } catch (err) {
+      console.error('Failed to start video call:', err)
+      setWebrtcError(err.name === 'NotAllowedError' 
+        ? 'Camera/microphone access denied. Please allow access and try again.'
+        : 'Failed to start video call. Please check your camera and microphone.')
+      setWebrtcCallStatus('idle')
+    }
+  }
+
+  // Answer incoming video call
+  const answerWebRTCCall = async () => {
+    if (!incomingCall || !incomingCall.webrtcOffer) return
+
+    // Capture incoming call data before clearing state
+    const callerId = incomingCall.fromId
+    const callerName = incomingCall.fromName
+    const callerAvatar = incomingCall.fromAvatar
+    const offer = incomingCall.webrtcOffer
+
+    setWebrtcError(null)
+    setWebrtcCallPartner({
+      id: callerId,
+      name: callerName,
+      avatar: callerAvatar
+    })
+    setWebrtcCallStatus('connecting')
+    setShowWebRTCCall(true)
+    setIncomingCall(null)
+
+    try {
+      // Get local media stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      })
+      
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection(callerId)
+      peerConnectionRef.current = pc
+
+      // Add local tracks
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream)
+      })
+
+      // Set remote description from offer
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
+
+      // Process any pending ICE candidates
+      for (const candidate of pendingIceCandidatesRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      }
+      pendingIceCandidatesRef.current = []
+
+      // Create and send answer via user socket
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+
+      const answerMessage = {
+        type: 'webrtc-call-answer',
+        fromUserId: currentUser.id,
+        targetUserId: callerId,
+        answer: pc.localDescription
+      }
+      
+      if (userSocketRef.current) {
+        userSocketRef.current.send(answerMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(answerMessage)
+      }
+
+      setWebrtcCallStatus('connected')
+
+    } catch (err) {
+      console.error('Failed to answer video call:', err)
+      setWebrtcError(err.name === 'NotAllowedError'
+        ? 'Camera/microphone access denied.'
+        : 'Failed to answer video call.')
+      endWebRTCCall()
+    }
+  }
+
+  // Decline incoming video call
+  const declineWebRTCCall = () => {
+    if (incomingCall) {
+      const declineMessage = {
+        type: 'webrtc-call-declined',
+        fromUserId: currentUser?.id,
+        targetUserId: incomingCall.fromId
+      }
+      if (userSocketRef.current) {
+        userSocketRef.current.send(declineMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(declineMessage)
+      }
+    }
+    setIncomingCall(null)
+  }
+
+  // Format call duration as mm:ss or hh:mm:ss
+  const formatCallDuration = (seconds) => {
+    const hrs = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Call timer effect
+  useEffect(() => {
+    if (webrtcCallStatus === 'connected' && !callStartTime) {
+      setCallStartTime(Date.now())
+    }
+    
+    if (callStartTime && webrtcCallStatus === 'connected') {
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(Math.floor((Date.now() - callStartTime) / 1000))
+      }, 1000)
+    }
+    
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current)
+        callTimerRef.current = null
+      }
+    }
+  }, [webrtcCallStatus, callStartTime])
+
+  // Add friend to ongoing call
+  const addFriendToCall = async (friend) => {
+    if (!currentUser || !friend) return
+    
+    // Add to pending participants with "calling" status
+    setPendingCallParticipants(prev => [...prev, { ...friend, status: 'calling' }])
+    setShowAddFriendsToCall(false)
+    
+    // Send call request to the friend
+    const callRequest = {
+      type: 'webrtc-call-request',
+      fromUserId: currentUser.id,
+      fromUserName: currentUser.name,
+      fromUserAvatar: currentUser.avatar || currentUser.avatar_url,
+      targetUserId: friend.id,
+      isGroupCall: true
+    }
+    
+    if (userSocketRef.current) {
+      userSocketRef.current.send(callRequest)
+    }
+    
+    // Remove from pending after 10 seconds if not answered
+    setTimeout(() => {
+      setPendingCallParticipants(prev => prev.filter(p => p.id !== friend.id))
+    }, 10000)
+  }
+
+  // End video call
+  const endWebRTCCall = () => {
+    // Clear call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current)
+      callTimerRef.current = null
+    }
+    
+    // Stop all local tracks
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop())
+    }
+    setLocalStream(null)
+    setRemoteStream(null)
+
+    // Close peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close()
+      peerConnectionRef.current = null
+    }
+
+    // Notify other party
+    if (webrtcCallPartner) {
+      const endMessage = {
+        type: 'webrtc-call-ended',
+        fromUserId: currentUser?.id,
+        targetUserId: webrtcCallPartner.id
+      }
+      if (userSocketRef.current) {
+        userSocketRef.current.send(endMessage)
+      } else if (chatSocketRef.current) {
+        chatSocketRef.current.send(endMessage)
+      }
+    }
+    
+    // Notify all participants in group call
+    callParticipants.forEach(participant => {
+      if (participant.id !== currentUser?.id) {
+        const endMessage = {
+          type: 'webrtc-call-ended',
+          fromUserId: currentUser?.id,
+          targetUserId: participant.id
+        }
+        if (userSocketRef.current) {
+          userSocketRef.current.send(endMessage)
+        }
+      }
+    })
+
+    // Reset state
+    setShowWebRTCCall(false)
+    setWebrtcCallStatus('idle')
+    setWebrtcCallPartner(null)
+    setWebrtcError(null)
+    setIsWebRTCMicOn(true)
+    setIsWebRTCVideoOn(true)
+    setCallStartTime(null)
+    setCallDuration(0)
+    setCallParticipants([])
+    setPendingCallParticipants([])
+    pendingIceCandidatesRef.current = []
+  }
+
+  // Toggle microphone
+  const toggleWebRTCMic = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0]
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled
+        setIsWebRTCMicOn(audioTrack.enabled)
+      }
+    }
+  }
+
+  // Toggle camera
+  const toggleWebRTCVideo = () => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0]
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled
+        setIsWebRTCVideoOn(videoTrack.enabled)
+      }
+    }
+  }
+
+  // Handle WebRTC signaling messages
+  const handleWebRTCSignaling = async (data) => {
+    console.log('WebRTC signaling:', data.type)
+    
+    switch (data.type) {
+      case 'webrtc-call-request':
+        // Incoming call - show notification
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          setIncomingCall({
+            id: `webrtc-${Date.now()}`,
+            fromId: data.fromUserId,
+            fromName: data.fromUserName,
+            fromAvatar: data.fromUserAvatar || '👤',
+            webrtcOffer: data.offer,
+            isWebRTC: true
+          })
+        }
+        break
+
+      case 'webrtc-call-answer':
+        // Call was answered - set remote description
+        if (peerConnectionRef.current && String(data.targetUserId) === String(currentUser?.id)) {
+          try {
+            await peerConnectionRef.current.setRemoteDescription(
+              new RTCSessionDescription(data.answer)
+            )
+            setWebrtcCallStatus('connected')
+            
+            // Process any pending ICE candidates
+            for (const candidate of pendingIceCandidatesRef.current) {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
+            }
+            pendingIceCandidatesRef.current = []
+          } catch (err) {
+            console.error('Failed to set remote description:', err)
+          }
+        }
+        break
+
+      case 'webrtc-call-declined':
+        // Call was declined
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          setWebrtcError('Call was declined')
+          endWebRTCCall()
+        }
+        break
+
+      case 'webrtc-call-ended':
+        // Other party ended the call
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          endWebRTCCall()
+        }
+        break
+
+      case 'ice-candidate':
+        // ICE candidate received
+        if (String(data.targetUserId) === String(currentUser?.id)) {
+          if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+            try {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate))
+            } catch (err) {
+              console.error('Failed to add ICE candidate:', err)
+            }
+          } else {
+            // Queue candidates if remote description not set yet
+            pendingIceCandidatesRef.current.push(data.candidate)
+          }
+        }
+        break
+    }
+  }
+
+  // Attach the signaling handler to WebSocket messages
+  useEffect(() => {
+    if (chatSocketRef.current && chatSocketRef.current._wrapper) {
+      const existingHandler = chatSocketRef.current._wrapper._handlers?.onmessage
+      chatSocketRef.current._wrapper.setOnMessage((data) => {
+        // Handle WebRTC signaling messages
+        if (data && (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate')) {
+          handleWebRTCSignaling(data)
+          return
+        }
+        // Pass to existing handler for regular messages
+        if (existingHandler) existingHandler({ data: JSON.stringify(data) })
+      })
+    }
+  }, [chatSocketRef.current, currentUser?.id])
+
+  // Attach remote stream to video element when it changes
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      console.log('Attaching remote stream to video element')
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  // Attach local stream to video element when it changes
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      console.log('Attaching local stream to video element')
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
 
   // --- Helpers ---
   const formatTime = timestamp => {
@@ -2205,8 +2967,11 @@ export default function CollaborationApp() {
     setActiveSpace(spaceId)
     setActiveChannel(channelId)
     setActiveView("channel")
+    // When navigating to a channel, collapse the friends sidebar for focused view
+    setFriendsSidebarCollapsed(true)
     // Indicate a manual thread switch so scroll logic jumps directly to latest (no long smooth animation)
     justSwitchedThreadRef.current = true
+    if (isMobile) setMobileView("chat")
   } else {
     setShowAccessDeniedModal(true)
   }
@@ -2641,7 +3406,7 @@ export default function CollaborationApp() {
     await Storage.saveEvent(event)
     setEvents(prev => [...prev, event])
     setShowEventModal(false)
-    setNewEvent({ title: "", description: "", time: "09:00", type: "meeting" })
+    setNewEvent({ title: "", description: "", time: "09:00", type: "event" })
   }
 
   const getDaysInMonth = date => {
@@ -2681,6 +3446,12 @@ export default function CollaborationApp() {
 
   const answerCall = async () => {
     if (incomingCall) {
+      // Handle WebRTC calls
+      if (incomingCall.isWebRTC) {
+        answerWebRTCCall()
+        return
+      }
+
       // If the incoming call has a Meet link (scheduled or meet invite), open it
       if (incomingCall.link) {
         try {
@@ -2707,6 +3478,12 @@ export default function CollaborationApp() {
 
   const declineCall = async () => {
     if (incomingCall) {
+      // Handle WebRTC calls
+      if (incomingCall.isWebRTC) {
+        declineWebRTCCall()
+        return
+      }
+
       // If scheduled event (has link) simply dismiss
       if (incomingCall.link) {
         // Clear any auto-dismiss timer
@@ -2774,10 +3551,10 @@ export default function CollaborationApp() {
 
   const toggleFriendSelection = userId => {
     setSelectedFriendInvitees(prev =>
-      prev.includes(userId)
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
     )
+    // Hide the dropdown after a selection to reveal the Send button and avoid overlay issues
+    setInviteSearchResults([])
   }
 
   const addFriendsToChannel = async () => {
@@ -2962,38 +3739,86 @@ export default function CollaborationApp() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-purple-50 text-slate-900">
-        <div className="w-full max-w-md animate-fade-in relative z-10">
+      <div className={`min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden ${
+        isDarkMode 
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 text-white' 
+          : 'bg-gradient-to-br from-slate-100 via-indigo-50/50 to-purple-50/30 text-slate-900'
+      }`}>
+        {/* Theme Toggle for Login */}
+        <button
+          onClick={() => {
+            setIsDarkMode(!isDarkMode)
+            localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
+          }}
+          className={`absolute top-6 right-6 z-20 p-3 rounded-2xl transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
+              : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+          } backdrop-blur-xl`}
+        >
+          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        </button>
+
+        {/* Animated background elements */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className={`absolute -top-40 -right-40 w-80 h-80 rounded-full blur-3xl animate-float ${
+            isDarkMode ? 'bg-gradient-to-br from-violet-600/20 to-pink-600/20' : 'bg-gradient-to-br from-purple-300/25 to-pink-300/25'
+          }`}></div>
+          <div className={`absolute -bottom-40 -left-40 w-96 h-96 rounded-full blur-3xl animate-float ${
+            isDarkMode ? 'bg-gradient-to-br from-indigo-600/20 to-blue-600/20' : 'bg-gradient-to-br from-indigo-300/25 to-blue-300/25'
+          }`} style={{animationDelay: '1s'}}></div>
+          <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full blur-3xl ${
+            isDarkMode ? 'bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10' : 'bg-gradient-to-br from-violet-200/15 to-fuchsia-200/15'
+          }`}></div>
+        </div>
+        
+        <div className="w-full max-w-md animate-fade-in-up relative z-10">
           <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-105 hover:rotate-6 transition-all duration-300 bg-gradient-to-tr from-indigo-600 to-purple-600 shadow-indigo-200">
-              <Sparkles className="w-12 h-12 text-white" />
+            <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-110 hover:rotate-6 transition-all duration-500 animate-float ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 shadow-violet-500/30' 
+                : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50'
+            }`}>
+              <Sparkles className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h1 className="text-5xl font-extrabold mb-3 tracking-tight text-slate-900">
+            <h1 className={`text-5xl font-extrabold mb-3 tracking-tight bg-clip-text text-transparent ${
+              isDarkMode 
+                ? 'bg-gradient-to-r from-violet-400 via-purple-400 to-pink-400' 
+                : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600'
+            }`}>
               Spaces
             </h1>
-            <p className="text-lg font-medium text-slate-500">
+            <p className={`text-lg font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
               Where squads and pros collide.
             </p>
           </div>
 
-          <div className="rounded-[2rem] overflow-hidden p-1 bg-white/80 backdrop-blur-xl shadow-2xl border border-white/50">
-            <div className="flex p-1 rounded-[1.8rem] mb-2 bg-slate-100">
+          <div className={`rounded-[2rem] overflow-hidden p-1 backdrop-blur-2xl shadow-2xl border transition-shadow duration-500 ${
+            isDarkMode 
+              ? 'bg-slate-800/70 shadow-violet-500/20 border-slate-700/60 hover:shadow-violet-500/30' 
+              : 'bg-white/60 shadow-slate-300/30 border-white/50 hover:shadow-slate-400/40'
+          }`}>
+            <div className={`flex p-1.5 rounded-[1.6rem] mb-2 ${isDarkMode ? 'bg-slate-900/80' : 'bg-slate-100/60'}`}>
               <button
                 onClick={() => setAuthMode("login")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-3xl transition-all duration-300 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                   authMode === "login"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? isDarkMode 
+                      ? "bg-slate-700 text-violet-400 shadow-lg shadow-violet-500/20" 
+                      : "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
+                    : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
                 }`}
               >
                 Sign In
               </button>
               <button
                 onClick={() => setAuthMode("signup")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-3xl transition-all duration-300 ${
+                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                   authMode === "signup"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? isDarkMode 
+                      ? "bg-slate-700 text-violet-400 shadow-lg shadow-violet-500/20" 
+                      : "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
+                    : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
                 }`}
               >
                 Sign Up
@@ -3001,13 +3826,21 @@ export default function CollaborationApp() {
             </div>
             <form onSubmit={handleAuthSubmit} className="p-8 space-y-5">
               {authSuccess && (
-                <div className="px-4 py-3 rounded-2xl text-sm flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700">
+                <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
+                  isDarkMode 
+                    ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400' 
+                    : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                }`}>
                   <CheckCircle className="w-5 h-5" />
                   {authSuccess}
                 </div>
               )}
               {authError && (
-                <div className="px-4 py-3 rounded-2xl text-sm flex items-center gap-3 bg-red-50 border border-red-200 text-red-700">
+                <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
+                  isDarkMode 
+                    ? 'bg-red-500/20 border border-red-500/30 text-red-400' 
+                    : 'bg-red-50 border border-red-200 text-red-700'
+                }`}>
                   <XCircle className="w-5 h-5" />
                   {authError}
                 </div>
@@ -3015,7 +3848,9 @@ export default function CollaborationApp() {
 
               {authMode === "signup" && (
                 <div className="group">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 text-slate-400">
+                  <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                    isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                  }`}>
                     Full Name
                   </label>
                   <input
@@ -3024,13 +3859,19 @@ export default function CollaborationApp() {
                     onChange={e =>
                       setAuthData({ ...authData, name: e.target.value })
                     }
-                    className="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent transition-all font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                    className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                      isDarkMode 
+                        ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                        : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
+                    }`}
                     placeholder="Jane Doe"
                   />
                 </div>
               )}
               <div className="group">
-                <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 text-slate-400">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                  isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                }`}>
                   Email
                 </label>
                 <input
@@ -3039,12 +3880,18 @@ export default function CollaborationApp() {
                   onChange={e =>
                     setAuthData({ ...authData, email: e.target.value })
                   }
-                  className="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent transition-all font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                  className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                    isDarkMode 
+                      ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                      : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
+                  }`}
                   placeholder="jane@example.com"
                 />
               </div>
               <div className="group">
-                <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 text-slate-400">
+                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                  isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                }`}>
                   Password
                 </label>
                 <input
@@ -3053,13 +3900,19 @@ export default function CollaborationApp() {
                   onChange={e =>
                     setAuthData({ ...authData, password: e.target.value })
                   }
-                  className="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent transition-all font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                  className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                    isDarkMode 
+                      ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                      : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
+                  }`}
                   placeholder="••••••••"
                 />
               </div>
               {authMode === "signup" && (
                 <div className="group">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 text-slate-400">
+                  <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                    isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                  }`}>
                     Confirm Password
                   </label>
                   <input
@@ -3071,14 +3924,22 @@ export default function CollaborationApp() {
                         confirmPassword: e.target.value
                       })
                     }
-                    className="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent transition-all font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                    className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                      isDarkMode 
+                        ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                        : 'bg-slate-50 border border-slate-200 text-slate-800 focus:ring-pink-500/50'
+                    }`}
                     placeholder="••••••••"
                   />
                 </div>
               )}
               <button
                 type="submit"
-                className="w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 bg-indigo-600 hover:bg-indigo-700 text-white hover:shadow-lg hover:shadow-indigo-500/30"
+                className={`w-full py-4 font-bold rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 text-white shadow-xl hover:scale-[1.02] ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 hover:from-violet-600 hover:via-purple-600 hover:to-pink-600 shadow-violet-500/30 hover:shadow-violet-500/50' 
+                    : 'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 shadow-purple-300/40 hover:shadow-purple-400/50'
+                }`}
               >
                 {authMode === "login" ? (
                   <>
@@ -3094,10 +3955,10 @@ export default function CollaborationApp() {
               {/* Google Sign-In Divider */}
               <div className="relative my-6">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200"></div>
+                  <div className={`w-full border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200/60'}`}></div>
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-3 text-slate-500 font-bold">Or continue with</span>
+                  <span className={`px-3 font-bold ${isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-white/60 text-slate-400'}`}>Or continue with</span>
                 </div>
               </div>
 
@@ -3105,7 +3966,11 @@ export default function CollaborationApp() {
               <button
                 type="button"
                 onClick={handleGoogleLogin}
-                className="w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 transform active:scale-[0.98] bg-white border-2 border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md"
+                className={`w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 transform active:scale-[0.98] border-2 ${
+                  isDarkMode 
+                    ? 'bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 hover:shadow-md' 
+                    : 'bg-white/60 border-slate-200/60 text-slate-600 hover:bg-white hover:border-slate-300 hover:shadow-md shadow-sm'
+                }`}
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -3115,9 +3980,202 @@ export default function CollaborationApp() {
                 </svg>
                 Sign in with Google
               </button>
+              {/* Register Company Button (glass style) - show only on Sign Up mode */}
+              {authMode === "signup" && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+                      console.log('Opening org modal')
+                      setShowOrgModal(true);
+                      setOrgStage('form');
+                      setOrgError('');
+                      setOrgMessage('');
+                      setOrgForm({ name: '', adminEmail: '', domain: '', logoUrl: '' });
+                      setOrgOtp('');
+                      setOrgOtpExpiresAt(null);
+                      setOrgDnsStatus(null);
+                    }}
+                    className={`w-full py-3 font-semibold rounded-3xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-2 ${
+                      isDarkMode
+                        ? 'text-white shadow-xl bg-white/6 backdrop-blur-lg border border-white/10 hover:scale-[1.01] shadow-violet-600/20'
+                        : 'text-slate-800 shadow-sm bg-white border border-slate-200 hover:scale-[1.01]'
+                    }`}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span className="ml-2">Register your company with Spaces</span>
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         </div>
+
+        {showOrgModal && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setShowOrgModal(false)}></div>
+            <div className="relative w-full max-w-xl p-6 z-[85]">
+              <div className="rounded-[1.6rem] overflow-hidden p-6 backdrop-blur-2xl bg-white/60 dark:bg-slate-800/70 border border-white/30 shadow-2xl">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="text-2xl font-extrabold">Register your company with Spaces</h3>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">Secure your company domain and invite employees.</p>
+                  </div>
+                  <button onClick={() => setShowOrgModal(false)} className="p-2 rounded-full hover:bg-white/20">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {orgStage === 'form' && (
+                  <div className="space-y-4">
+                    {orgError && <div className="px-3 py-2 rounded-xl bg-red-50 text-red-700">{orgError}</div>}
+                    {orgMessage && <div className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700">{orgMessage}</div>}
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-slate-500">Organization Name</label>
+                      <input value={orgForm.name} onChange={e => setOrgForm({...orgForm, name: e.target.value})} className="w-full px-4 py-3 rounded-2xl mt-2" placeholder="Example, Acme Corp" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-slate-500">Company Admin Email</label>
+                      <input value={orgForm.adminEmail} onChange={e => { const v=e.target.value; const d=(v.match(/@([A-Za-z0-9.-]+)$/)||[])[1]||''; setOrgForm({...orgForm, adminEmail: v, domain: d}) }} className="w-full px-4 py-3 rounded-2xl mt-2" placeholder="admin@yourcompany.com" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-slate-500">Company Domain (auto-parsed)</label>
+                      <input value={orgForm.domain} readOnly className="w-full px-4 py-3 rounded-2xl mt-2 bg-white/30" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-slate-500">Logo (optional)</label>
+                      <div className="mt-2 flex items-center gap-3">
+                        <input id="org-logo-file" type="file" accept="image/*" onChange={async e => {
+                          const f = e.target.files && e.target.files[0]
+                          if (!f) return
+                          try {
+                            const form = new FormData()
+                            form.append('file', f)
+                            const upl = await fetch(`${API_BASE}/upload/file`, { method: 'POST', body: form })
+                            const jr = await upl.json()
+                            if (upl.ok && jr.file_id) {
+                              const url = `${API_BASE}/upload/file/${jr.file_id}/download`
+                              setOrgForm(prev => ({ ...prev, logoUrl: url }))
+                              setOrgMessage('Logo uploaded')
+                            } else {
+                              setOrgError(jr.detail || jr.error || 'Upload failed')
+                            }
+                          } catch (err) {
+                            console.error('upload failed', err)
+                            setOrgError('Logo upload failed')
+                          }
+                        }} className="rounded-2xl" />
+                        <input type="text" value={orgForm.logoUrl} onChange={e => setOrgForm({...orgForm, logoUrl: e.target.value})} placeholder="Image URL or uploaded file" className="flex-1 px-4 py-3 rounded-2xl" />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 mt-3">
+                      <button onClick={async () => {
+                        setOrgError('')
+                        setOrgMessage('')
+                        if (!orgForm.name || !orgForm.adminEmail) { setOrgError('Please provide organization name and admin email'); return }
+                        const domain = orgForm.domain
+                        const publicDomains = ['gmail.com','yahoo.com','outlook.com','hotmail.com','aol.com','icloud.com']
+                        if (publicDomains.includes(domain)) { setOrgError('Public email domains are not allowed'); return }
+                        try {
+                          const resExist = await fetch(`${API_BASE}/api/org/org/${domain}`)
+                          if (resExist.ok) {
+                            const data = await resExist.json()
+                            if (data.verified) { setOrgError('This domain is already registered and verified'); return }
+                          }
+                        } catch (e) {}
+                        try {
+                          const resp = await fetch(`https://dns.google/resolve?name=${domain}&type=MX`)
+                          const j = await resp.json()
+                          if (!j.Answer || j.Answer.length === 0) { setOrgError('Domain appears to have no MX records'); return }
+                        } catch (e) {}
+                        try {
+                          const reg = await fetch(`${API_BASE}/api/org/register`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: orgForm.name, adminEmail: orgForm.adminEmail, logoUrl: orgForm.logoUrl }) })
+                          const jr = await reg.json()
+                          if (reg.status >= 400) { setOrgError(jr.detail || jr.error || 'Registration failed'); return }
+                          setOrgMessage(jr.message || 'OTP sent to admin email')
+                          setOrgStage('otp')
+                          setOrgOtp('')
+                          setOrgOtpExpiresAt(Date.now() + 5*60*1000)
+                        } catch (e) {
+                          setOrgError('Registration request failed')
+                        }
+                      }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-bold">Send OTP</button>
+                      <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {orgStage === 'otp' && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-600">Enter the 6-digit code sent to <strong>{orgForm.adminEmail}</strong></p>
+                    <input value={orgOtp} onChange={e => setOrgOtp(e.target.value)} className="w-full px-4 py-3 rounded-2xl mt-2 text-center text-lg tracking-widest" placeholder="123456" />
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-slate-500">Expires in: {orgOtpExpiresAt ? Math.max(0, Math.ceil((orgOtpExpiresAt - Date.now())/1000)) : ''}s</div>
+                      <div className="flex gap-2">
+                        <button onClick={async () => {
+                          setOrgError('')
+                          try {
+                            const v = await fetch(`${API_BASE}/api/org/verify-otp`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ adminEmail: orgForm.adminEmail, code: orgOtp }) })
+                            const j = await v.json()
+                            if (v.status >= 400) { setOrgError(j.detail || j.error || 'OTP verify failed'); return }
+                            setOrgMessage('Email verified. Please add DNS TXT record to complete verification.')
+                            setOrgStage('dns')
+                            setOrgDnsStatus('pending')
+                          } catch (e) { setOrgError('OTP verify request failed') }
+                        }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Verify</button>
+                        <button onClick={async () => {
+                          setOrgError('')
+                          try {
+                            await fetch(`${API_BASE}/api/org/register`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: orgForm.name, adminEmail: orgForm.adminEmail, logoUrl: orgForm.logoUrl }) })
+                            setOrgMessage('OTP resent (if SMTP configured)')
+                          } catch (e) { setOrgError('Resend failed') }
+                        }} className="px-4 py-2 rounded-2xl border">Resend</button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setOrgStage('form'); setOrgMessage(''); setOrgError('') }} className="px-4 py-2 rounded-2xl border">Back</button>
+                    </div>
+                  </div>
+                )}
+
+                {orgStage === 'dns' && (
+                  <div className="space-y-4">
+                    <p className="text-sm">Please add the following DNS TXT record to domain <strong>{orgForm.domain}</strong>:</p>
+                    <div className="p-3 rounded-xl bg-slate-50 border">record name: <strong>@</strong><br/>type: <strong>TXT</strong><br/>value: <strong>spaces-verify=&lt;token&gt;</strong></div>
+                    <div className="flex gap-2">
+                      <button onClick={async () => {
+                        setOrgError('')
+                        try {
+                          const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
+                          const j = await q.json()
+                          if (q.status >= 400) { setOrgError(j.detail || 'DNS check failed'); return }
+                          if (j.status === 'verified') { setOrgDnsStatus('verified'); setOrgStage('verified'); setOrgMessage('Domain verified — organization is active') }
+                          else { setOrgDnsStatus('not_found'); setOrgMessage('DNS token not found yet; try again in a few minutes') }
+                        } catch (e) { setOrgError('DNS check request failed') }
+                      }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Check DNS</button>
+                      <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Close</button>
+                    </div>
+                  </div>
+                )}
+
+                {orgStage === 'verified' && (
+                  <div className="space-y-4 text-center">
+                    <CheckCircle className="w-12 h-12 mx-auto text-emerald-500" />
+                    <h4 className="text-lg font-bold">Organization Verified</h4>
+                    <p className="text-sm text-slate-600">Your organization is now verified via DNS. Admins can invite employees by email.</p>
+                    <div className="mt-4">
+                      <button onClick={() => { setShowOrgModal(false); setOrgStage('form') }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Done</button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     )
   }
@@ -3127,50 +4185,55 @@ export default function CollaborationApp() {
   const { daysInMonth, firstDay } = getDaysInMonth(currentDate)
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans transition-colors duration-300 text-slate-900 bg-slate-50">
-      {/* ... (Incoming Call Modal) ... */}
+    <div className={`flex h-screen overflow-hidden font-sans transition-all ease-in-out duration-500 ${isDarkMode ? 'dark bg-[var(--bg-primary)] text-[var(--text-primary)]' : 'text-slate-700 bg-[#f4f6fb]'} mesh-gradient`}>
+      {/* Incoming Call Popup - Small banner at top */}
       {incomingCall && (
-        <div className="fixed inset-0 z-[60] backdrop-blur-xl flex flex-col items-center justify-center animate-fade-in bg-slate-900/80">
-          <div className="text-center mb-12">
-            <div className="relative inline-block mb-8">
-              <div className="absolute inset-0 bg-pink-500 rounded-full animate-ping opacity-50 blur-xl"></div>
-              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-full flex items-center justify-center text-6xl shadow-2xl border-4 border-white/20">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
+          <div className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-gradient-to-r from-slate-900/95 via-purple-900/95 to-slate-900/95 backdrop-blur-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/30">
+            {/* Caller Avatar */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-md"></div>
+              <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 border-white/20">
                 {incomingCall.fromAvatar}
               </div>
             </div>
-            <h2 className="text-4xl font-bold text-white mb-3 tracking-tight">
-              {incomingCall.fromName}
-            </h2>
-            <p className="text-pink-300 text-lg font-medium animate-pulse">
-              Incoming Video Call...
-            </p>
-          </div>
-          <div className="flex items-center gap-10">
-            <button
-              onClick={declineCall}
-              className="w-20 h-20 rounded-full bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md transition-all hover:scale-110"
-            >
-              <PhoneOff className="w-8 h-8" />
-            </button>
-            <button
-              onClick={answerCall}
-              className="w-24 h-24 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white flex items-center justify-center shadow-2xl shadow-emerald-500/30 transition-all hover:scale-110 animate-bounce"
-            >
-              <Video className="w-10 h-10" />
-            </button>
+            
+            {/* Caller Info */}
+            <div className="flex flex-col mr-4">
+              <span className="text-white font-bold text-lg">{incomingCall.fromName}</span>
+              <span className="text-purple-300 text-sm font-medium animate-pulse">Incoming Video Call...</span>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={declineCall}
+                className="w-12 h-12 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all duration-200 hover:scale-110"
+                title="Decline"
+              >
+                <PhoneOff className="w-5 h-5" />
+              </button>
+              <button
+                onClick={answerCall}
+                className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all duration-200 hover:scale-110"
+                title="Accept"
+              >
+                <Video className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Video Call Modal */}
       {showVideoModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-6 w-full max-w-lg shadow-2xl bg-white ring-1 ring-slate-900/5">
+        <div className="fixed inset-0 backdrop-blur-xl flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/50">
+          <div className="rounded-[2rem] p-6 w-full max-w-lg shadow-2xl bg-white/95 backdrop-blur-2xl ring-1 ring-white/50 shadow-purple-200/30">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-3xl font-bold text-slate-800">Start Video Call</h3>
+              <h3 className="text-3xl font-bold bg-gradient-to-r from-slate-800 to-indigo-700 bg-clip-text text-transparent">Start Video Call</h3>
               <button
                 onClick={() => setShowVideoModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className="p-2 rounded-xl transition-all duration-200 hover:bg-slate-100 hover:shadow-md text-slate-500"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -3180,13 +4243,13 @@ export default function CollaborationApp() {
               <button
                 onClick={() => createMeetCall({ callEveryone: true })}
                 disabled={callCreating}
-                className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                className="flex-1 py-3 rounded-2xl font-bold bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 disabled:opacity-60 shadow-lg shadow-indigo-200/50 transition-all duration-300 hover:shadow-indigo-300/60 hover:scale-[1.02]"
               >
                 Call Everyone
               </button>
               <button
                 onClick={() => setSelectedCallMembers([])}
-                className="py-3 px-4 rounded-2xl font-bold border bg-white"
+                className="py-3 px-4 rounded-2xl font-bold border-2 border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/50 transition-all duration-200"
               >
                 Select Members
               </button>
@@ -3228,6 +4291,193 @@ export default function CollaborationApp() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* WebRTC Video Call Modal */}
+      {showWebRTCCall && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/95 via-purple-900/90 to-slate-900/95 backdrop-blur-2xl">
+          {/* In Call Indicator with Timer */}
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
+            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></span>
+            <span className="text-white font-bold text-sm uppercase tracking-wider">
+              {webrtcCallStatus === 'calling' ? 'Calling...' : 
+               webrtcCallStatus === 'connecting' ? 'Connecting...' : 
+               webrtcCallStatus === 'connected' ? 'In Call' : 'Call'}
+            </span>
+            <span className="text-white/60 text-sm">with {webrtcCallPartner?.name || 'Unknown'}</span>
+            {webrtcCallStatus === 'connected' && (
+              <span className="text-emerald-400 font-mono text-sm ml-2 bg-emerald-500/20 px-3 py-1 rounded-full">
+                {formatCallDuration(callDuration)}
+              </span>
+            )}
+          </div>
+          
+          {/* Pending Participants Being Called */}
+          {pendingCallParticipants.length > 0 && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/20 backdrop-blur-xl border border-yellow-500/30">
+              <Phone className="w-4 h-4 text-yellow-400 animate-pulse" />
+              <span className="text-yellow-300 text-sm">
+                Calling {pendingCallParticipants.map(p => p.name).join(', ')}...
+              </span>
+            </div>
+          )}
+
+          {/* Video Containers */}
+          <div className="relative w-full h-full">
+            {/* Remote Video (Full Screen) */}
+            <div className="absolute inset-0 bg-black">
+              <video 
+                ref={remoteVideoRef}
+                autoPlay 
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {!remoteStream && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900/50 to-slate-900">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-2xl scale-150"></div>
+                    <div className="relative w-48 h-48 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-8xl shadow-2xl border-4 border-white/30">
+                      {webrtcCallPartner?.avatar || '👤'}
+                    </div>
+                  </div>
+                  <h3 className="mt-8 text-4xl font-bold text-white drop-shadow-lg">{webrtcCallPartner?.name || 'Unknown'}</h3>
+                  <p className="mt-3 text-xl text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
+                    {webrtcCallStatus === 'calling' ? 'Ringing...' : 
+                     webrtcCallStatus === 'connecting' ? 'Connecting...' : 
+                     'Waiting for video...'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Local Video (Small, Picture-in-Picture) */}
+            <div className="absolute bottom-28 right-8 w-56 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/30 shadow-2xl hover:scale-105 transition-transform cursor-move group z-10">
+              <video 
+                ref={localVideoRef}
+                autoPlay 
+                playsInline 
+                muted
+                className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
+              />
+              {!isWebRTCVideoOn && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
+                  <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl">
+                    {currentUser?.avatar || '👤'}
+                  </div>
+                </div>
+              )}
+              <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/50 backdrop-blur-sm">
+                <span className="text-white text-xs font-medium">You</span>
+              </div>
+              {!isWebRTCMicOn && (
+                <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/90">
+                  <MicOff className="w-3 h-3 text-white" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Error Message */}
+          {webrtcError && (
+            <div className="absolute top-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl bg-red-500/20 border border-red-500/50 backdrop-blur-xl">
+              <p className="text-red-300 font-medium">{webrtcError}</p>
+            </div>
+          )}
+
+          {/* Call Controls */}
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6">
+            {/* Toggle Mic */}
+            <button
+              onClick={toggleWebRTCMic}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
+                isWebRTCMicOn 
+                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
+                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
+              }`}
+              title={isWebRTCMicOn ? 'Mute microphone' : 'Unmute microphone'}
+            >
+              {isWebRTCMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
+            </button>
+
+            {/* Toggle Video */}
+            <button
+              onClick={toggleWebRTCVideo}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
+                isWebRTCVideoOn 
+                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
+                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
+              }`}
+              title={isWebRTCVideoOn ? 'Turn off camera' : 'Turn on camera'}
+            >
+              {isWebRTCVideoOn ? <Video className="w-7 h-7" /> : <VideoOff className="w-7 h-7" />}
+            </button>
+
+            {/* End Call */}
+            <button
+              onClick={endWebRTCCall}
+              className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-2xl shadow-red-500/50 transition-all duration-300 hover:scale-110"
+              title="End call"
+            >
+              <PhoneOff className="w-9 h-9" />
+            </button>
+
+            {/* Screen Share (placeholder for future) */}
+            <button
+              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl opacity-50 cursor-not-allowed"
+              title="Screen share (coming soon)"
+              disabled
+            >
+              <Monitor className="w-7 h-7" />
+            </button>
+
+            {/* Add Friends Button */}
+            <button
+              onClick={() => setShowAddFriendsToCall(true)}
+              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl"
+              title="Add friends to call"
+            >
+              <UserPlus className="w-7 h-7" />
+            </button>
+          </div>
+
+          {/* Add Friends Modal */}
+          {showAddFriendsToCall && (
+            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-3xl p-6 shadow-2xl animate-fade-in">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-white">Add Friends to Call</h3>
+                  <button
+                    onClick={() => setShowAddFriendsToCall(false)}
+                    className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).map(friend => (
+                    <button
+                      key={friend.id}
+                      onClick={() => addFriendToCall(friend)}
+                      className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-white/10 transition-all text-left"
+                    >
+                      <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl">
+                        {friend.avatar || friend.avatar_url || '👤'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-white">{friend.name}</div>
+                        <div className="text-sm text-white/60">{friend.email || ''}</div>
+                      </div>
+                      <Phone className="w-5 h-5 text-emerald-400" />
+                    </button>
+                  ))}
+                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).length === 0 && (
+                    <p className="text-center text-white/50 py-4">No other friends available</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3355,33 +4605,39 @@ export default function CollaborationApp() {
                           avatar_preset: selectedPreset || null
                         }
 
-                        const res = await Storage.updateUser(uid, updates)
-
-                        // Merge backend response (which may be partial) with local stored user
-                        const updatedFromRes = (res && typeof res === 'object') ? (res.user || res || {}) : {}
-                        const merged = { ...stored, ...updates, ...updatedFromRes }
-
-                        // Persist merged user locally and update state/collections
-                        saveAuth(merged, getToken())
-                        setCurrentUser(merged)
-                        syncUserCollections(merged)
-
-                        // Broadcast avatar update to friends/members via notification
-                        try {
-                          await Storage.broadcastAvatarUpdate(uid, {
-                            avatar_url: merged.avatar_url,
-                            avatar_preset: merged.avatar_preset,
-                            name: merged.name
-                          })
-                        } catch (e) {
-                          console.error('Failed to broadcast avatar update', e)
-                        }
-
+                        // Optimistically update UI immediately for fast feedback
+                        const optimisticMerged = { ...stored, ...updates }
+                        saveAuth(optimisticMerged, getToken())
+                        setCurrentUser(optimisticMerged)
+                        syncUserCollections(optimisticMerged)
                         setShowProfileModal(false)
+                        setIsSavingProfile(false)
+
+                        // Perform backend save in background (non-blocking)
+                        Storage.updateUser(uid, updates).then(res => {
+                          // Merge backend response (which may be partial) with local stored user
+                          const updatedFromRes = (res && typeof res === 'object') ? (res.user || res || {}) : {}
+                          const merged = { ...optimisticMerged, ...updatedFromRes }
+                          saveAuth(merged, getToken())
+                          setCurrentUser(merged)
+                          syncUserCollections(merged)
+                        }).catch(err => {
+                          console.error('Backend save failed', err)
+                        })
+
+                        // Broadcast avatar update to friends/members via notification (non-blocking)
+                        Storage.broadcastAvatarUpdate(uid, {
+                          avatar_url: updates.avatar_url,
+                          avatar_preset: updates.avatar_preset,
+                          name: optimisticMerged.name
+                        }).catch(e => {
+                          console.error('Failed to broadcast avatar update', e)
+                        })
+
                       } catch (err) {
                         console.error("save profile failed", err)
+                        setIsSavingProfile(false)
                       }
-                      setIsSavingProfile(false)
                     }}
                     disabled={isSavingProfile}
                     className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow disabled:opacity-60"
@@ -3406,14 +4662,235 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {showOrgModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowOrgModal(false)}></div>
+          <div className="relative w-full max-w-xl p-6 z-[85]">
+            <div className="rounded-[1.6rem] overflow-hidden p-6 backdrop-blur-2xl bg-white/60 dark:bg-slate-800/70 border border-white/30 shadow-2xl">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-2xl font-extrabold">Register your company with Spaces</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">Secure your company domain and invite employees.</p>
+                </div>
+                <button onClick={() => setShowOrgModal(false)} className="p-2 rounded-full hover:bg-white/20">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {orgStage === 'form' && (
+                <div className="space-y-4">
+                  {orgError && <div className="px-3 py-2 rounded-xl bg-red-50 text-red-700">{orgError}</div>}
+                  {orgMessage && <div className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700">{orgMessage}</div>}
+                  <div>
+                    <label className="text-xs font-semibold uppercase text-slate-500">Organization Name</label>
+                    <input value={orgForm.name} onChange={e => setOrgForm({...orgForm, name: e.target.value})} className="w-full px-4 py-3 rounded-2xl mt-2" placeholder="Example, Acme Corp" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase text-slate-500">Company Admin Email</label>
+                    <input value={orgForm.adminEmail} onChange={e => { const v=e.target.value; const d=(v.match(/@([A-Za-z0-9.-]+)$/)||[])[1]||''; setOrgForm({...orgForm, adminEmail: v, domain: d}) }} className="w-full px-4 py-3 rounded-2xl mt-2" placeholder="admin@yourcompany.com" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase text-slate-500">Company Domain (auto-parsed)</label>
+                    <input value={orgForm.domain} readOnly className="w-full px-4 py-3 rounded-2xl mt-2 bg-white/30" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase text-slate-500">Logo (optional)</label>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input id="org-logo-file" type="file" accept="image/*" onChange={async e => {
+                        const f = e.target.files && e.target.files[0]
+                        if (!f) return
+                        try {
+                          const form = new FormData()
+                          form.append('file', f)
+                          const upl = await fetch(`${API_BASE}/upload/file`, { method: 'POST', body: form })
+                          const jr = await upl.json()
+                          if (upl.ok && jr.file_id) {
+                            // set logoUrl to download endpoint
+                            const url = `${API_BASE}/upload/file/${jr.file_id}/download`
+                            setOrgForm(prev => ({ ...prev, logoUrl: url }))
+                            setOrgMessage('Logo uploaded')
+                          } else {
+                            setOrgError(jr.detail || jr.error || 'Upload failed')
+                          }
+                        } catch (err) {
+                          console.error('upload failed', err)
+                          setOrgError('Logo upload failed')
+                        }
+                      }} className="rounded-2xl" />
+                      <input type="text" value={orgForm.logoUrl} onChange={e => setOrgForm({...orgForm, logoUrl: e.target.value})} placeholder="Image URL or uploaded file" className="flex-1 px-4 py-3 rounded-2xl" />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 mt-3">
+                    <button onClick={async () => {
+                      setOrgError('')
+                      setOrgMessage('')
+                      // basic validation
+                      if (!orgForm.name || !orgForm.adminEmail) { setOrgError('Please provide organization name and admin email'); return }
+                      const domain = orgForm.domain
+                      const publicDomains = ['gmail.com','yahoo.com','outlook.com','hotmail.com','aol.com','icloud.com']
+                      if (publicDomains.includes(domain)) { setOrgError('Public email domains are not allowed'); return }
+                      // check existing org via backend
+                      try {
+                        const resExist = await fetch(`${API_BASE}/api/org/org/${domain}`)
+                        if (resExist.ok) {
+                          const data = await resExist.json()
+                          if (data.verified) { setOrgError('This domain is already registered and verified'); return }
+                          // allow continuing if pending
+                        }
+                      } catch (e) {}
+                      // quick MX check via dns over https
+                      try {
+                        const resp = await fetch(`https://dns.google/resolve?name=${domain}&type=MX`)
+                        const j = await resp.json()
+                        if (!j.Answer || j.Answer.length === 0) { setOrgError('Domain appears to have no MX records'); return }
+                      } catch (e) {
+                        // ignore and let backend validate
+                      }
+                      // submit to backend
+                      try {
+                        const reg = await fetch(`${API_BASE}/api/org/register`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: orgForm.name, adminEmail: orgForm.adminEmail, logoUrl: orgForm.logoUrl }) })
+                        const jr = await reg.json()
+                        if (reg.status >= 400) { setOrgError(jr.detail || jr.error || 'Registration failed'); return }
+                        setOrgMessage(jr.message || 'OTP sent to admin email')
+                        setOrgStage('otp')
+                        setOrgOtp('')
+                        setOrgOtpExpiresAt(Date.now() + 5*60*1000)
+                      } catch (e) {
+                        setOrgError('Registration request failed')
+                      }
+                    }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-bold">Send OTP</button>
+                    <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {orgStage === 'otp' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-600">Enter the 6-digit code sent to <strong>{orgForm.adminEmail}</strong></p>
+                  <input value={orgOtp} onChange={e => setOrgOtp(e.target.value)} className="w-full px-4 py-3 rounded-2xl mt-2 text-center text-lg tracking-widest" placeholder="123456" />
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-slate-500">Expires in: {orgOtpExpiresAt ? Math.max(0, Math.ceil((orgOtpExpiresAt - Date.now())/1000)) : ''}s</div>
+                    <div className="flex gap-2">
+                      <button onClick={async () => {
+                        setOrgError('')
+                        try {
+                          const v = await fetch(`${API_BASE}/api/org/verify-otp`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ adminEmail: orgForm.adminEmail, code: orgOtp }) })
+                          const j = await v.json()
+                          if (v.status >= 400) { setOrgError(j.detail || j.error || 'OTP verify failed'); return }
+                          setOrgMessage('Email verified. Please add DNS TXT record to complete verification.')
+                          setOrgStage('dns')
+                          setOrgDnsStatus('pending')
+                        } catch (e) { setOrgError('OTP verify request failed') }
+                      }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Verify</button>
+                      <button onClick={async () => {
+                        // Re-trigger registration to resend OTP
+                        setOrgError('')
+                        try {
+                          await fetch(`${API_BASE}/api/org/register`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: orgForm.name, adminEmail: orgForm.adminEmail, logoUrl: orgForm.logoUrl }) })
+                          setOrgMessage('OTP resent (if SMTP configured)')
+                        } catch (e) { setOrgError('Resend failed') }
+                      }} className="px-4 py-2 rounded-2xl border">Resend</button>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setOrgStage('form'); setOrgMessage(''); setOrgError('') }} className="px-4 py-2 rounded-2xl border">Back</button>
+                  </div>
+                </div>
+              )}
+
+              {orgStage === 'dns' && (
+                <div className="space-y-4">
+                  <p className="text-sm">Please add the following DNS TXT record to domain <strong>{orgForm.domain}</strong>:</p>
+                  <div className="p-3 rounded-xl bg-slate-50 border">record name: <strong>@</strong><br/>type: <strong>TXT</strong><br/>value: <strong>spaces-verify=&lt;token&gt;</strong></div>
+                  <div className="flex gap-2">
+                    <button onClick={async () => {
+                      setOrgError('')
+                      try {
+                        const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
+                        const j = await q.json()
+                        if (q.status >= 400) { setOrgError(j.detail || 'DNS check failed'); return }
+                        if (j.status === 'verified') { setOrgDnsStatus('verified'); setOrgStage('verified'); setOrgMessage('Domain verified — organization is active') }
+                        else { setOrgDnsStatus('not_found'); setOrgMessage('DNS token not found yet; try again in a few minutes') }
+                      } catch (e) { setOrgError('DNS check request failed') }
+                    }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Check DNS</button>
+                    <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Close</button>
+                  </div>
+                </div>
+              )}
+
+              {orgStage === 'verified' && (
+                <div className="space-y-4 text-center">
+                  <CheckCircle className="w-12 h-12 mx-auto text-emerald-500" />
+                  <h4 className="text-lg font-bold">Organization Verified</h4>
+                  <p className="text-sm text-slate-600">Your organization is now verified via DNS. Admins can invite employees by email.</p>
+                  <div className="mt-4">
+                    <button onClick={() => { setShowOrgModal(false); setOrgStage('form') }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Done</button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdminDashboard && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => { setShowAdminDashboard(false); if (adminSocketRef.current) { adminSocketRef.current.close(); adminSocketRef.current = null } }}></div>
+          <div className="relative w-full max-w-3xl p-6 z-[95]">
+            <div className="rounded-[1.2rem] p-6 backdrop-blur-2xl bg-white/60 dark:bg-slate-800/70 border shadow-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold">Admin Dashboard</h3>
+                <div className="flex items-center gap-2">
+                  <input placeholder="Search users" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} className="px-3 py-2 rounded-md" />
+                  <button onClick={() => { setShowAdminDashboard(false); if (adminSocketRef.current) { adminSocketRef.current.close(); adminSocketRef.current = null } }} className="px-3 py-2 rounded-md border">Close</button>
+                </div>
+              </div>
+              <div className="mb-4 text-sm text-slate-600">Domain: <strong>{orgInfo?.domain}</strong></div>
+                <div className="max-h-80 overflow-y-auto space-y-2">
+                  {adminUsers.filter(u => u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase())).map(u => {
+                    const uid = getUserIdValue(u)
+                    const online = adminOnlineSet && adminOnlineSet.has(String(uid))
+                    return (
+                      <div key={uid || u.email} className="p-3 rounded-xl flex items-center justify-between bg-white/40 border">
+                        <div>
+                          <div className="font-bold">{u.name}</div>
+                          <div className="text-sm text-slate-500">{u.email}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-sm text-slate-500">{u.role || 'user'}</div>
+                          <div className={`text-xs px-2 py-1 rounded-full ${online ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{ online ? 'online' : 'offline' }</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Sidebar Overlay */}
+      {isMobile && (mobileView === "spaces" || mobileView === "friends") && (
+        <div 
+          className="mobile-sidebar-overlay"
+          onClick={() => setMobileView("chat")}
+        />
+      )}
+
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
           sidebarCollapsed ? "w-20" : "w-80"
-        } flex flex-col transition-all duration-300 z-20 flex-shrink-0 bg-white border-r border-slate-200/60`}
+        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-y-0 left-0 w-[85%] max-w-[320px] mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
       >
+        {/* Mobile Swipe Indicator */}
+        {isMobile && mobileView === "spaces" && (
+          <div className="swipe-indicator mt-2" />
+        )}
         {/* ... (Sidebar Content) ... */}
-        <div className="p-6 flex items-center justify-between h-[80px] border-b border-slate-100">
+        <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           {!sidebarCollapsed && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -3426,16 +4903,33 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <div className="p-2 rounded-xl shadow-lg transition-all bg-indigo-600 shadow-indigo-200">
+              <div className="p-2.5 rounded-2xl shadow-lg transition-all bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-indigo-300/50 group-hover:shadow-indigo-400/60 group-hover:scale-105 animate-gradient">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <h1 className="font-extrabold text-xl tracking-tight text-slate-800">
+              <h1 className={`font-extrabold text-xl tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                 Spaces
               </h1>
             </div>
           )}
           <div className="flex gap-2 ml-auto">
-            {!sidebarCollapsed && (
+            {isMobile && (
+              <button
+                onClick={() => setShowCreateSpaceModal(true)}
+                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                title="Create Space"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            )}
+            {isMobile && (
+              <button
+                onClick={() => setMobileView("chat")}
+                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+            {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
                 className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
@@ -3443,12 +4937,34 @@ export default function CollaborationApp() {
                 <Plus className="w-5 h-5" />
               </button>
             )}
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            {/* Admin dashboard access - visible to org admins of verified org */}
+            {!sidebarCollapsed && !isMobile && currentUser?.role === 'org_admin' && orgInfo?.verified && (
+              <button
+                onClick={async () => {
+                  setShowAdminDashboard(true)
+                  // fetch users by domain
+                  try {
+                    const res = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(orgInfo.domain)}`)
+                    const j = await res.json()
+                    setAdminUsers(Array.isArray(j) ? j : [])
+                  } catch (e) {
+                    console.error('fetch admin users failed', e)
+                  }
+                }}
+                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                title="Admin Dashboard"
+              >
+                <Grid3x3 className="w-5 h-5" />
+              </button>
+            )}
+            {!isMobile && (
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -3461,7 +4977,11 @@ export default function CollaborationApp() {
                 placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/50 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800"
+                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
+                  isDarkMode
+                    ? 'bg-slate-800/60 border border-slate-700/50 focus:bg-slate-800 focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/50 text-slate-200 hover:bg-slate-800/80 placeholder:text-slate-500'
+                    : 'bg-slate-100/60 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-300 text-slate-700 hover:bg-slate-100/80 hover:border-slate-200 placeholder:text-slate-400 shadow-sm'
+                }`}
               />
             </div>
           </div>
@@ -3582,17 +5102,17 @@ export default function CollaborationApp() {
                         setActiveSpace(null)
                       }
                     }}
-                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-200 mb-6 group ${
+                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
                       activeView === "calendar"
-                        ? "bg-white shadow-md shadow-indigo-100 border border-indigo-50 text-indigo-600"
-                        : "hover:bg-slate-100/80 border border-transparent text-slate-600"
+                        ? "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100 text-indigo-600"
+                        : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md text-slate-600"
                     }`}
                   >
                     <div
-                      className={`p-2.5 rounded-xl transition-colors ${
+                      className={`p-2.5 rounded-xl transition-all duration-300 ${
                         activeView === "calendar"
-                          ? "bg-indigo-500 text-white"
-                          : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                          ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50"
+                          : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600"
                       }`}
                     >
                       <Calendar className="w-5 h-5" />
@@ -3614,11 +5134,15 @@ export default function CollaborationApp() {
                   {spaces.map(space => (
                     <div key={space.id} className="mb-2">
                       <div
-                        className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 group ${
-                          activeView === "channel" && activeSpace === space.id
-                            ? "bg-white shadow-md shadow-indigo-100 border border-indigo-50"
-                            : "hover:bg-slate-100/80 border border-transparent"
-                        }`}
+                        className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 group hover-lift ${
+                            activeView === "channel" && activeSpace === space.id
+                              ? (isDarkMode
+                                  ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
+                                  : "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100")
+                              : (isDarkMode
+                                  ? "bg-slate-800/50 border-transparent hover:bg-gradient-to-r hover:from-purple-900/10 hover:to-violet-900/10 hover:border-purple-600/10"
+                                  : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md")
+                          }`}
                         onClick={() => {
                           setActiveSpace(space.id)
                           // Don't auto-switch channel unless user has access to current active, handled by effect
@@ -3627,19 +5151,23 @@ export default function CollaborationApp() {
                         }}
                       >
                         <div
-                          className={`p-2.5 rounded-xl transition-colors ${
-                            activeSpace === space.id
-                              ? "bg-indigo-100 text-indigo-600"
-                              : "bg-slate-100 text-slate-500 group-hover:bg-white"
-                          }`}
+                          className={`p-2.5 rounded-xl transition-all duration-300 ${
+                              activeSpace === space.id
+                                ? (isDarkMode
+                                    ? "bg-gradient-to-br from-purple-800/60 to-violet-800/40 text-purple-200 shadow-md shadow-purple-500/10"
+                                    : "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50")
+                                : (isDarkMode
+                                    ? "bg-slate-700/60 text-slate-300 group-hover:bg-gradient-to-br group-hover:from-purple-900/10 group-hover:to-violet-900/10 group-hover:text-purple-300"
+                                    : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600")
+                            }`}
                         >
-                          {space.icon}
+                          <img src="/hexagon-gradient%20For%20spaces..png" alt={space.name || 'space'} className="w-5 h-5 object-contain" />
                         </div>
                         <span
-                          className={`font-semibold text-sm truncate flex-1 ${
+                          className={`font-semibold text-sm truncate flex-1 transition-colors ${
                             activeSpace === space.id
-                              ? "text-slate-900"
-                              : "text-slate-600"
+                              ? (isDarkMode ? "text-white" : "text-slate-900")
+                              : (isDarkMode ? "text-white" : "text-slate-600")
                           }`}
                         >
                           {space.name}
@@ -3658,7 +5186,7 @@ export default function CollaborationApp() {
                                     currentName: space.name
                                   })
                                 }}
-                                className="p-1 hover:text-indigo-600 text-slate-400"
+                                className="p-1 text-blue-500 hover:text-blue-600"
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
@@ -3670,7 +5198,7 @@ export default function CollaborationApp() {
                                     id: space.id
                                   })
                                 }}
-                                className="p-1 hover:text-red-500 text-slate-400"
+                                className="p-1 text-red-500 hover:text-red-600"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -3716,19 +5244,23 @@ export default function CollaborationApp() {
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-3 w-full px-3 py-2 rounded-xl text-[13px] font-medium transition-all ${
+                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
-                                    ? "bg-indigo-50 text-indigo-600"
-                                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                                }`}
+                                    ? (isDarkMode
+                                        ? "bg-gradient-to-r from-purple-900/30 to-violet-900/20 text-purple-300 shadow-sm"
+                                        : "bg-gradient-to-r from-indigo-50 to-purple-50/50 text-indigo-600 shadow-sm")
+                                    : (isDarkMode
+                                        ? "text-slate-400 hover:text-purple-300 hover:bg-gradient-to-r hover:from-purple-900/8 hover:to-violet-900/8 hover:shadow-sm"
+                                        : "text-slate-500 hover:text-slate-800 hover:bg-white/80 hover:shadow-sm")
+                                }`} 
                               >
                                 <Hash
-                                  className={`w-4 h-4 ${
+                                  className={`w-4 h-4 transition-colors ${
                                     activeChannel === channel.id
-                                      ? "text-indigo-400"
-                                      : "text-slate-300"
-                                  }`}
+                                      ? (isDarkMode ? "text-purple-300" : "text-indigo-500")
+                                      : (isDarkMode ? "text-slate-400 group-hover/channel:text-purple-300" : "text-slate-300 group-hover/channel:text-indigo-400")
+                                  }`} 
                                 />
                                 <span className="truncate flex-1 text-left">
                                   {channel.name}
@@ -3748,7 +5280,7 @@ export default function CollaborationApp() {
                                 {space.ownerId === currentUser?.id && (
                                   <div className="hidden group-hover/channel:flex items-center gap-1">
                                     <span
-                                      className="p-1 hover:text-indigo-600 text-slate-400"
+                                      className="p-1 text-blue-500 hover:text-blue-600 cursor-pointer"
                                       onClick={e => {
                                         e.stopPropagation()
                                         setShowRenameModal({
@@ -3761,7 +5293,7 @@ export default function CollaborationApp() {
                                       <Edit2 className="w-3 h-3" />
                                     </span>
                                     <span
-                                      className="p-1 hover:text-red-600 text-slate-400"
+                                      className="p-1 text-red-500 hover:text-red-600 cursor-pointer"
                                       onClick={e => {
                                         e.stopPropagation()
                                         setShowDeleteConfirm({
@@ -3820,11 +5352,9 @@ export default function CollaborationApp() {
               {spaces.map(s => (
                 <button
                   key={s.id}
-                  className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300 font-bold text-lg ${
-                    activeSpace === s.id
-                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/30"
-                      : "bg-slate-100 text-slate-600 hover:bg-white hover:shadow-md"
-                  }`}
+                  className={`w-12 h-12 flex items-center justify-center transition-all duration-300 relative ${activeSpace === s.id ? 'ring-2 ring-indigo-500 squircle-mask' : ''}`}
+                  /* Add this style at the top-level or in your CSS file if not present already */
+                  // .squircle-mask { border-radius: 40%/50% !important; }
                   title={s.name}
                   onClick={() => {
                     setActiveSpace(s.id)
@@ -3835,9 +5365,13 @@ export default function CollaborationApp() {
                         s.ownerId === currentUser?.id
                     )
                     if (accChannel) setActiveChannel(accChannel.id)
+                    if (isMobile) setMobileView("chat")
                   }}
                 >
-                  {s.name.charAt(0).toUpperCase()}
+                  <img src="/hexagon-gradient%20For%20spaces..png" alt={s.name} className="w-10 h-10 object-contain" />
+                  <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold ${activeSpace === s.id ? 'text-white' : 'text-white'}`}>
+                    {s.name.charAt(0).toUpperCase()}
+                  </span>
                 </button>
               ))}
               <button
@@ -3854,7 +5388,7 @@ export default function CollaborationApp() {
       {/* ... (Main Content, Headers, etc.) ... */}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 relative z-0">
+      <div className={`flex-1 flex flex-col min-w-0 relative z-0 ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
         {/* VIEW: VIDEO MEETING / CALENDAR (No changes needed) ... */}
         {activeView === "meeting" ? (
           <div className="flex-1 flex flex-col relative bg-slate-900">
@@ -3934,21 +5468,24 @@ export default function CollaborationApp() {
           </div>
         ) : activeView === "calendar" ? (
           /* VIEW: CALENDAR */
-          <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className={`flex-1 flex flex-col overflow-hidden ${isDarkMode ? 'bg-[var(--bg-tertiary)]' : 'bg-gradient-to-br from-slate-50/80 via-white/40 to-indigo-50/30'}`}>
             {/* ... (Calendar UI) ... */}
-            <div className="h-[80px] flex items-center justify-between px-8 border-b border-slate-200">
-              <h2 className="text-3xl font-bold flex items-center gap-3 text-slate-800">
-                <Calendar className="w-8 h-8 text-indigo-600" /> Calendar
+            <div className={`h-[90px] flex items-center justify-between px-8 border-b ${isDarkMode ? 'bg-[var(--bg-secondary)]/90 border-[var(--border-light)]' : 'bg-white/80 border-slate-200/50'} backdrop-blur-xl`}>
+              <h2 className={`text-3xl font-bold flex items-center gap-4 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                <div className={`p-3 rounded-2xl ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-indigo-600 shadow-lg shadow-purple-500/30' : 'bg-gradient-to-br from-indigo-500 to-purple-500 shadow-lg shadow-indigo-200/50'}`}>
+                  <Calendar className="w-7 h-7 text-white" />
+                </div>
+                Calendar
               </h2>
               <div className="flex items-center gap-4">
-                <div className="flex rounded-2xl p-1 border bg-slate-100 border-transparent">
+                <div className={`flex rounded-2xl p-1.5 border ${isDarkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white/80 border-slate-200/60 shadow-sm'}`}>
                   <button
                     onClick={() => changeMonth(-1)}
-                    className="p-2 rounded-xl transition-all hover:bg-white shadow-sm"
+                    className={`p-2.5 rounded-xl transition-all ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-600'}`}
                   >
-                    <ChevronDown className="w-5 h-5 rotate-90 text-slate-600" />
+                    <ChevronDown className="w-5 h-5 rotate-90" />
                   </button>
-                  <span className="px-6 font-bold flex items-center text-slate-700">
+                  <span className={`px-6 font-bold flex items-center ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
                     {currentDate.toLocaleString("default", {
                       month: "long",
                       year: "numeric"
@@ -3956,9 +5493,9 @@ export default function CollaborationApp() {
                   </span>
                   <button
                     onClick={() => changeMonth(1)}
-                    className="p-2 rounded-xl transition-all hover:bg-white shadow-sm"
+                    className={`p-2.5 rounded-xl transition-all ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-600'}`}
                   >
-                    <ChevronRight className="w-5 h-5 text-slate-600" />
+                    <ChevronRight className="w-5 h-5" />
                   </button>
                 </div>
                 <button
@@ -3966,25 +5503,31 @@ export default function CollaborationApp() {
                     setSelectedDate(new Date())
                     setShowEventModal(true)
                   }}
-                  className="px-6 py-3 rounded-2xl font-bold text-sm shadow-lg hover:scale-105 transition-all flex items-center gap-2 bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700"
+                  className={`px-6 py-3 rounded-2xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-300 flex items-center gap-2 text-white ${isDarkMode ? 'bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 shadow-purple-500/30 hover:shadow-purple-500/50' : 'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50'}`}
                 >
                   <Plus className="w-5 h-5" /> New Event
                 </button>
-                <button
-                  onClick={() => handleConnectGoogleCalendar()}
-                  className="px-4 py-2 rounded-2xl font-bold text-sm border bg-white hover:bg-slate-50 transition-all flex items-center gap-2 text-slate-700"
-                >
-                  Connect Google Calendar
-                </button>
+                {!googleCalendarToken && (
+                  <button
+                    onClick={() => handleConnectGoogleCalendar()}
+                    className={`px-4 py-2.5 rounded-2xl font-bold text-sm border transition-all flex items-center gap-2 ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-purple-600/50 hover:text-purple-300' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-indigo-200 hover:text-indigo-600 shadow-sm'}`}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    </svg>
+                    Connect Calendar
+                  </button>
+                )}
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className={`flex-1 overflow-y-auto p-8 ${isDarkMode ? '' : ''}`}>
               {/* ... (Calendar Grid) ... */}
-              <div className="grid grid-cols-7 gap-4 mb-4">
+              <div className="grid grid-cols-7 gap-4 mb-6">
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
                   <div
                     key={d}
-                    className="text-center text-xs font-bold uppercase tracking-widest text-slate-400"
+                    className={`text-center text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}
                   >
                     {d}
                   </div>
@@ -3994,7 +5537,7 @@ export default function CollaborationApp() {
                 {Array.from({ length: firstDay }).map((_, i) => (
                   <div
                     key={`empty-${i}`}
-                    className="rounded-3xl bg-slate-50/50"
+                    className={`rounded-3xl ${isDarkMode ? 'bg-slate-800/30' : 'bg-slate-50/50'}`}
                   ></div>
                 ))}
                 {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -4022,17 +5565,25 @@ export default function CollaborationApp() {
                         setSelectedDate(d)
                         setShowEventModal(true)
                       }}
-                      className={`p-4 rounded-3xl border transition-all cursor-pointer flex flex-col gap-2 group ${
+                      className={`p-4 rounded-3xl border transition-all cursor-pointer flex flex-col gap-2 group hover:scale-[1.02] ${
                         isToday
-                          ? "bg-indigo-50 border-indigo-200"
-                          : "bg-white border-slate-100 hover:shadow-md hover:border-indigo-300"
+                          ? isDarkMode 
+                            ? "bg-purple-900/30 border-purple-600/40 shadow-lg shadow-purple-500/10"
+                            : "bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 shadow-md shadow-indigo-100/50"
+                          : isDarkMode 
+                            ? "bg-slate-800/50 border-slate-700/50 hover:bg-slate-800 hover:border-purple-600/30 hover:shadow-lg hover:shadow-purple-500/10"
+                            : "bg-white/80 border-slate-200/60 hover:bg-white hover:shadow-lg hover:border-indigo-200 hover:shadow-indigo-100/30"
                       }`}
                     >
                       <span
-                        className={`text-sm font-bold w-8 h-8 flex items-center justify-center rounded-full ${
+                        className={`text-sm font-bold w-8 h-8 flex items-center justify-center rounded-full transition-all ${
                           isToday
-                            ? "bg-indigo-600 text-white"
-                            : "text-slate-700"
+                            ? isDarkMode 
+                              ? "bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-500/30"
+                              : "bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-300/50"
+                            : isDarkMode 
+                              ? "text-slate-300 group-hover:bg-slate-700 group-hover:text-purple-400"
+                              : "text-slate-700 group-hover:bg-slate-100"
                         }`}
                       >
                         {day}
@@ -4043,17 +5594,14 @@ export default function CollaborationApp() {
                             key={ev.id}
                             onClick={e => {
                               e.stopPropagation()
-                              if (ev.type === "meeting") startMeeting(ev.title)
                             }}
-                            className={`text-[10px] px-2.5 py-1.5 rounded-lg font-bold truncate flex items-center gap-1.5 ${
-                              ev.type === "meeting"
-                                ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-                                : "bg-yellow-100 text-yellow-700"
+                            className={`text-[10px] px-2.5 py-1.5 rounded-lg font-bold truncate flex items-center gap-1.5 transition-all ${
+                              isDarkMode 
+                                ? "bg-purple-900/50 text-purple-300 hover:bg-purple-800/50 border border-purple-700/30"
+                                : "bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 hover:from-indigo-200 hover:to-purple-200"
                             }`}
                           >
-                            {ev.type === "meeting" && (
-                              <Video className="w-3 h-3" />
-                            )}
+                            <Calendar className="w-3 h-3 flex-shrink-0" />
                             {ev.title}
                           </div>
                         ))}
@@ -4067,21 +5615,21 @@ export default function CollaborationApp() {
         ) : (
           /* VIEW: CHANNEL / DM */
           <>
-            {/* Header */}
-            <div className="h-[90px] sticky top-0 z-30 flex items-center justify-between px-10 border-b bg-white backdrop-blur-xl border-slate-200 shadow-sm">
-              {/* ... (Header Content) ... */}
+            {/* Header - Desktop with Liquid Glass */}
+            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3 rounded-2xl`}>
+              {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className="flex items-center gap-5 cursor-pointer group py-2.5 px-4 -ml-4 rounded-2xl transition-all hover:bg-gradient-to-r hover:from-slate-50 hover:to-white hover:shadow-md"
+                className={`liquid-glass-header flex items-center gap-5 cursor-pointer group py-3 px-5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
-                  <div className="flex items-center gap-5">
+                  <div className="flex items-center gap-5 relative z-10">
                     <div className="relative">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 bg-gradient-to-br from-indigo-100 to-purple-100 border-white text-slate-700 overflow-hidden">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-purple-900/50 to-indigo-900/50 border-purple-700/50' : 'bg-gradient-to-br from-indigo-100 to-purple-100 border-white'} text-slate-700 overflow-hidden`}>
                         {renderAvatar(getUser(activeDMUser), 48)}
                       </div>
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-white shadow-md ${
+                        className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] ${isDarkMode ? 'border-[var(--bg-secondary)]' : 'border-white'} shadow-md ${
                           getUser(activeDMUser)?.status === "online"
                             ? "bg-emerald-500"
                             : "bg-slate-400"
@@ -4089,35 +5637,37 @@ export default function CollaborationApp() {
                       ></span>
                     </div>
                     <div>
-                      <h2 className="font-bold text-2xl leading-tight tracking-tight text-slate-800">
+                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                         {getActiveViewName()}
                       </h2>
-                      <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-emerald-600 mt-0.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300"></span>{" "}
-                        Online
+                      <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : isDarkMode ? 'text-slate-500' : "text-slate-400"}`}>
+                        <span className={`w-2 h-2 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300" : "bg-slate-400"}`}></span>{" "}
+                        {getUser(activeDMUser)?.status === "online" ? "Online" : "Offline"}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-5">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition-all bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border-2 border-slate-200/50 shadow-sm group-hover:shadow-md group-hover:from-indigo-50 group-hover:to-purple-50 group-hover:border-indigo-200 group-hover:text-indigo-600">
+                  <div className="flex items-center gap-5 relative z-10">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isDarkMode ? 'bg-gradient-to-br from-slate-800/80 to-slate-700/80 text-slate-300 border-2 border-slate-600/50 group-hover:from-purple-900/50 group-hover:to-indigo-900/50 group-hover:border-purple-600/50 group-hover:text-purple-400' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-indigo-50 group-hover:to-purple-50 group-hover:border-indigo-200 group-hover:text-indigo-600'}`}>
                       <Hash className="w-6 h-6" />
                     </div>
                     <div>
-                      <h2 className="font-bold text-2xl leading-tight tracking-tight text-slate-800 flex items-center gap-2.5">
+                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2.5`}>
                         {/* Header Breadcrumb Context */}
-                        <span className="text-slate-400 font-semibold">
+                        <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={getCurrentSpace()?.name}>
                           {getCurrentSpace()?.name}
                         </span>
-                        <ChevronRight className="w-4 h-4 text-slate-300" />
-                        <span>{getActiveViewName().replace("#", "")}</span>
+                        <ChevronRight className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                        <span className="truncate max-w-[18vw] md:max-w-[24vw] lg:max-w-[28vw] xl:max-w-[32vw] 2xl:max-w-[36vw] block" title={getActiveViewName().replace('#','')}>
+                          {getActiveViewName().replace("#", "")}
+                        </span>
                       </h2>
-                      <div className="flex items-center gap-3 text-xs font-medium text-slate-400 mt-0.5">
-                        <span className="flex items-center gap-1.5 text-slate-500">
+                      <div className={`flex items-center gap-3 text-xs font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <span className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                           <Users className="w-3.5 h-3.5" /> {activeMembers.length}{" "}
                           members
                         </span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-indigo-500">
+                        <span className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`}>
                           • View details
                         </span>
                       </div>
@@ -4126,15 +5676,16 @@ export default function CollaborationApp() {
                 )}
               </div>
 
-              <div className="flex items-center gap-4">
+              {/* Action Buttons with Liquid Glass */}
+              <div className="flex items-center gap-3">
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
                     onClick={handleDocsClick}
-                    className="p-3.5 rounded-2xl transition-all bg-slate-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-600 hover:text-indigo-600 hover:shadow-lg border border-transparent hover:border-indigo-200 relative group"
+                    className={`liquid-glass-nav-item p-3.5 transition-all relative group`}
                     title="Documents"
                   >
-                    <FileText className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                     {googleAccessToken && (
                       <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
                     )}
@@ -4145,10 +5696,10 @@ export default function CollaborationApp() {
                 <div className="relative">
                   <button
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
-                    className="p-3.5 rounded-2xl transition-all bg-slate-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-600 hover:text-indigo-600 hover:shadow-lg border border-transparent hover:border-indigo-200 group"
+                    className={`liquid-glass-nav-item p-3.5 transition-all group`}
                     title="Google Apps"
                   >
-                    <Grid3x3 className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <Grid3x3 className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                   </button>
 
                   {showGoogleAppsMenu && (
@@ -4157,9 +5708,9 @@ export default function CollaborationApp() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowGoogleAppsMenu(false)}
                       ></div>
-                      <div className="absolute right-0 top-full mt-3 w-96 rounded-3xl shadow-2xl p-8 animate-fade-in origin-top-right ring-1 ring-slate-200 bg-white backdrop-blur-xl border border-slate-100 z-50">
-                        <h3 className="text-xl font-bold mb-6 text-slate-800 flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                      <div className={`absolute right-0 top-full mt-3 w-96 rounded-3xl shadow-2xl p-8 animate-fade-in origin-top-right z-50 ${isDarkMode ? 'bg-slate-800/95 ring-1 ring-purple-500/30 border border-slate-700' : 'bg-white/95 ring-1 ring-slate-200 border border-slate-100'} backdrop-blur-xl`}>
+                        <h3 className={`text-xl font-bold mb-6 flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-violet-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
                             <Grid3x3 className="w-5 h-5 text-white" />
                           </div>
                           Google Apps
@@ -4171,7 +5722,7 @@ export default function CollaborationApp() {
                               href={app.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex flex-col items-center gap-2.5 p-4 rounded-2xl hover:bg-slate-50 transition-all group hover:shadow-md border border-transparent hover:border-slate-200"
+                              className={`flex flex-col items-center gap-2.5 p-4 rounded-2xl transition-all group border border-transparent ${isDarkMode ? 'hover:bg-slate-700/50 hover:border-slate-600' : 'hover:bg-slate-50 hover:border-slate-200 hover:shadow-md'}`}
                               onClick={() => setShowGoogleAppsMenu(false)}
                             >
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${app.color} group-hover:scale-110 transition-all duration-300 shadow-sm group-hover:shadow-md`}>
@@ -4185,7 +5736,7 @@ export default function CollaborationApp() {
                                   }}
                                 />
                               </div>
-                              <span className="text-xs font-semibold text-slate-700 text-center group-hover:text-slate-900">{app.name}</span>
+                              <span className={`text-xs font-semibold text-center ${isDarkMode ? 'text-slate-300 group-hover:text-white' : 'text-slate-700 group-hover:text-slate-900'}`}>{app.name}</span>
                             </a>
                           ))}
                         </div>
@@ -4199,14 +5750,30 @@ export default function CollaborationApp() {
                   <div className="relative">
                     <button
                       onClick={() => {
-                        setSelectedCallMembers([])
-                        setShowVideoModal(true)
+                        if (activeView === 'dm' && activeDMUser) {
+                          // Start WebRTC call for DMs
+                          const partner = getUser(activeDMUser)
+                          if (partner) {
+                            startWebRTCCall(partner)
+                          }
+                        } else if (activeView === 'channel') {
+                          // For channels, directly create Meet link and send to channel
+                          createMeetCall({ callEveryone: true })
+                        } else {
+                          // Show video modal for other cases
+                          setSelectedCallMembers([])
+                          setShowVideoModal(true)
+                        }
                       }}
-                      className="p-3.5 rounded-2xl transition-all bg-slate-50 hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-600 hover:text-indigo-600 hover:shadow-lg border border-transparent hover:border-indigo-200"
-                      title="Start video call"
+                      className={`liquid-glass-nav-item p-3.5 transition-all group`}
+                      title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
-                      <Video className="w-5 h-5" />
+                      <Video className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                     </button>
+                    {/* In Call Indicator */}
+                    {showWebRTCCall && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse border-2 border-white shadow-lg shadow-red-500/50"></span>
+                    )}
                   </div>
                 )}
 
@@ -4217,36 +5784,53 @@ export default function CollaborationApp() {
                       setSelectedInviteUsers([])
                       setShowAddToSpaceModal(true)
                     }}
-                    className="hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white hover:from-slate-800 hover:via-slate-700 hover:to-slate-800"
+                    className="hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]"
                   >
                     <UserPlus className="w-4 h-4" />
                     <span>Invite Members</span>
                   </button>
                 )}
 
-                <div className="h-10 w-px mx-2 bg-gradient-to-b from-transparent via-slate-200 to-transparent"></div>
+                <div className={`h-10 w-px mx-2 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
+
+                {/* Theme Toggle Button */}
+                <button
+                  onClick={() => setIsDarkMode(!isDarkMode)}
+                  className={`liquid-glass-nav-item relative p-3 transition-all duration-500 group overflow-hidden`}
+                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  <div className={`relative z-10 transition-transform duration-500 group-hover:rotate-12 ${isDarkMode ? 'text-yellow-400' : 'text-slate-600'}`}>
+                    {isDarkMode ? (
+                      <Sun className="w-5 h-5" />
+                    ) : (
+                      <Moon className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className={`absolute inset-0 transition-opacity duration-500 ${isDarkMode ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 to-pink-600/20 animate-gradient"></div>
+                  </div>
+                </button>
 
                 {/* User Menu */}
                 {/* ... (User Menu) ... */}
                 <div className="relative z-50">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className={`flex items-center gap-4 pl-4 pr-3 py-2.5 rounded-2xl transition-all border-2 ${
-                      showUserMenu
-                        ? "bg-white border-indigo-200 shadow-xl"
-                        : "border-transparent bg-slate-50 hover:bg-white hover:border-slate-200 hover:shadow-lg"
-                    }`}
+                    className={`liquid-glass-header flex items-center gap-4 pl-4 pr-3 py-2.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
                   >
-                    <div className="text-right hidden sm:block">
-                      <div className="text-sm font-bold text-slate-800">
-                        {currentUser?.name}
+                    {/* Only show name if at least one sidebar is collapsed */}
+                    {!(sidebarCollapsed === false && friendsSidebarCollapsed === false) && (
+                      <div className="text-right hidden sm:block relative z-10">
+                        <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          {currentUser?.name}
+                        </div>
+                        <div className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                          Available
+                        </div>
                       </div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Available
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md bg-white border-2 border-white ring-2 ring-slate-100 overflow-hidden">
+                    )}
+                    <div className="relative z-10">
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
                         {renderAvatar(currentUser, 44)}
                       </div>
                       {currentUser?.notifications?.length ? (
@@ -4257,7 +5841,7 @@ export default function CollaborationApp() {
                       ) : null}
                     </div>
                     <ChevronDown
-                      className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${
+                      className={`w-4 h-4 relative z-10 transition-transform duration-300 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} ${
                         showUserMenu ? "rotate-180" : ""
                       }`}
                     />
@@ -4269,17 +5853,17 @@ export default function CollaborationApp() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowUserMenu(false)}
                       ></div>
-                      <div className="absolute right-0 top-full mt-3 w-72 rounded-3xl shadow-2xl py-2 animate-fade-in origin-top-right ring-1 ring-black/5 bg-white/95 backdrop-blur-xl border border-slate-100 z-50">
-                        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50">
+                      <div className={`absolute right-0 top-full mt-3 w-72 rounded-3xl shadow-2xl py-2 animate-fade-in origin-top-right ring-1 ${isDarkMode ? 'bg-slate-800/95 border-purple-600/30 ring-purple-500/10 shadow-purple-500/20' : 'bg-white/95 border-slate-100 ring-black/5'} backdrop-blur-xl border z-50`}>
+                        <div className={`px-5 py-4 border-b ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
                           <div className="flex items-center gap-3">
-                            <span className="text-3xl p-2 rounded-full bg-white shadow-sm border border-slate-100">
+                            <span className={`text-3xl p-2 rounded-full shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
                               {renderAvatar(currentUser, 36)}
                             </span>
                             <div className="overflow-hidden">
-                              <div className="font-bold truncate text-slate-800">
+                              <div className={`font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                                 {currentUser?.name}
                               </div>
-                              <div className="text-xs truncate text-slate-500">
+                              <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                 {currentUser?.email}
                               </div>
                             </div>
@@ -4334,10 +5918,347 @@ export default function CollaborationApp() {
               </div>
             </div>
 
+            {/* Header - Mobile */}
+            {isMobile && (
+              <div className={`h-[70px] sticky top-0 z-30 flex items-center justify-between px-4 border-b backdrop-blur-xl shadow-sm safe-area-top ${
+                isDarkMode 
+                  ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/30' 
+                  : 'bg-white/95 border-slate-200/60 shadow-slate-100/50'
+              }`}>
+                {/* Left: Profile & Context */}
+                <div 
+                  onClick={() => setShowMemberDetails(prev => !prev)}
+                  className="flex items-center gap-3 cursor-pointer touch-active"
+                >
+                  {activeView === "dm" ? (
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-base shadow-md border-2 overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600' 
+                            : 'bg-gradient-to-br from-indigo-100 to-purple-100 border-white'
+                        }`}>
+                          {renderAvatar(getUser(activeDMUser), 44)}
+                        </div>
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                            getUser(activeDMUser)?.status === "online"
+                              ? "bg-emerald-500 shadow-emerald-300/50"
+                              : "bg-slate-400"
+                          } ${isDarkMode ? 'border-slate-900' : 'border-white'}`}
+                        ></span>
+                      </div>
+                      <div className="max-w-[130px]">
+                        <h2 className={`font-bold text-[15px] leading-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          {getActiveViewName()}
+                        </h2>
+                        <p className={`text-[11px] font-semibold flex items-center gap-1.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-500" : isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                          <span className={`w-2 h-2 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`}></span>
+                          {getUser(activeDMUser)?.status === "online" ? "Online" : "Offline"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-sm ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-300 border border-slate-600' 
+                          : 'bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border border-slate-200/50'
+                      }`}>
+                        <Hash className="w-5 h-5" />
+                      </div>
+                      <div className="max-w-[140px]">
+                        <h2 className={`font-bold text-[15px] leading-tight truncate flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          <span className={`font-medium text-xs truncate max-w-[60px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{getCurrentSpace()?.name}</span>
+                          <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
+                          <span className="truncate">{getActiveViewName().replace("#", "")}</span>
+                        </h2>
+                        <p className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                          <Users className="w-3 h-3" /> {activeMembers.length} members
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Action Icons & Menu */}
+                <div className="flex items-center gap-1.5">
+                  {/* Docs Icon */}
+                  <button
+                    onClick={handleDocsClick}
+                    className={`p-2.5 rounded-xl transition-all relative touch-active ${
+                      isDarkMode 
+                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                    }`}
+                    title="Documents"
+                  >
+                    <FileText className="w-5 h-5" />
+                    {googleAccessToken && (
+                      <span className={`absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
+                    )}
+                  </button>
+
+                  {/* Video Call Icon */}
+                  {VIDEO_ENABLED && (
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          if (activeView === 'dm' && activeDMUser) {
+                            // Start WebRTC call for DMs
+                            const partner = getUser(activeDMUser)
+                            if (partner) {
+                              startWebRTCCall(partner)
+                            }
+                          } else if (activeView === 'channel') {
+                            // For channels, directly create Meet link and send to channel
+                            createMeetCall({ callEveryone: true })
+                          } else {
+                            // Show video modal for other cases
+                            setSelectedCallMembers([])
+                            setShowVideoModal(true)
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl transition-all touch-active ${
+                          isDarkMode 
+                            ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                            : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                        }`}
+                        title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                      >
+                        <Video className="w-5 h-5" />
+                      </button>
+                      {/* In Call Indicator */}
+                      {showWebRTCCall && (
+                        <span className={`absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 shadow-sm ${isDarkMode ? 'border-slate-900' : 'border-white'}`}></span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Invite Members (Channel only) */}
+                  {activeView === "channel" && (
+                    <button
+                      onClick={() => {
+                        setInviteSearchQuery("")
+                        setSelectedInviteUsers([])
+                        setShowAddToSpaceModal(true)
+                      }}
+                      className={`p-2.5 rounded-xl transition-all text-white shadow-md touch-active ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/30 active:from-violet-500 active:to-purple-500' 
+                          : 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-indigo-200/50 active:from-indigo-600 active:to-purple-600'
+                      }`}
+                      title="Invite Members"
+                    >
+                      <UserPlus className="w-5 h-5" />
+                    </button>
+                  )}
+
+                  {/* Mobile Menu Button */}
+                  <button
+                    onClick={() => setShowMobileDrawer(true)}
+                    className={`p-2.5 rounded-xl transition-all touch-active ${
+                      isDarkMode 
+                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                    }`}
+                    title="Menu"
+                  >
+                    <Menu className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Mobile Drawer Menu */}
+            {isMobile && showMobileDrawer && (
+              <>
+                {/* Backdrop */}
+                <div 
+                  className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm animate-fade-in"
+                  onClick={() => setShowMobileDrawer(false)}
+                ></div>
+                
+                {/* Drawer */}
+                <div className={`fixed top-0 right-0 bottom-0 w-[280px] z-50 backdrop-blur-xl shadow-2xl border-l mobile-slide-in-right ${
+                  isDarkMode 
+                    ? 'bg-slate-900/98 border-slate-700/60 shadow-slate-950/50' 
+                    : 'bg-white/98 border-slate-200/60 shadow-slate-500/20'
+                }`}>
+                  {/* Drawer Header */}
+                  <div className={`p-5 border-b ${isDarkMode ? 'border-slate-800 bg-gradient-to-r from-slate-900 to-violet-900/20' : 'border-slate-100 bg-gradient-to-r from-white to-indigo-50/30'}`}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Menu</h3>
+                      <button
+                        onClick={() => setShowMobileDrawer(false)}
+                        className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-slate-300' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                    
+                    {/* User Profile Card */}
+                    <div className={`flex items-center gap-3 p-3 rounded-2xl shadow-sm border ${
+                      isDarkMode 
+                        ? 'bg-slate-800/80 border-slate-700' 
+                        : 'bg-white border-slate-100'
+                    }`}>
+                      <div className="relative">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-md border-2 ring-2 overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-slate-700 border-slate-700 ring-slate-700/50' 
+                            : 'bg-white border-white ring-slate-100'
+                        }`}>
+                          {renderAvatar(currentUser, 48)}
+                        </div>
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <div className={`font-bold text-sm truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{currentUser?.name}</div>
+                        <div className="text-[10px] font-semibold text-emerald-500 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                          Available
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drawer Content */}
+                  <div className="p-4 space-y-2 overflow-y-auto max-h-[calc(100vh-200px)]">
+                    {/* Edit Profile */}
+                    <button
+                      onClick={() => {
+                        setSelectedPreset(currentUser?.avatar_preset || null)
+                        setAvatarPreview(currentUser?.avatar_url || null)
+                        setShowProfileModal(true)
+                        setShowMobileDrawer(false)
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <UserPlus className="w-5 h-5" />
+                      </div>
+                      Edit Profile
+                    </button>
+
+                    {/* Notifications */}
+                    <button
+                      onClick={() => {
+                        setShowNotificationsModal(true)
+                        setShowMobileDrawer(false)
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                          <Bell className="w-5 h-5" />
+                        </div>
+                        Notifications
+                      </div>
+                      {currentUser?.notifications?.length ? (
+                        <span className="bg-red-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-sm shadow-red-500/30">
+                          {currentUser?.notifications?.length}
+                        </span>
+                      ) : null}
+                    </button>
+
+                    {/* Google Apps */}
+                    <button
+                      onClick={() => {
+                        setShowGoogleAppsMenu(true)
+                        setShowMobileDrawer(false)
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <Grid3x3 className="w-5 h-5" />
+                      </div>
+                      Google Apps
+                    </button>
+
+                    {/* Calendar */}
+                    <button
+                      onClick={() => {
+                        if (!googleCalendarToken) {
+                          setShowCalendarConnectModal(true)
+                        } else {
+                          setActiveView("calendar")
+                          setActiveSpace(null)
+                        }
+                        setShowMobileDrawer(false)
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      Calendar
+                    </button>
+
+                    {/* Theme Toggle */}
+                    <button
+                      onClick={() => setIsDarkMode(!isDarkMode)}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
+                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-500'}`}>
+                          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                        </div>
+                        {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+                      </div>
+                      <div className={`relative w-11 h-6 rounded-full transition-colors ${isDarkMode ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+                        <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-md transition-all ${isDarkMode ? 'left-6' : 'left-1'}`}></div>
+                      </div>
+                    </button>
+
+                    <div className={`h-px my-3 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}></div>
+
+                    {/* Sign Out */}
+                    <button
+                      onClick={() => {
+                        handleLogout()
+                        setShowMobileDrawer(false)
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
+                        isDarkMode 
+                          ? 'text-red-400 hover:bg-red-900/30 active:bg-red-900/50' 
+                          : 'text-red-600 hover:bg-red-50 active:bg-red-100'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-50 text-red-500'}`}>
+                        <LogIn className="w-5 h-5" />
+                      </div>
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
-            <div className="flex-1 flex overflow-hidden bg-slate-50/50">
-              <div className="flex-1 flex flex-col min-w-0">
+            <div className={`flex-1 flex overflow-hidden liquid-glass-chat-area relative`}>
+              <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
                 {/* Updated Container with Custom Pattern Background */}
                 {/* day label computed above via `messageDateLabel` */}
 
@@ -4368,27 +6289,27 @@ export default function CollaborationApp() {
                       }
                     } catch (e) {}
                   }}
-                  className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin chat-background relative"
+                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
                       {getCurrentMessages().length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center">
-                      <div className="p-10 rounded-[2.5rem] text-center max-w-sm bg-white/80 backdrop-blur-sm shadow-sm border border-white/50">
-                        <div className="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 relative shadow-lg transform rotate-3 hover:rotate-6 transition-transform bg-indigo-100 text-indigo-600">
+                      <div className={`p-10 rounded-[2.5rem] text-center max-w-sm backdrop-blur-sm border ${isDarkMode ? 'bg-slate-800/80 border-purple-600/20 shadow-lg shadow-purple-500/5' : 'bg-white/70 border-slate-200/50 shadow-xl shadow-indigo-100/30'}`}>
+                        <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 relative shadow-lg transform rotate-3 hover:rotate-6 transition-transform ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-600'}`}>
                           <MessageCircle className="w-12 h-12" />
-                          <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full border-4 animate-bounce bg-yellow-400 border-white"></div>
+                          <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full border-4 animate-bounce bg-yellow-400 ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></div>
                         </div>
-                        <h3 className="text-2xl font-extrabold mb-3 text-slate-800">
+                        <h3 className={`text-2xl font-extrabold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
                           Say Hello!
                         </h3>
-                        <p className="text-sm leading-relaxed mb-6 text-slate-500">
+                        <p className={`text-sm leading-relaxed mb-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                           This is the start of something epic in{" "}
-                          <span className="font-bold text-indigo-600">
+                          <span className={`font-bold ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`}>
                             {getActiveViewName()}
                           </span>
                           . Send a message to break the ice.
                         </p>
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-[10px] font-bold uppercase tracking-widest bg-yellow-50/80 border-yellow-100 text-yellow-800">
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'bg-purple-900/30 border-purple-600/30 text-purple-300' : 'bg-indigo-50/80 border-indigo-100/60 text-indigo-600'}`}>
                           <Lock className="w-3 h-3" /> End-to-End Encrypted
                         </div>
                       </div>
@@ -4396,11 +6317,11 @@ export default function CollaborationApp() {
                   ) : (
                     <>
                       {pinnedMessageId && (
-                        <div className="sticky top-0 z-20 mb-4 flex items-center justify-between gap-4 bg-white/90 rounded-xl px-4 py-3 border border-slate-100 shadow-sm">
+                        <div className={`sticky top-0 z-20 mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-purple-600/30' : 'bg-white/90 border-slate-100'}`}>
                           <div className="flex items-center gap-3">
-                            <Sparkles className="w-4 h-4 text-indigo-500" />
-                            <div className="text-sm font-bold">Pinned Search Result</div>
-                            <div className="text-xs text-slate-500">Reviewing highlighted message</div>
+                            <Sparkles className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} />
+                            <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : ''}`}>Pinned Search Result</div>
+                            <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Reviewing highlighted message</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -4477,7 +6398,11 @@ export default function CollaborationApp() {
                           <React.Fragment key={msg.id}>
                             {showDateSeparator && (
                               <div className="w-full flex justify-center mb-4">
-                                <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-white/90 border border-slate-100 text-slate-500">
+                                <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
+                                  isDarkMode 
+                                    ? 'bg-slate-800/90 border-slate-700 text-slate-400' 
+                                    : 'bg-white/90 border-slate-100 text-slate-500'
+                                }`}>
                                   {msgDayLabel}
                                 </span>
                               </div>
@@ -4495,11 +6420,15 @@ export default function CollaborationApp() {
                             <div className="flex-shrink-0 w-10 flex flex-col items-center">
                               {!isSequence ? (
                                 <div
-                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ${
+                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
                                     isMe
-                                      ? "bg-indigo-50 border-white"
-                                      : "bg-white border-white text-sm"
-                                  } ${isMe ? "text-indigo-600" : ""}`}
+                                      ? isDarkMode 
+                                        ? "bg-gradient-to-br from-violet-500/30 to-purple-500/30 border-violet-500/50 ring-slate-800/50" 
+                                        : "bg-gradient-to-br from-indigo-100 to-purple-100 border-white ring-white/50"
+                                      : isDarkMode 
+                                        ? "bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-800/50 text-sm" 
+                                        : "bg-gradient-to-br from-white to-slate-50 border-white ring-white/50 text-sm"
+                                  } ${isMe ? isDarkMode ? "text-violet-300" : "text-indigo-600" : ""}`}
                                 >
                                   {renderAvatar(user, 36)}
                                 </div>
@@ -4516,10 +6445,10 @@ export default function CollaborationApp() {
                               {/* Name only for first in sequence */}
                               {!isSequence && !isMe && (
                                 <div className="ml-1 mb-1.5 flex items-baseline gap-2">
-                                  <span className="text-xs font-bold text-slate-500">
+                                  <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                     {user?.name}
                                   </span>
-                                  <span className="text-[10px] font-medium text-slate-400">
+                                  <span className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {msg.timestamp
                                       ? formatTime(msg.timestamp)
                                       : "now"}
@@ -4536,13 +6465,44 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative px-5 py-3 text-[15px] leading-relaxed break-words shadow-lg backdrop-blur-sm ${
+                              className={`relative px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 hover:scale-[1.01] ${
                                   isMe
-                                    ? "bg-indigo-600 text-white rounded-2xl rounded-tr-sm"
-                                    : "bg-white text-slate-800 rounded-2xl rounded-tl-sm"
-                                } ${pinnedMessageId === msg.id ? 'ring-2 ring-indigo-400 ring-offset-2' : ''}`}
+                                    ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
+                                    : isDarkMode 
+                                      ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm" 
+                                      : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm"
+                                } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-violet-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-indigo-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
-                                {msg.text && (
+                                {/* Meet Invite Message */}
+                                {msg.type === 'meet-invite' && msg.meetLink && (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+                                        <Video className={`w-5 h-5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
+                                      </div>
+                                      <span className="font-bold">Video Call Started</span>
+                                    </div>
+                                    <p className={`text-sm ${isMe ? 'text-white/90' : isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                      {msg.meetTitle || 'Join the video meeting'}
+                                    </p>
+                                    <a
+                                      href={msg.meetLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all hover:scale-105 ${
+                                        isDarkMode 
+                                          ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/30' 
+                                          : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-200'
+                                      }`}
+                                    >
+                                      <Video className="w-4 h-4" />
+                                      Join Meeting
+                                    </a>
+                                  </div>
+                                )}
+                                
+                                {msg.text && msg.type !== 'meet-invite' && (
                                   <div>
                                     {renderWithHighlight(
                                       msg.text,
@@ -4559,10 +6519,12 @@ export default function CollaborationApp() {
                                         key={emoji}
                                         title={uids.map(id => getUser(id)?.name || '').join(', ')}
                                         onClick={() => toggleReaction(getActiveChatId(), msg.id, emoji)}
-                                        className="px-2 py-1 rounded-full text-sm bg-slate-100 flex items-center gap-2"
+                                        className={`px-2 py-1 rounded-full text-sm flex items-center gap-2 ${
+                                          isDarkMode ? 'bg-slate-700' : 'bg-slate-100'
+                                        }`}
                                       >
                                         <span className="text-lg">{emoji}</span>
-                                        <span className="ml-1 text-xs text-slate-600 font-bold">{uids.length}</span>
+                                        <span className={`ml-1 text-xs font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{uids.length}</span>
                                       </button>
                                     ))}
                                   </div>
@@ -4571,14 +6533,18 @@ export default function CollaborationApp() {
                                 {/* Emoji picker - hover or explicit open */}
                                 {(hoveredMessageId === msg.id || showEmojiPickerFor === msg.id) && (
                                   <div
-                                    className="absolute flex gap-1 bg-white p-2 rounded-xl shadow-lg z-20 animate-fade-in"
-                                    style={{ left: '-72px', top: '50%', transform: 'translateY(-50%)' }}
+                                    className={`absolute flex gap-1 p-2 rounded-xl shadow-lg z-20 animate-fade-in ${
+                                      isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'
+                                    }`}
+                                    style={{ left: '50%', top: '-48px', transform: 'translateX(-50%)' }}
                                   >
                                     {EMOJIS.map(e => (
                                       <button
                                         key={e}
                                         onClick={() => { toggleReaction(getActiveChatId(), msg.id, e); setShowEmojiPickerFor(null) }}
-                                        className="p-1 text-lg"
+                                        className={`p-1 text-lg rounded transition-colors ${
+                                          isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'
+                                        }`}
                                       >
                                         {e}
                                       </button>
@@ -4769,47 +6735,47 @@ export default function CollaborationApp() {
                         setHighlightTerm("")
                       }}
                       style={{ bottom: `${(messageInputRef.current?.offsetHeight || 48) + 12}px`, right: '1.5rem' }}
-                      className="absolute z-30 p-3 rounded-full bg-white shadow-lg border hover:bg-indigo-50 transition-transform transition-opacity animate-fade-in hover:-translate-y-1"
+                      className={`absolute z-30 p-3 rounded-full shadow-lg border transition-transform transition-opacity animate-fade-in hover:-translate-y-1 ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-purple-400' : 'bg-white border-slate-100 hover:bg-indigo-50 text-indigo-600 shadow-slate-200/50'}`}
                       aria-label="Scroll to latest messages"
                     >
-                      <ChevronDown className="w-5 h-5 text-indigo-600" />
+                      <ChevronDown className="w-5 h-5" />
                     </button>
                   )}
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className="p-6 pt-2 bg-slate-50/50 backdrop-blur-sm">
+                <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
-                  <div className="rounded-[2rem] p-2 relative transition-all focus-within:ring-2 bg-white shadow-xl shadow-slate-200/50 border border-slate-100 focus-within:ring-indigo-500/20 focus-within:border-indigo-400">
+                  <div className={`liquid-glass-card rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 ${isDarkMode ? 'focus-within:ring-purple-500/30' : 'focus-within:ring-indigo-500/20'}`}>
                     {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
-                      <div className="flex gap-3 p-3 mb-2 overflow-x-auto border-b border-slate-100">
+                      <div className={`flex gap-3 p-3 mb-2 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
                         {selectedFiles.map(file => (
                           <div
                             key={file.id}
-                            className="relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 bg-slate-50 border-slate-200"
+                            className={`relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 transition-all duration-200 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 hover:border-purple-500/50 hover:shadow-md hover:shadow-purple-500/20' : 'bg-gradient-to-br from-slate-50 to-white border-slate-200/80 hover:border-indigo-200 hover:shadow-md'}`}
                           >
-                            {file.source === "drive" ? (
+                            {file.source === "drive" || file.source === "gmail" ? (
                               <img
-                                src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg"
+                                src={file.iconLink || GoogleService.getAppIcon(GoogleService.getAppTypeFromMime(file.type)).iconUrl || "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png"}
                                 className="w-6 h-6"
-                                alt="Drive"
+                                alt={file.source === "gmail" ? "Gmail" : "Drive"}
                               />
-                            ) : file.type.startsWith("image/") && (file.previewUrl || file.url) ? (
+                            ) : file.type && file.type.startsWith("image/") && (file.previewUrl || file.url) ? (
                               <img
                                 src={file.url || file.previewUrl}
                                 className="w-10 h-10 rounded-xl object-cover"
                                 alt=""
                               />
                             ) : (
-                              <FileIcon className="w-6 h-6 text-indigo-500" />
+                              <FileIcon className={`w-6 h-6 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} />
                             )}
-                            <span className="text-xs font-bold max-w-[100px] truncate">
+                            <span className={`text-xs font-bold max-w-[100px] truncate ${isDarkMode ? 'text-slate-200' : ''}`}>
                               {file.name}
                             </span>
                             <button
                               onClick={() => removeAttachment(file.id)}
-                              className="absolute -top-2 -right-2 rounded-full p-1 shadow-md hover:scale-110 transition-transform bg-white border border-slate-200 hover:text-red-500"
+                              className={`absolute -top-2 -right-2 rounded-full p-1 shadow-md hover:scale-110 transition-transform ${isDarkMode ? 'bg-slate-700 border-slate-600 hover:text-red-400' : 'bg-white border-slate-200 hover:text-red-500'} border`}
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -4822,19 +6788,19 @@ export default function CollaborationApp() {
                       <div className="relative">
                         <button
                           onClick={() => fileInputRef.current?.click()}
-                          className="p-3 mb-1 rounded-full transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                          className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                         >
                           <Paperclip className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => setShowEmojiPickerFor('input')}
-                          className="p-3 mb-1 ml-1 rounded-full transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                          className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                         >
                           <span className="text-lg">😀</span>
                         </button>
 
                         {showEmojiPickerFor === 'input' && (
-                          <div className="absolute left-0 top-12 flex gap-1 bg-white p-2 rounded-xl shadow-lg z-30">
+                          <div className={`absolute left-0 top-12 flex gap-1 p-2 rounded-xl shadow-lg z-30 ${isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`}>
                             {EMOJIS.map(e => (
                               <button
                                 key={e}
@@ -4869,7 +6835,7 @@ export default function CollaborationApp() {
                             sendMessage()
                           }
                         }}
-                        className="flex-1 bg-transparent border-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium text-slate-800 placeholder-slate-400"
+                        className={`flex-1 bg-transparent border-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
                         style={{ minHeight: "48px" }}
                       />
 
@@ -4880,13 +6846,13 @@ export default function CollaborationApp() {
                             selectedFiles.length === 0) ||
                           isUploading
                         }
-                        className="p-3 mb-1 rounded-2xl shadow-lg transition-all active:scale-90 transform bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white shadow-indigo-200"
+                        className={`p-3.5 mb-1 rounded-2xl shadow-lg transition-all duration-300 active:scale-90 transform ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-purple-500/30 hover:shadow-purple-400/50' : 'bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-indigo-300/50 hover:shadow-indigo-400/60'} disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 text-white hover:scale-105`}
                       >
                         <Send className="w-5 h-5 ml-0.5" />
                       </button>
                     </div>
                   </div>
-                  <div className="text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 text-slate-400">
+                  <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                     Press <strong>Enter</strong> to send
                   </div>
                 </div>
@@ -4894,17 +6860,17 @@ export default function CollaborationApp() {
 
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
-                className={`border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-30 border-slate-200 bg-white shadow-2xl ${
+                className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-purple-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
-                    ? "w-80 translate-x-0"
-                    : "w-0 translate-x-full opacity-0 overflow-hidden"
+                    ? "w-80 translate-x-0 opacity-100"
+                    : "w-80 translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
-                <div className="h-[80px] flex items-center justify-between px-6 border-b border-slate-100 bg-slate-50/50">
-                  <h3 className="font-bold text-lg text-slate-800">Details</h3>
+                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-purple-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-indigo-50/30'}`}>
+                  <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
-                    className="p-2 rounded-full transition-colors hover:bg-slate-200 text-slate-500"
+                    className={`p-2 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-white hover:shadow-md' : 'hover:bg-white hover:shadow-md text-slate-500 hover:text-slate-700'}`}
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -4918,16 +6884,16 @@ export default function CollaborationApp() {
                           {renderAvatar(getUser(activeDMUser), 96)}
                         </div>
                       ) : (
-                        <div className="w-24 h-24 rounded-[2rem] mx-auto flex items-center justify-center shadow-lg bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 shadow-inner">
+                        <div className={`w-24 h-24 rounded-[2rem] mx-auto flex items-center justify-center shadow-lg shadow-inner ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-500' : 'bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400'}`}>
                           <Hash className="w-10 h-10" />
                         </div>
                       )}
                     </div>
-                    <h2 className="text-2xl font-bold mb-1 text-slate-900">
+                    <h2 className={`text-2xl font-bold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       {getActiveViewName().replace("#", "")}
                     </h2>
                     {activeView === "channel" && (
-                      <p className="text-sm font-medium text-slate-500">
+                      <p className={`text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {activeMembers.length} members in this channel
                       </p>
                     )}
@@ -4935,12 +6901,12 @@ export default function CollaborationApp() {
 
                   {activeView === "channel" && (
                     <div className="mb-8">
-                      <h4 className="text-[10px] font-bold uppercase tracking-widest mb-3 text-slate-400">
+                      <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                         Topic
                       </h4>
-                      <div className="rounded-2xl p-5 border text-sm leading-relaxed bg-slate-50 border-slate-100 text-slate-600">
+                      <div className={`rounded-2xl p-5 border text-sm leading-relaxed ${isDarkMode ? 'bg-slate-800/50 border-slate-700 text-slate-300' : 'bg-slate-50/80 border-slate-100/60 text-slate-600'}`}>
                         Welcome to the{" "}
-                        <span className="font-bold text-indigo-600">
+                        <span className={`font-bold ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`}>
                           #{getActiveViewName().replace("# ", "")}
                         </span>{" "}
                         channel. This is the beginning of your collaboration
@@ -4950,9 +6916,9 @@ export default function CollaborationApp() {
                   )}
 
                   <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest mb-4 flex items-center justify-between text-slate-400">
+                    <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-4 flex items-center justify-between ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                       Members
-                      <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                      <span className={`px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
                         {activeMembers.length}
                       </span>
                     </h4>
@@ -4975,30 +6941,30 @@ export default function CollaborationApp() {
                         return (
                           <div
                             key={member.id}
-                            className="flex items-center gap-3 p-3 rounded-2xl transition-colors cursor-default group border border-transparent hover:bg-slate-50 hover:border-slate-100"
+                            className={`flex items-center gap-3 p-3 rounded-2xl transition-colors cursor-default group border border-transparent ${isDarkMode ? 'hover:bg-slate-800 hover:border-slate-700' : 'hover:bg-slate-50/80 hover:border-slate-100/60'}`}
                           >
                             <div className="relative">
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border bg-white border-slate-100 overflow-hidden">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border overflow-hidden ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'}`}>
                                 {renderAvatar(member, 40)}
                               </div>
                               <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 ${
                                   member.status === "online"
                                     ? "bg-emerald-500"
                                     : "bg-slate-300"
-                                }`}
+                                } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
                               ></span>
                             </div>
                             <div className="overflow-hidden flex-1">
-                              <div className="text-sm font-bold truncate text-slate-800">
+                              <div className={`text-sm font-bold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
                                 {member.name}
                               </div>
-                              <div className="text-xs truncate text-slate-400">
+                              <div className={`text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                 {member.email}
                               </div>
                             </div>
                             {isMe ? (
-                              <span className="text-[10px] px-2 py-1 rounded-md font-bold tracking-wide bg-indigo-50 text-indigo-600">
+                              <span className={`text-[10px] px-2 py-1 rounded-md font-bold tracking-wide ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-indigo-50 text-indigo-600'}`}>
                                 YOU
                               </span>
                             ) : (
@@ -5012,8 +6978,8 @@ export default function CollaborationApp() {
                                     disabled={isPending}
                                     className={`p-1.5 rounded-lg transition-all ${
                                       isPending
-                                        ? "text-slate-300 cursor-default"
-                                        : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
+                                        ? isDarkMode ? "text-slate-600 cursor-default" : "text-slate-300 cursor-default"
+                                        : isDarkMode ? "hover:bg-purple-900/50 text-slate-400 hover:text-purple-400" : "hover:bg-indigo-100 text-slate-400 hover:text-indigo-600"
                                     }`}
                                     title={
                                       isPending
@@ -5033,7 +6999,7 @@ export default function CollaborationApp() {
                                 {(currentUser?.id === getCurrentSpace()?.ownerId || currentUser?.id === (getCurrentChannels().find(c => c.id === activeChannel)?.ownerId)) && !isMe && (
                                   <button
                                     onClick={() => handleRemoveMember(member.id)}
-                                    className="p-1.5 rounded-lg transition-all hover:bg-red-100 text-slate-400 hover:text-red-600"
+                                    className="p-1.5 rounded-lg transition-all hover:bg-red-100 text-red-500 hover:text-red-600"
                                     title="Remove member"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -5054,146 +7020,255 @@ export default function CollaborationApp() {
       </div>
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className="hidden lg:flex flex-col w-80 border-l border-slate-200/60 bg-white z-20">
-        <div className="p-6 h-[80px] border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-extrabold text-lg text-slate-800">Friends</h3>
-          <button
-            onClick={() => {
-              setInviteSearchQuery("")
-              setSelectedFriendInvitees([])
-              setShowAddFriendModal(true)
-            }}
-            className="p-2 rounded-xl transition-all hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
-          >
-            <UserPlus className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="px-5 pt-6 pb-2">
-          <div className="relative group">
-            <Search className="absolute left-4 top-3.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-indigo-500" />
-            <input
-              type="text"
-              placeholder="Filter friends..."
-              value={dmSearchQuery}
-              onChange={e => setDmSearchQuery(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all bg-slate-100/50 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-800"
-            />
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-y-0 right-0 w-[85%] max-w-[320px] mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
+        {/* Mobile Swipe Indicator */}
+        {isMobile && mobileView === "friends" && (
+          <div className="swipe-indicator mt-2" />
+        )}
+        <div className={`p-6 ${isMobile ? 'pt-4' : ''} h-[80px] border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-purple-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-indigo-50/30'}`}>
+          {isMobile && (
+            <button
+              onClick={() => setMobileView("chat")}
+              className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100/80 text-slate-400 hover:text-indigo-600'} mr-2`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+          {!friendsSidebarCollapsed && (
+            <h3 className={`font-extrabold text-lg bg-gradient-to-r ${isDarkMode ? 'from-white to-purple-300' : 'from-slate-700 to-indigo-700'} bg-clip-text text-transparent animate-fade-in`}>Friends</h3>
+          )}
+          <div className="flex gap-2 ml-auto">
+            {!friendsSidebarCollapsed && !isMobile && (
+              <button
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
+                className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400' : 'hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600'} hover:shadow-md`}
+              >
+                <UserPlus className="w-5 h-5" />
+              </button>
+            )}
+            {isMobile && (
+              <button
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
+                className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-purple-900/50 hover:to-indigo-900/50 text-slate-400 hover:text-purple-400' : 'hover:bg-gradient-to-br hover:from-indigo-50 hover:to-purple-50 text-slate-400 hover:text-indigo-600'} hover:shadow-md`}
+              >
+                <UserPlus className="w-5 h-5" />
+              </button>
+            )}
+            {!isMobile && (
+              <button
+                onClick={() => setFriendsSidebarCollapsed(!friendsSidebarCollapsed)}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
-          {dmSearchResults.length > 0 ? (
-            dmSearchResults.map(result => (
-              <div
-                key={result.id}
-                onClick={() => {
-                  if (result.userId) {
-                    setActiveDMUser(result.userId)
-                    setActiveView("dm")
-                    if (result.messageId) {
-                      // Scroll to the message and pin it for review
-                      setTargetMessageId(result.messageId)
-                      setPinnedMessageId(result.messageId)
-                      setHighlightTerm(debouncedDmSearchQuery)
-                    } else {
-                      // Navigating to a DM without a specific message should clear any pinned result
-                      setPinnedMessageId(null)
-                    }
-                  }
-                }}
-                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
-                  activeView === "dm" && activeDMUser === result.userId
-                    ? "bg-indigo-50 border-indigo-100"
-                    : "bg-white border-transparent hover:bg-slate-50"
-                }`}
-              >
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm bg-white border border-slate-100">
-                    {result.icon}
-                  </div>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex justify-between items-center">
-                    <span
-                      className={`text-sm font-bold truncate ${
-                        activeView === "dm" && activeDMUser === result.userId
-                          ? "text-indigo-900"
-                          : "text-slate-700"
-                      }`}
-                    >
-                      {result.title}
-                    </span>
-                    {result.timestamp && (
-                      <span className="text-[10px] text-slate-400">
-                        {formatTime(result.timestamp)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 truncate">
-                    {renderWithHighlight(
-                      result.subtitle,
-                      debouncedDmSearchQuery
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : friends.length === 0 ? (
-            <div className="text-center py-10 px-4">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
-                <Users className="w-8 h-8" />
-              </div>
-              <p className="text-sm font-medium text-slate-500 mb-4">
-                No friends yet.
-              </p>
-              <button
-                onClick={() => setShowAddFriendModal(true)}
-                className="text-xs font-bold text-indigo-600 hover:underline"
-              >
-                Find people
-              </button>
+        {!friendsSidebarCollapsed && (
+          <div className="px-5 pt-6 pb-2 animate-fade-in">
+            <div className="relative group">
+              <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-purple-400' : 'text-slate-400 group-focus-within:text-indigo-500'}`} />
+              <input
+                type="text"
+                placeholder="Filter friends..."
+                value={dmSearchQuery}
+                onChange={e => setDmSearchQuery(e.target.value)}
+                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
+              />
             </div>
-          ) : (
-            friends.map(friend => (
-              <div
-                key={friend.id}
-                onClick={() => {
-                  setActiveDMUser(friend.id)
-                  setActiveView("dm")
-                  justSwitchedThreadRef.current = true
-                }}
-                className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
-                  activeView === "dm" && activeDMUser === friend.id
-                    ? "bg-indigo-50 border-indigo-100"
-                    : "bg-white border-transparent hover:bg-slate-50"
-                }`}
-              >
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm bg-white border border-slate-100 overflow-hidden">
-                    {renderAvatar(friend, 40)}
-                  </div>
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-                      friend.status === "online"
-                        ? "bg-emerald-500"
-                        : "bg-slate-300"
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
+          {!friendsSidebarCollapsed ? (
+            <>
+              {dmSearchResults.length > 0 ? (
+                dmSearchResults.map(result => (
+                  <div
+                    key={result.id}
+                    onClick={() => {
+                      if (result.userId) {
+                        setActiveDMUser(result.userId)
+                        setActiveView("dm")
+                        // When opening a DM, collapse the spaces (left) sidebar for focus
+                        setSidebarCollapsed(true)
+                        if (isMobile) setMobileView("chat")
+                        if (result.messageId) {
+                          // Scroll to the message and pin it for review
+                          setTargetMessageId(result.messageId)
+                          setPinnedMessageId(result.messageId)
+                          setHighlightTerm(debouncedDmSearchQuery)
+                        } else {
+                          // Navigating to a DM without a specific message should clear any pinned result
+                          setPinnedMessageId(null)
+                        }
+                      }
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
+                      activeView === "dm" && activeDMUser === result.userId
+                        ? isDarkMode ? "bg-purple-900/30 border-purple-600/30" : "bg-indigo-50/80 border-indigo-100/60 shadow-sm"
+                        : isDarkMode ? "bg-slate-800/50 border-transparent hover:bg-slate-800" : "bg-white/60 border-transparent hover:bg-white/90 hover:shadow-sm"
                     }`}
-                  ></span>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className="text-sm font-bold truncate text-slate-700">
-                    {friend.name}
+                  >
+                    <div className="relative">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
+                        {result.icon}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className="flex justify-between items-center">
+                        <span
+                          className={`text-sm font-bold truncate ${
+                            activeView === "dm" && activeDMUser === result.userId
+                              ? isDarkMode ? "text-purple-300" : "text-indigo-900"
+                              : isDarkMode ? "text-slate-200" : "text-slate-700"
+                          }`}
+                        >
+                          {result.title}
+                        </span>
+                        {result.timestamp && (
+                          <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {formatTime(result.timestamp)}
+                          </span>
+                        )}
+                      </div>
+                      <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {renderWithHighlight(
+                          result.subtitle,
+                          debouncedDmSearchQuery
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-400 truncate">
-                    {friend.status === "online" ? "Online" : "Offline"}
+                ))
+              ) : friends.length === 0 ? (
+                <div className="text-center py-10 px-4">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-slate-100/80 text-slate-400'}`}>
+                    <Users className="w-8 h-8" />
                   </div>
+                  <p className={`text-sm font-medium mb-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                    No friends yet.
+                  </p>
+                  <button
+                    onClick={() => setShowAddFriendModal(true)}
+                    className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`}
+                  >
+                    Find people
+                  </button>
                 </div>
-                <div className="p-1.5 rounded-lg hover:bg-white hover:text-indigo-600 text-slate-300 transition-colors">
-                  <MessageSquare className="w-4 h-4" />
-                </div>
-              </div>
-            ))
+              ) : (
+                friends.map(friend => (
+                  <div
+                    key={friend.id}
+                    onClick={() => {
+                      setActiveDMUser(friend.id)
+                      setActiveView("dm")
+                      // Collapse spaces sidebar when opening friends chat
+                      setSidebarCollapsed(true)
+                      justSwitchedThreadRef.current = true
+                      if (isMobile) setMobileView("chat")
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 border hover-lift ${
+                      activeView === "dm" && activeDMUser === friend.id
+                        ? isDarkMode 
+                          ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
+                          : "bg-gradient-to-r from-indigo-50/80 to-purple-50/50 border-indigo-100/60 shadow-md shadow-indigo-100/40 ring-1 ring-indigo-100/50"
+                        : isDarkMode 
+                          ? "bg-slate-800/50 border-transparent hover:bg-slate-800 hover:border-slate-700"
+                          : "bg-white/60 border-transparent hover:bg-white/90 hover:border-slate-200/40 hover:shadow-md"
+                    }`}
+                  >
+                    <div className="relative">
+                      <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg shadow-md border-2 overflow-hidden ring-2 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-700/50' : 'bg-gradient-to-br from-white to-slate-50 border-white ring-slate-100/50'}`}>
+                        {renderAvatar(friend, 40)}
+                      </div>
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                          friend.status === "online"
+                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                            : "bg-gradient-to-br from-slate-300 to-slate-400"
+                        } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
+                      ></span>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className={`text-sm font-bold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
+                        {friend.name}
+                      </div>
+                      <div className={`text-xs truncate ${friend.status === "online" ? "text-emerald-500 font-medium" : isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                        {friend.status === "online" ? "Online" : "Offline"}
+                      </div>
+                    </div>
+                    <div className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-slate-700 hover:text-purple-400 text-slate-500' : 'hover:bg-white hover:text-indigo-600 text-slate-300'}`}>
+                      <MessageSquare className="w-4 h-4" />
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          ) : (
+            /* Collapsed view - only friend icons */
+            <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
+              {friends.length === 0 ? (
+                <button
+                  onClick={() => setShowAddFriendModal(true)}
+                  className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-purple-500 hover:text-purple-400' : 'border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500'}`}
+                  title="Add Friend"
+                >
+                  <UserPlus className="w-5 h-5" />
+                </button>
+              ) : (
+                <>
+                  {friends.map(friend => (
+                    <button
+                      key={friend.id}
+                      className={`relative w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300 overflow-hidden ${
+                        activeView === "dm" && activeDMUser === friend.id
+                          ? isDarkMode 
+                            ? "ring-2 ring-purple-500 shadow-lg shadow-purple-500/30" 
+                            : "ring-2 ring-indigo-500 shadow-lg shadow-indigo-500/30"
+                          : isDarkMode
+                            ? "hover:ring-2 hover:ring-slate-600 hover:shadow-md"
+                            : "hover:ring-2 hover:ring-slate-200 hover:shadow-md"
+                      }`}
+                      title={friend.name}
+                      onClick={() => {
+                        setActiveDMUser(friend.id)
+                        setActiveView("dm")
+                        // Collapse spaces sidebar when opening friends chat
+                        setSidebarCollapsed(true)
+                        justSwitchedThreadRef.current = true
+                        if (isMobile) setMobileView("chat")
+                      }}
+                    >
+                      {renderAvatar(friend, 48)}
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                          friend.status === "online"
+                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                            : "bg-gradient-to-br from-slate-300 to-slate-400"
+                        } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
+                      ></span>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowAddFriendModal(true)}
+                    className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-purple-500 hover:text-purple-400' : 'border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500'}`}
+                    title="Add Friend"
+                  >
+                    <UserPlus className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -5202,15 +7277,15 @@ export default function CollaborationApp() {
 
       {/* Add Friend Confirmation Modal */}
       {showAddFriendConfirm && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100 text-center">
-            <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm text-center`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-indigo-100/80 text-indigo-600'}`}>
               <UserPlus className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
               Add Friend?
             </h3>
-            <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+            <p className={`text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               Do you want to send a friend request to{" "}
               <span className="font-bold">
                 {users.find(u => u.id === showAddFriendConfirm)?.name}
@@ -5220,7 +7295,7 @@ export default function CollaborationApp() {
             <div className="flex gap-4">
               <button
                 onClick={() => setShowAddFriendConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 No
               </button>
@@ -5230,7 +7305,7 @@ export default function CollaborationApp() {
                     sendFriendRequest(showAddFriendConfirm)
                   setShowAddFriendConfirm(null)
                 }}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'}`}
               >
                 Yes
               </button>
@@ -5241,15 +7316,15 @@ export default function CollaborationApp() {
 
       {/* Access Denied Modal */}
       {showAccessDeniedModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-[100] p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'}`}>
               <ShieldAlert className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Access Restricted
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               The admin has not allowed you to view/message this channel. Please
               ask for an invite.
             </p>
@@ -5259,7 +7334,7 @@ export default function CollaborationApp() {
                 // Switch to a different view or channel to avoid repeated access attempts
                 setActiveView("calendar")
               }}
-              className="w-full py-3.5 px-6 rounded-2xl font-bold bg-slate-900 text-white shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+              className={`w-full py-3.5 px-6 rounded-2xl font-bold shadow-lg transition-all active:scale-95 ${isDarkMode ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-500/20' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
             >
               Understood
             </button>
@@ -5269,14 +7344,14 @@ export default function CollaborationApp() {
 
       {/* Rename Modal */}
       {showRenameModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-sm shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <h3 className="text-xl font-bold mb-6 text-slate-900">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <h3 className={`text-xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Rename {showRenameModal.type === "space" ? "Space" : "Channel"}
             </h3>
             <input
               type="text"
-              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl mb-6 outline-none focus:ring-2 focus:ring-indigo-500"
+              className={`w-full p-4 rounded-2xl mb-6 outline-none focus:ring-2 ${isDarkMode ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500 border' : 'bg-slate-50 border border-slate-200 focus:ring-indigo-500'}`}
               placeholder={showRenameModal.currentName}
               defaultValue={showRenameModal.currentName}
               onChange={e => setNewNameInput(e.target.value)}
@@ -5288,13 +7363,13 @@ export default function CollaborationApp() {
                   setShowRenameModal(null)
                   setNewNameInput("")
                 }}
-                className="flex-1 py-3 rounded-2xl font-bold text-slate-500 border border-slate-200 hover:bg-slate-50"
+                className={`flex-1 py-3 rounded-2xl font-bold border transition-colors ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleRename}
-                className="flex-1 py-3 rounded-2xl font-bold bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
+                className={`flex-1 py-3 rounded-2xl font-bold text-white shadow-lg ${isDarkMode ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'}`}
               >
                 Save
               </button>
@@ -5305,28 +7380,28 @@ export default function CollaborationApp() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mb-6 mx-auto">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-600'}`}>
               <Trash2 className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Are you sure?
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               You are about to delete this {showDeleteConfirm.type}. This action
               cannot be undone.
             </p>
             <div className="flex gap-4">
               <button
                 onClick={() => setShowDeleteConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-red-600 shadow-red-200 hover:bg-red-700'}`}
               >
                 Delete
               </button>
@@ -5337,27 +7412,27 @@ export default function CollaborationApp() {
 
       {/* Remove Member Confirmation Modal */}
       {showRemoveMemberConfirm && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl border border-slate-100">
-            <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-3xl flex items-center justify-center mb-6 mx-auto">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 mx-auto ${isDarkMode ? 'bg-yellow-900/40 text-yellow-400' : 'bg-yellow-100 text-yellow-600'}`}>
               <Trash2 className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-center mb-2 text-slate-900">
+            <h3 className={`text-xl font-bold text-center mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
               Remove member?
             </h3>
-            <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
-              You are about to remove <strong>{showRemoveMemberConfirm.name}</strong> from <strong>{getActiveViewName().replace('# ', '')}</strong>. They will receive a notification about this.
+            <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              You are about to remove <strong className={isDarkMode ? 'text-slate-200' : ''}>{showRemoveMemberConfirm.name}</strong> from <strong className={isDarkMode ? 'text-slate-200' : ''}>{getActiveViewName().replace('# ', '')}</strong>. They will receive a notification about this.
             </p>
             <div className="flex gap-4">
               <button
                 onClick={() => setShowRemoveMemberConfirm(null)}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold text-slate-600 hover:bg-slate-100 transition-colors border border-slate-200"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold transition-colors border ${isDarkMode ? 'text-slate-300 border-slate-600 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 border-slate-200'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmRemoveMember}
-                className="flex-1 py-3 px-6 rounded-2xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+                className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-red-600 shadow-red-200 hover:bg-red-700'}`}
               >
                 Remove
               </button>
@@ -5368,39 +7443,68 @@ export default function CollaborationApp() {
 
       {/* Event Modal (Day Details + Create) */}
       {showEventModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-6 w-full max-w-2xl shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-2xl font-bold text-slate-800">
-                {selectedDate ? new Date(selectedDate).toDateString() : 'Day Details'}
-              </h3>
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'}`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-2xl`}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className={`p-3 rounded-2xl ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-indigo-600 shadow-lg shadow-purple-500/30' : 'bg-gradient-to-br from-indigo-500 to-purple-500 shadow-lg shadow-indigo-200/50'}`}>
+                  <Calendar className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                    {selectedDate ? new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : 'Day Details'}
+                  </h3>
+                  <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {selectedDate ? new Date(selectedDate).getFullYear() : ''}
+                  </p>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowNewEventForm(prev => !prev)} className="px-3 py-2 rounded-2xl border bg-white text-sm">{showNewEventForm ? 'Close' : 'New Event'}</button>
-                <button onClick={() => setShowEventModal(false)} className="px-3 py-2 rounded-2xl border bg-white text-sm">Close</button>
+                <button 
+                  onClick={() => setShowNewEventForm(prev => !prev)} 
+                  className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
+                    showNewEventForm 
+                      ? isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
+                      : isDarkMode ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  {showNewEventForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  {showNewEventForm ? 'Cancel' : 'New Event'}
+                </button>
+                <button 
+                  onClick={() => setShowEventModal(false)} 
+                  className={`p-2.5 rounded-xl transition-all ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-600">Events</h4>
-                <div className="rounded-2xl border p-3 max-h-96 overflow-y-auto bg-slate-50">
+                <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  <Calendar className="w-4 h-4" /> Events
+                </h4>
+                <div className={`rounded-2xl border p-4 max-h-96 overflow-y-auto ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/80 border-slate-200/60'}`}>
                   {((events || []).filter(e => e.startDate === (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : '')) || []).length === 0 ? (
-                    <div className="text-sm text-slate-500">No events for this day.</div>
+                    <div className={`text-center py-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <Calendar className={`w-10 h-10 mx-auto mb-3 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
+                      <p className="text-sm font-medium">No events for this day</p>
+                      <p className="text-xs mt-1">Click "New Event" to create one</p>
+                    </div>
                   ) : (
                     (events || []).filter(e => e.startDate === (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : '')).map(ev => (
-                      <div key={ev.id} className="p-3 rounded-md bg-white border mb-2">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-bold">{ev.title}</div>
-                            <div className="text-xs text-slate-500">{ev.startDateTime ? new Date(ev.startDateTime).toLocaleString() : ''}</div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {ev.type === 'meeting' && ev.link && (
-                              <button onClick={() => window.open(ev.link, '_blank')} className="px-3 py-1 rounded-2xl bg-indigo-600 text-white text-sm">Join</button>
-                            )}
+                      <div key={ev.id} className={`p-4 rounded-xl border mb-3 last:mb-0 transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:border-purple-600/30' : 'bg-white border-slate-200/60 hover:border-indigo-200 hover:shadow-sm'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{ev.title}</div>
+                            <div className={`text-xs mt-1 flex items-center gap-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <Clock className="w-3 h-3" />
+                              {ev.startDateTime ? new Date(ev.startDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'All day'}
+                            </div>
                           </div>
                         </div>
-                        {ev.description && <div className="text-sm text-slate-600 mt-2">{ev.description}</div>}
+                        {ev.description && <div className={`text-sm mt-3 pt-3 border-t ${isDarkMode ? 'text-slate-400 border-slate-700' : 'text-slate-600 border-slate-100'}`}>{ev.description}</div>}
                       </div>
                     ))
                   )}
@@ -5411,24 +7515,56 @@ export default function CollaborationApp() {
                 {showNewEventForm ? (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Title</label>
-                      <input type="text" value={newEvent.title} onChange={e => setNewEvent({ ...newEvent, title: e.target.value })} className="w-full px-5 py-3 rounded-2xl bg-white border border-slate-200 focus:outline-none" placeholder="Event title" />
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Event Title</label>
+                      <input 
+                        type="text" 
+                        value={newEvent.title} 
+                        onChange={e => setNewEvent({ ...newEvent, title: e.target.value })} 
+                        className={`w-full px-5 py-3.5 rounded-xl focus:outline-none focus:ring-2 transition-all ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:ring-purple-500/30 focus:border-purple-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:ring-indigo-500/30 focus:border-indigo-400'} border`}
+                        placeholder="Enter event title" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Time</label>
-                      <input type="time" value={newEvent.time} onChange={e => setNewEvent({ ...newEvent, time: e.target.value })} className="w-full px-5 py-3 rounded-2xl bg-white border border-slate-200" />
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Time</label>
+                      <input 
+                        type="time" 
+                        value={newEvent.time} 
+                        onChange={e => setNewEvent({ ...newEvent, time: e.target.value })} 
+                        className={`w-full px-5 py-3.5 rounded-xl focus:outline-none focus:ring-2 transition-all ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white focus:ring-purple-500/30 focus:border-purple-500' : 'bg-white border-slate-200 text-slate-800 focus:ring-indigo-500/30 focus:border-indigo-400'} border`}
+                      />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Description</label>
-                      <textarea value={newEvent.description} onChange={e => setNewEvent({ ...newEvent, description: e.target.value })} className="w-full px-5 py-3 rounded-2xl bg-white border border-slate-200 h-28" />
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Description</label>
+                      <textarea 
+                        value={newEvent.description} 
+                        onChange={e => setNewEvent({ ...newEvent, description: e.target.value })} 
+                        className={`w-full px-5 py-3.5 rounded-xl h-28 focus:outline-none focus:ring-2 transition-all resize-none ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:ring-purple-500/30 focus:border-purple-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:ring-indigo-500/30 focus:border-indigo-400'} border`}
+                        placeholder="Add a description (optional)"
+                      />
                     </div>
-                    <div className="flex gap-3 justify-end">
-                      <button onClick={() => setShowNewEventForm(false)} className="px-4 py-2 rounded-2xl border">Cancel</button>
-                      <button onClick={saveCalendarEvent} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Save</button>
+                    <div className="flex gap-3 justify-end pt-2">
+                      <button 
+                        onClick={() => setShowNewEventForm(false)} 
+                        className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${isDarkMode ? 'border-slate-700 text-slate-400 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'} border`}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={saveCalendarEvent} 
+                        className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white transition-all ${isDarkMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                      >
+                        Save Event
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">Select "New Event" to create a calendar entry for this day.</div>
+                  <div className={`flex flex-col items-center justify-center h-full text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                      <Plus className="w-8 h-8" />
+                    </div>
+                    <p className="text-sm font-medium">Create a new event</p>
+                    <p className="text-xs mt-1">Click "New Event" to add a calendar entry</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -5436,11 +7572,107 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {/* Google Apps Menu - Mobile Full Screen Modal */}
+      {isMobile && showGoogleAppsMenu && (
+        <div className={`fixed inset-0 z-[60] backdrop-blur-sm animate-fade-in ${isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'}`}>
+          <div className={`fixed inset-x-0 bottom-0 rounded-t-3xl shadow-2xl mobile-slide-in-bottom p-6 max-h-[80vh] overflow-y-auto ${isDarkMode ? 'bg-slate-800/98 border-t border-slate-700/50' : 'bg-white'}`}>
+            {/* Handle bar */}
+            <div className={`w-10 h-1 rounded-full mx-auto mb-4 ${isDarkMode ? 'bg-slate-600' : 'bg-slate-300'}`}></div>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className={`text-xl font-bold flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-violet-600 to-purple-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
+                  <Grid3x3 className="w-5 h-5 text-white" />
+                </div>
+                Google Apps
+              </h3>
+              <button
+                onClick={() => setShowGoogleAppsMenu(false)}
+                className={`p-2.5 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+              {GoogleService.GOOGLE_APPS.map((app) => (
+                <a
+                  key={app.name}
+                  href={app.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex flex-col items-center gap-2 p-3 rounded-2xl transition-all touch-active ${isDarkMode ? 'hover:bg-slate-700/50 active:bg-slate-700' : 'hover:bg-slate-50 active:bg-slate-100'}`}
+                  onClick={() => setShowGoogleAppsMenu(false)}
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${app.color} shadow-sm`}>
+                    <img 
+                      src={app.icon} 
+                      alt={app.name} 
+                      className="w-7 h-7 object-contain"
+                      onError={(e) => {
+                        e.target.style.display = 'none'
+                        e.target.parentElement.innerHTML = '<span class="text-xl">' + (app.name.charAt(0)) + '</span>'
+                      }}
+                    />
+                  </div>
+                  <span className={`text-[10px] font-semibold text-center ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{app.name}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      {isMobile && (
+        <div className={`mobile-bottom-nav ${
+          isDarkMode 
+            ? 'bg-slate-900/95 border-slate-700/60' 
+            : 'bg-white/95 border-slate-200/60'
+        }`}>
+          <div className="flex items-center justify-around h-16 px-2">
+            <button
+              onClick={() => setMobileView("spaces")}
+              className={`mobile-nav-item ${mobileView === "spaces" ? "active" : ""} ${
+                mobileView === "spaces"
+                  ? isDarkMode ? "text-violet-400" : "text-indigo-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              <Sparkles className={`w-5 h-5 transition-transform duration-200`} />
+              <span className="text-[10px] font-semibold">Spaces</span>
+            </button>
+            <button
+              onClick={() => setMobileView("chat")}
+              className={`mobile-nav-item ${mobileView === "chat" ? "active" : ""} ${
+                mobileView === "chat"
+                  ? isDarkMode ? "text-violet-400" : "text-indigo-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              <MessageCircle className={`w-5 h-5 transition-transform duration-200`} />
+              <span className="text-[10px] font-semibold">Chat</span>
+            </button>
+            <button
+              onClick={() => setMobileView("friends")}
+              className={`mobile-nav-item ${mobileView === "friends" ? "active" : ""} ${
+                mobileView === "friends"
+                  ? isDarkMode ? "text-violet-400" : "text-indigo-600"
+                  : isDarkMode ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              <Users className={`w-5 h-5 transition-transform duration-200`} />
+              <span className="text-[10px] font-semibold">Friends</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Create Space Modal */}
       {showCreateSpaceModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-sm shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <h3 className="text-2xl font-bold mb-6 text-slate-800">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <h3 className={`text-2xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
               Create Space
             </h3>
             <div className="space-y-4">
@@ -5448,20 +7680,32 @@ export default function CollaborationApp() {
                 type="text"
                 value={newSpaceName}
                 onChange={e => setNewSpaceName(e.target.value)}
-                className="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={`w-full px-5 py-4 rounded-2xl border focus:outline-none focus:ring-2 ${
+                  isDarkMode 
+                    ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500' 
+                    : 'bg-slate-50 border-slate-200 focus:ring-indigo-500'
+                }`}
                 placeholder="Space Name"
                 autoFocus
               />
               <div className="flex gap-4">
                 <button
                   onClick={() => setShowCreateSpaceModal(false)}
-                  className="flex-1 py-3.5 font-bold rounded-2xl text-slate-500 border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className={`flex-1 py-3.5 font-bold rounded-2xl border transition-colors ${
+                    isDarkMode 
+                      ? 'text-slate-300 border-slate-600 hover:bg-slate-700' 
+                      : 'text-slate-500 border-slate-200 hover:bg-slate-50'
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={createSpace}
-                  className="flex-1 py-3.5 font-bold rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all"
+                  className={`flex-1 py-3.5 font-bold rounded-2xl text-white shadow-lg transition-all ${
+                    isDarkMode 
+                      ? 'bg-violet-600 shadow-violet-500/20 hover:bg-violet-700' 
+                      : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'
+                  }`}
                 >
                   Create
                 </button>
@@ -5473,13 +7717,17 @@ export default function CollaborationApp() {
 
       {/* Add Friend Modal - UPDATED FOR BULK SELECTION */}
       {showAddFriendModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl bg-white ring-1 ring-slate-900/5">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-md`}>
             <div className="flex items-center justify-between mb-8">
-              <h3 className="text-3xl font-bold text-slate-800">Add Friends</h3>
+              <h3 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>Add Friends</h3>
               <button
                 onClick={() => setShowAddFriendModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className={`p-2 rounded-full transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                }`}
               >
                 <X className="w-6 h-6" />
               </button>
@@ -5487,11 +7735,13 @@ export default function CollaborationApp() {
             {!inviteSent ? (
               <div className="space-y-6">
                 <div className="relative">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${
+                    isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                  }`}>
                     Find People
                   </label>
                   <div className="relative">
-                    <Search className="absolute left-5 top-4 w-5 h-5 text-slate-500" />
+                    <Search className={`absolute left-5 top-4 w-5 h-5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
                     <input
                       type="text"
                       value={inviteSearchQuery}
@@ -5499,11 +7749,19 @@ export default function CollaborationApp() {
                         setInviteSearchQuery(e.target.value)
                       }}
                       placeholder="Search by name..."
-                      className="w-full pl-12 pr-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                      className={`w-full pl-12 pr-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent font-medium ${
+                        isDarkMode 
+                          ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                          : 'bg-slate-50 border border-slate-200 text-slate-800 focus:ring-pink-500/50'
+                      }`}
                     />
                   </div>
                   {inviteSearchResults.length > 0 && (
-                    <div className="absolute z-10 w-full mt-2 rounded-2xl shadow-xl max-h-48 overflow-y-auto py-2 bg-white border border-slate-100">
+                    <div className={`absolute z-10 w-full mt-2 rounded-2xl shadow-xl max-h-48 overflow-y-auto py-2 ${
+                      isDarkMode 
+                        ? 'bg-slate-800 border border-slate-700' 
+                        : 'bg-white border border-slate-100'
+                    }`}>
                       {inviteSearchResults.map(u => {
                         const isSelected = selectedFriendInvitees.includes(u.id)
                         return (
@@ -5512,20 +7770,26 @@ export default function CollaborationApp() {
                             onClick={() => toggleFriendSelection(u.id)}
                             className={`px-5 py-3 cursor-pointer flex items-center justify-between gap-3 transition-colors border-l-4 ${
                               isSelected
-                                ? "border-indigo-500 bg-indigo-50"
-                                : "border-transparent hover:bg-slate-50"
+                                ? isDarkMode 
+                                  ? "border-violet-500 bg-violet-500/20" 
+                                  : "border-indigo-500 bg-indigo-50"
+                                : isDarkMode 
+                                  ? "border-transparent hover:bg-slate-700" 
+                                  : "border-transparent hover:bg-slate-50"
                             }`}
                           >
                             <div className="flex items-center gap-3">
-                              <div className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50 overflow-hidden">
+                              <div className={`text-xl rounded-full w-9 h-9 flex items-center justify-center overflow-hidden ${
+                                isDarkMode ? 'bg-slate-700' : 'bg-slate-50'
+                              }`}>
                                 {renderAvatar(u, 36)}
                               </div>
-                              <span className="font-bold text-slate-700">
+                              <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
                                 {u.name}
                               </span>
                             </div>
                             {isSelected && (
-                              <CheckCircle className="w-5 h-5 text-indigo-500" />
+                              <CheckCircle className={`w-5 h-5 ${isDarkMode ? 'text-violet-400' : 'text-indigo-500'}`} />
                             )}
                           </div>
                         )
@@ -5534,8 +7798,14 @@ export default function CollaborationApp() {
                   )}
                 </div>
                 {selectedFriendInvitees.length > 0 && (
-                  <div className="p-4 rounded-2xl border bg-indigo-50 border-indigo-100">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-500 mb-2">
+                  <div className={`p-4 rounded-2xl border ${
+                    isDarkMode 
+                      ? 'bg-violet-500/20 border-violet-500/30' 
+                      : 'bg-indigo-50 border-indigo-100'
+                  }`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wide mb-2 ${
+                      isDarkMode ? 'text-violet-400' : 'text-indigo-500'
+                    }`}>
                       Selected ({selectedFriendInvitees.length})
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -5546,7 +7816,11 @@ export default function CollaborationApp() {
                         return (
                           <div
                             key={id}
-                            className="text-xs bg-white px-2 py-1 rounded-lg border border-indigo-100 font-bold text-indigo-800 flex items-center gap-1"
+                            className={`text-xs px-2 py-1 rounded-lg border font-bold flex items-center gap-1 ${
+                              isDarkMode 
+                                ? 'bg-slate-700 border-violet-500/30 text-violet-300' 
+                                : 'bg-white border-indigo-100 text-indigo-800'
+                            }`}
                           >
                             {u?.name}
                             <X
@@ -5562,7 +7836,11 @@ export default function CollaborationApp() {
                 <button
                   onClick={handleBulkFriendInvite}
                   disabled={selectedFriendInvitees.length === 0}
-                  className="w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200"
+                  className={`w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] ${
+                    isDarkMode 
+                      ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
+                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                  }`}
                 >
                   <UserPlus className="w-5 h-5" />
                   Send {selectedFriendInvitees.length} Request
@@ -5571,13 +7849,17 @@ export default function CollaborationApp() {
               </div>
             ) : (
               <div className="text-center py-10">
-                <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border animate-bounce bg-emerald-100 border-emerald-200">
-                  <Check className="w-12 h-12 text-emerald-600" />
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border animate-bounce ${
+                  isDarkMode 
+                    ? 'bg-emerald-500/20 border-emerald-500/30' 
+                    : 'bg-emerald-100 border-emerald-200'
+                }`}>
+                  <Check className={`w-12 h-12 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
                 </div>
-                <h4 className="text-2xl font-bold mb-2 text-slate-800">
+                <h4 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                   Sent!
                 </h4>
-                <p className="text-slate-500">
+                <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
                   Friend requests delivered successfully.
                 </p>
               </div>
@@ -5588,28 +7870,34 @@ export default function CollaborationApp() {
 
       {/* Add To Channel Modal - Invite Member logic */}
       {showAddToSpaceModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-3xl font-bold text-slate-800">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-md max-h-[90vh] flex flex-col`}>
+            <div className="flex items-center justify-between mb-8 flex-shrink-0">
+              <h3 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                 Invite Members
               </h3>
               <button
                 onClick={() => setShowAddToSpaceModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className={`p-2 rounded-full transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                }`}
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
 
             {!inviteSent ? (
-              <div className="space-y-6">
+              <div className="space-y-6 flex-1 overflow-hidden flex flex-col">
                 {friends.length === 0 ? (
                   <div className="text-center py-8">
-                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                      isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-400'
+                    }`}>
                       <Users className="w-8 h-8" />
                     </div>
-                    <p className="text-sm font-medium text-slate-600 mb-6 px-4">
+                    <p className={`text-sm font-medium mb-6 px-4 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                       You need to be friends with people before inviting them to
                       this channel.
                     </p>
@@ -5618,7 +7906,11 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(false)
                         setShowAddFriendModal(true)
                       }}
-                      className="w-full py-4 rounded-2xl font-bold bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                      className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 ${
+                        isDarkMode 
+                          ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
+                          : 'bg-indigo-600 hover:bg-indigo-700'
+                      }`}
                     >
                       <UserPlus className="w-5 h-5" /> Find Friends
                     </button>
@@ -5626,21 +7918,31 @@ export default function CollaborationApp() {
                 ) : (
                   <>
                     <div className="relative">
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                      <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ${
+                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                      }`}>
                         Search Friends
                       </label>
                       <div className="relative">
-                        <Search className="absolute left-5 top-4 w-5 h-5 text-slate-500" />
+                        <Search className={`absolute left-5 top-4 w-5 h-5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} />
                         <input
                           type="text"
                           value={inviteSearchQuery}
                           onChange={e => setInviteSearchQuery(e.target.value)}
                           placeholder="Search by name..."
-                          className="w-full pl-12 pr-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent font-medium bg-slate-50 border border-slate-200 text-slate-800"
+                          className={`w-full pl-12 pr-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent font-medium ${
+                            isDarkMode 
+                              ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
+                              : 'bg-slate-50 border border-slate-200 text-slate-800 focus:ring-pink-500/50'
+                          }`}
                         />
                       </div>
                       {inviteSearchResults.length > 0 && (
-                        <div className="absolute z-10 w-full mt-2 rounded-2xl shadow-xl max-h-48 overflow-y-auto py-2 bg-white border border-slate-100">
+                        <div className={`absolute z-10 w-full mt-2 rounded-2xl shadow-xl max-h-48 overflow-y-auto py-2 ${
+                          isDarkMode 
+                            ? 'bg-slate-800 border border-slate-700' 
+                            : 'bg-white border border-slate-100'
+                        }`}>
                           {inviteSearchResults.map(u => {
                             const isSelected = selectedInviteUsers.includes(
                               u.id
@@ -5651,20 +7953,26 @@ export default function CollaborationApp() {
                                 onClick={() => toggleInviteSelection(u.id)}
                                 className={`px-5 py-3 cursor-pointer flex items-center justify-between gap-3 transition-colors border-l-4 ${
                                   isSelected
-                                    ? "border-indigo-500 bg-indigo-50"
-                                    : "border-transparent hover:bg-slate-50"
+                                    ? isDarkMode 
+                                      ? "border-violet-500 bg-violet-500/20" 
+                                      : "border-indigo-500 bg-indigo-50"
+                                    : isDarkMode 
+                                      ? "border-transparent hover:bg-slate-700" 
+                                      : "border-transparent hover:bg-slate-50"
                                 }`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <div className="text-xl rounded-full w-9 h-9 flex items-center justify-center bg-slate-50 overflow-hidden">
+                                  <div className={`text-xl rounded-full w-9 h-9 flex items-center justify-center overflow-hidden ${
+                                    isDarkMode ? 'bg-slate-700' : 'bg-slate-50'
+                                  }`}>
                                     {renderAvatar(u, 36)}
                                   </div>
-                                  <span className="font-bold text-slate-700">
+                                  <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
                                     {u.name}
                                   </span>
                                 </div>
                                 {isSelected && (
-                                  <CheckCircle className="w-5 h-5 text-indigo-500" />
+                                  <CheckCircle className={`w-5 h-5 ${isDarkMode ? 'text-violet-400' : 'text-indigo-500'}`} />
                                 )}
                               </div>
                             )
@@ -5673,8 +7981,14 @@ export default function CollaborationApp() {
                       )}
                     </div>
                     {selectedInviteUsers.length > 0 && (
-                      <div className="p-4 rounded-2xl border bg-indigo-50 border-indigo-100">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-500 mb-2">
+                      <div className={`p-4 rounded-2xl border max-h-32 overflow-y-auto flex-shrink-0 ${
+                        isDarkMode 
+                          ? 'bg-violet-500/20 border-violet-500/30' 
+                          : 'bg-indigo-50 border-indigo-100'
+                      }`}>
+                        <p className={`text-[10px] font-bold uppercase tracking-wide mb-2 ${
+                          isDarkMode ? 'text-violet-400' : 'text-indigo-500'
+                        }`}>
                           Selected ({selectedInviteUsers.length})
                         </p>
                         <div className="flex flex-wrap gap-2">
@@ -5685,7 +7999,11 @@ export default function CollaborationApp() {
                             return (
                               <div
                                 key={id}
-                                className="text-xs bg-white px-2 py-1 rounded-lg border border-indigo-100 font-bold text-indigo-800 flex items-center gap-1"
+                                className={`text-xs px-2 py-1 rounded-lg border font-bold flex items-center gap-1 ${
+                                  isDarkMode 
+                                    ? 'bg-slate-700 border-violet-500/30 text-violet-300' 
+                                    : 'bg-white border-indigo-100 text-indigo-800'
+                                }`}
                               >
                                 {u?.name}
                                 <X
@@ -5701,20 +8019,26 @@ export default function CollaborationApp() {
                     <button
                       onClick={addFriendsToChannel}
                       disabled={selectedInviteUsers.length === 0}
-                      className="w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200"
+                      className={`w-full py-4 rounded-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white shadow-lg transition-all transform hover:scale-[1.02] flex-shrink-0 ${
+                        isDarkMode 
+                          ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
+                          : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                      }`}
                     >
                       <UserPlus className="w-5 h-5" />
                       Add {selectedInviteUsers.length} Member
                       {selectedInviteUsers.length !== 1 ? "s" : ""}
                     </button>
 
-                    <div className="text-center mt-2">
+                    <div className="text-center mt-2 flex-shrink-0">
                       <button
                         onClick={() => {
                           setShowAddToSpaceModal(false)
                           setShowAddFriendModal(true)
                         }}
-                        className="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors"
+                        className={`text-xs font-bold transition-colors ${
+                          isDarkMode ? 'text-slate-500 hover:text-violet-400' : 'text-slate-400 hover:text-indigo-600'
+                        }`}
                       >
                         Don't see them? Find new friends
                       </button>
@@ -5724,13 +8048,17 @@ export default function CollaborationApp() {
               </div>
             ) : (
               <div className="text-center py-10">
-                <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border animate-bounce bg-emerald-100 border-emerald-200">
-                  <Check className="w-12 h-12 text-emerald-600" />
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border animate-bounce ${
+                  isDarkMode 
+                    ? 'bg-emerald-500/20 border-emerald-500/30' 
+                    : 'bg-emerald-100 border-emerald-200'
+                }`}>
+                  <Check className={`w-12 h-12 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
                 </div>
-                <h4 className="text-2xl font-bold mb-2 text-slate-800">
+                <h4 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                   Added!
                 </h4>
-                <p className="text-slate-500">
+                <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
                   Members successfully added to the channel.
                 </p>
               </div>
@@ -5741,23 +8069,29 @@ export default function CollaborationApp() {
 
       {/* Notifications Modal */}
       {showNotificationsModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh] bg-white ring-1 ring-slate-900/5">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-md flex flex-col max-h-[80vh]`}>
             <div className="flex items-center justify-between mb-8">
-              <h3 className="text-3xl font-bold flex items-center gap-3 text-slate-800">
-                <Bell className="w-8 h-8 text-indigo-500" /> Notifications
+              <h3 className={`text-3xl font-bold flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                <Bell className={`w-8 h-8 ${isDarkMode ? 'text-violet-400' : 'text-indigo-500'}`} /> Notifications
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={clearAllNotifications}
                   disabled={!((currentUser?.notifications || []).some(n => n.type === 'info'))}
-                  className="text-sm font-bold px-3 py-2 rounded-xl transition-colors text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`text-sm font-bold px-3 py-2 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isDarkMode ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'
+                  }`}
                 >
                   Clear all
                 </button>
                 <button
                   onClick={() => setShowNotificationsModal(false)}
-                  className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                  className={`p-2 rounded-full transition-colors ${
+                    isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                  }`}
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -5765,7 +8099,7 @@ export default function CollaborationApp() {
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
               {(currentUser?.notifications?.length || 0) === 0 ? (
-                <div className="text-center py-16 text-slate-500">
+                <div className={`text-center py-16 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                   <Bell className="w-16 h-16 mx-auto mb-4 opacity-20" />
                   <p className="font-medium">No new notifications</p>
                 </div>
@@ -5773,37 +8107,43 @@ export default function CollaborationApp() {
                 currentUser?.notifications.map(notif => (
                   <div
                     key={notif.id}
-                    className="p-5 border rounded-2xl transition-all group border-slate-100 bg-slate-50 hover:bg-white hover:shadow-lg"
+                    className={`p-5 border rounded-2xl transition-all group ${
+                      isDarkMode 
+                        ? 'border-slate-700 bg-slate-700/50 hover:bg-slate-700 hover:shadow-lg' 
+                        : 'border-slate-100 bg-slate-50 hover:bg-white hover:shadow-lg'
+                    }`}
                   >
                     <div className="flex gap-4">
-                      <div className="p-3 rounded-full h-fit shadow-sm bg-white border border-slate-100">
+                      <div className={`p-3 rounded-full h-fit shadow-sm border ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-100'
+                      }`}>
                         {notif.type === "friend_request" ? (
-                          <UserPlus className="w-5 h-5 text-indigo-600" />
+                          <UserPlus className={`w-5 h-5 ${isDarkMode ? 'text-violet-400' : 'text-indigo-600'}`} />
                         ) : notif.type === "info" ? (
-                          <Info className="w-5 h-5 text-emerald-500" />
+                          <Info className={`w-5 h-5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-500'}`} />
                         ) : (
-                          <Mail className="w-5 h-5 text-pink-500" />
+                          <Mail className={`w-5 h-5 ${isDarkMode ? 'text-pink-400' : 'text-pink-500'}`} />
                         )}
                       </div>
                       <div className="flex-1">
                         {notif.type === "friend_request" ? (
-                          <p className="text-sm leading-relaxed text-slate-600">
-                            <span className="font-bold text-slate-900">
+                          <p className={`text-sm leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                            <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                               {notif.from}
                             </span>{" "}
                             sent you a friend request.
                           </p>
                         ) : notif.type === "info" ? (
-                          <p className="text-sm leading-relaxed text-slate-600">
+                          <p className={`text-sm leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                             {notif.message}
                           </p>
                         ) : (
-                          <p className="text-sm leading-relaxed text-slate-600">
-                            <span className="font-bold text-slate-900">
+                          <p className={`text-sm leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                            <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                               {notif.from}
                             </span>{" "}
                             invited you to{" "}
-                            <span className="font-bold text-indigo-600">
+                            <span className={`font-bold ${isDarkMode ? 'text-violet-400' : 'text-indigo-600'}`}>
                               {notif.spaceName}
                             </span>
                           </p>
@@ -5814,7 +8154,9 @@ export default function CollaborationApp() {
                         {notif.type === "info" ? (
                           <button
                             onClick={() => dismissNotification(notif.id)}
-                            className="mt-3 text-xs font-bold text-slate-400 hover:text-slate-600"
+                            className={`mt-3 text-xs font-bold ${
+                              isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+                            }`}
                           >
                             Dismiss
                           </button>
@@ -5824,7 +8166,11 @@ export default function CollaborationApp() {
                               onClick={() =>
                                 handleNotificationAction(notif.id, notif.type)
                               }
-                              className="flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all transform active:scale-95 bg-indigo-600 hover:bg-indigo-700 text-white"
+                              className={`flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all transform active:scale-95 text-white ${
+                                isDarkMode 
+                                  ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
+                                  : 'bg-indigo-600 hover:bg-indigo-700'
+                              }`}
                             >
                               <CheckCircle className="w-4 h-4" /> Accept
                             </button>
@@ -5832,7 +8178,11 @@ export default function CollaborationApp() {
                               onClick={() =>
                                 handleRejectNotification(notif.id, notif.type)
                               }
-                              className="flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 border border-slate-200 transition-all hover:bg-slate-100 text-slate-500"
+                              className={`flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 border transition-all ${
+                                isDarkMode 
+                                  ? 'border-slate-600 hover:bg-slate-600 text-slate-300' 
+                                  : 'border-slate-200 hover:bg-slate-100 text-slate-500'
+                              }`}
                             >
                               Reject
                             </button>
@@ -5850,9 +8200,11 @@ export default function CollaborationApp() {
 
       {/* Create Channel Modal */}
       {showChannelModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-sm shadow-2xl bg-white ring-1 ring-slate-900/5">
-            <h3 className="text-2xl font-bold mb-6 text-slate-800">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
+            <h3 className={`text-2xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
               New Channel
             </h3>
             <div className="space-y-4">
@@ -5860,20 +8212,32 @@ export default function CollaborationApp() {
                 type="text"
                 value={newChannelName}
                 onChange={e => setNewChannelName(e.target.value)}
-                className="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className={`w-full px-5 py-4 rounded-2xl border focus:outline-none focus:ring-2 ${
+                  isDarkMode 
+                    ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500' 
+                    : 'bg-slate-50 border-slate-200 focus:ring-indigo-500'
+                }`}
                 placeholder="Channel Name"
                 autoFocus
               />
               <div className="flex gap-4">
                 <button
                   onClick={() => setShowChannelModal(false)}
-                  className="flex-1 py-3.5 font-bold rounded-2xl text-slate-500 border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className={`flex-1 py-3.5 font-bold rounded-2xl border transition-colors ${
+                    isDarkMode 
+                      ? 'text-slate-300 border-slate-600 hover:bg-slate-700' 
+                      : 'text-slate-500 border-slate-200 hover:bg-slate-50'
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={createChannel}
-                  className="flex-1 py-3.5 font-bold rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all"
+                  className={`flex-1 py-3.5 font-bold rounded-2xl text-white shadow-lg transition-all ${
+                    isDarkMode 
+                      ? 'bg-violet-600 shadow-violet-500/20 hover:bg-violet-700' 
+                      : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'
+                  }`}
                 >
                   Create
                 </button>
@@ -5885,52 +8249,101 @@ export default function CollaborationApp() {
 
       {/* Docs Modal */}
       {showDocsModal && (
-        <div className="fixed inset-0 backdrop-blur-lg flex items-center justify-center z-50 p-4 md:p-6 animate-fade-in bg-slate-900/50">
-          <div className="rounded-[2rem] p-6 md:p-8 w-full max-w-6xl max-h-[90vh] shadow-2xl bg-gradient-to-br from-white to-slate-50/50 ring-1 ring-slate-200/50 flex flex-col backdrop-blur-xl">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-200">
-                  <FileText className="w-7 h-7 text-white" />
+        <div className={`fixed inset-0 backdrop-blur-xl flex items-center justify-center z-50 p-2 sm:p-4 md:p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'
+        }`}>
+          <div className={`rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 md:p-8 w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] shadow-2xl backdrop-blur-2xl ring-1 flex flex-col ${
+            isDarkMode 
+              ? 'bg-slate-800/95 ring-slate-700/50 shadow-violet-500/10' 
+              : 'bg-white/95 ring-white/50 shadow-purple-200/30'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-8 gap-4">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 shadow-purple-500/30' 
+                    : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50'
+                }`}>
+                  <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
                 </div>
-                <div>
-                  <h3 className="text-3xl font-bold text-slate-800">
+                <div className="min-w-0">
+                  <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
+                    isDarkMode 
+                      ? 'bg-gradient-to-r from-white to-violet-400' 
+                      : 'bg-gradient-to-r from-slate-800 to-indigo-700'
+                  }`}>
                     My Documents
                   </h3>
-                  <p className="text-sm text-slate-500 mt-0.5">Access your Google Drive files and Gmail attachments</p>
+                  <p className={`text-xs sm:text-sm mt-0.5 hidden sm:block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Access your Google Drive files and Gmail attachments</p>
                 </div>
-                {googleAccessToken && (
-                  <button
-                    onClick={() => setShowConnectAppsModal(true)}
-                    className="ml-auto px-5 py-2.5 text-sm font-bold rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 transition-all flex items-center gap-2 border border-indigo-100 shadow-sm hover:shadow-md"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Connect More Apps
-                  </button>
-                )}
               </div>
-              <button
-                onClick={() => setShowDocsModal(false)}
-                className="p-2.5 rounded-xl transition-all hover:bg-slate-100 text-slate-400 hover:text-slate-600 hover:rotate-90 duration-300"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-2 sm:gap-3">
+                {googleAccessToken && (
+                  <>
+                    <button
+                      onClick={() => {
+                        // Show Drive files quickly when clicked (connect if needed)
+                        if (!googleAccessToken) {
+                          handleConnectGoogleDocs()
+                        } else {
+                          setSelectedAppFilter('drive')
+                          loadGoogleDocs(googleAccessToken, 'drive')
+                        }
+                      }}
+                      className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200' : 'bg-slate-50 text-slate-700'}`}
+                      title="Show Drive Files"
+                    >
+                      <img src="/google-drive.png" alt="Drive" className="w-5 h-5" />
+                      <span className="hidden sm:inline">Drive</span>
+                    </button>
+                    <button
+                      onClick={() => setShowConnectAppsModal(true)}
+                      className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
+                        isDarkMode 
+                          ? 'bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 border-violet-500/30 hover:shadow-lg hover:shadow-violet-500/20' 
+                          : 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 border-indigo-100 hover:shadow-lg hover:shadow-indigo-100/50'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Connect More Apps</span>
+                      <span className="sm:hidden">Connect</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => setShowDocsModal(false)}
+                  className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
+                    isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
             </div>
 
             {!googleAccessToken ? (
               <div className="flex-1 flex flex-col items-center justify-center py-16">
-                <div className="w-24 h-24 rounded-full flex items-center justify-center mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-100">
-                  <FileText className="w-12 h-12 text-indigo-600" />
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border-2 ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-br from-violet-500/20 to-purple-500/20 border-violet-500/30' 
+                    : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100'
+                }`}>
+                  <FileText className={`w-12 h-12 ${isDarkMode ? 'text-violet-400' : 'text-indigo-600'}`} />
                 </div>
-                <h4 className="text-2xl font-bold mb-3 text-slate-800">Connect Your Google Account</h4>
-                <p className="text-slate-500 mb-6 text-center max-w-md">
+                <h4 className={`text-2xl font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Connect Your Google Account</h4>
+                <p className={`mb-6 text-center max-w-md ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                   Connect your Google account to access <strong>Gmail attachments</strong> and <strong>Google Drive files</strong> in one unified view.
                 </p>
-                <p className="text-xs text-slate-400 mb-4 text-center">
+                <p className={`text-xs mb-4 text-center ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                   You'll be asked to grant permissions for Gmail and Drive access.
                 </p>
                 <button
                   onClick={handleConnectGoogleDocs}
-                  className="px-8 py-4 font-bold rounded-2xl transition-all flex items-center gap-3 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200"
+                  className={`px-8 py-4 font-bold rounded-2xl transition-all flex items-center gap-3 text-white shadow-lg ${
+                    isDarkMode 
+                      ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
+                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                  }`}
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -5946,20 +8359,36 @@ export default function CollaborationApp() {
                 {loadingDocs ? (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                      <p className="text-slate-500 text-sm">Loading documents...</p>
+                      <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
+                        isDarkMode ? 'border-violet-500' : 'border-indigo-600'
+                      }`}></div>
+                      <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
                     </div>
                   </div>
                 ) : docsError ? (
                   <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 bg-red-50">
-                        <XCircle className="w-8 h-8 text-red-600" />
+                    <div className="text-center px-4">
+                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                        isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
+                      }`}>
+                        <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
                       </div>
-                      <p className="text-red-600 font-medium mb-4">{docsError}</p>
+                      <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
                       <button
-                        onClick={() => loadGoogleDocs(googleAccessToken)}
-                        className="px-6 py-3 font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
+                        onClick={() => {
+                          // If token expired, re-authenticate
+                          if (docsError.includes('expired') || docsError.includes('Invalid')) {
+                            setGoogleAccessToken(null)
+                            GoogleService.removeGoogleAccessToken()
+                            setDocsError(null)
+                            handleConnectGoogleDocs()
+                          } else {
+                            loadGoogleDocs(googleAccessToken)
+                          }
+                        }}
+                        className={`px-6 py-3 font-bold rounded-xl text-white ${
+                          isDarkMode ? 'bg-violet-600 hover:bg-violet-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
                       >
                         Retry
                       </button>
@@ -5968,7 +8397,9 @@ export default function CollaborationApp() {
                 ) : (
                   <>
                     {/* Filter Tabs - Compact */}
-                    <div className="flex flex-wrap gap-2 mb-4 pb-2 border-b border-slate-100">
+                    <div className={`flex flex-wrap gap-2 mb-4 pb-2 border-b ${
+                      isDarkMode ? 'border-slate-700' : 'border-slate-100'
+                    }`}>
                       <button
                         onClick={() => {
                           setSelectedAppFilter('all')
@@ -5976,8 +8407,8 @@ export default function CollaborationApp() {
                         }}
                         className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all ${
                           selectedAppFilter === 'all'
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            ? isDarkMode ? 'bg-violet-600 text-white' : 'bg-indigo-600 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
                         All
@@ -5991,12 +8422,24 @@ export default function CollaborationApp() {
                           className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
                             selectedAppFilter === 'docs'
                               ? 'bg-blue-600 text-white'
-                              : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                              : isDarkMode ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
                           }`}
                         >
-                          📄 Docs
+                          <img src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('shared')
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          selectedAppFilter === 'shared'
+                            ? isDarkMode ? 'bg-violet-600 text-white' : 'bg-indigo-600 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                        >
+                        <img src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
+                      </button>
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
                         <button
                           onClick={() => {
@@ -6006,10 +8449,10 @@ export default function CollaborationApp() {
                           className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
                             selectedAppFilter === 'sheets'
                               ? 'bg-green-600 text-white'
-                              : 'bg-green-50 text-green-600 hover:bg-green-100'
+                              : isDarkMode ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-green-50 text-green-600 hover:bg-green-100'
                           }`}
                         >
-                          📊 Sheets
+                          <img src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
                         </button>
                       )}
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
@@ -6021,10 +8464,10 @@ export default function CollaborationApp() {
                           className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
                             selectedAppFilter === 'slides'
                               ? 'bg-yellow-600 text-white'
-                              : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
+                              : isDarkMode ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
                           }`}
-                        >
-                          📽️ Slides
+                          >
+                          <img src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
                         </button>
                       )}
                       {gmailAttachments.length > 0 && (
@@ -6036,39 +8479,99 @@ export default function CollaborationApp() {
                           className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
                             selectedAppFilter === 'gmail'
                               ? 'bg-red-600 text-white'
-                              : 'bg-red-50 text-red-600 hover:bg-red-100'
+                              : isDarkMode ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
                           }`}
                         >
-                          ✉️ Gmail
+                          <img src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
                         </button>
                       )}
                     </div>
 
                     {/* Documents Grid */}
                     <div className="flex-1 overflow-y-auto pr-2">
-                      {(selectedAppFilter === 'all' || selectedAppFilter !== 'gmail') && googleDocs.length > 0 && (
+                      {/* Shared Files View */}
+                      {selectedAppFilter === 'shared' && (
+                        <div className="mb-6">
+                          <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                            <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared Files
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                            {sharedChatDocs.map((attachment, idx) => {
+                                    const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
+                                    const attAppIcon = GoogleService.getAppIcon(attAppType)
+                                    return (
+                                      <div 
+                                        key={attachment.id || `${attachment.name}-${idx}`} 
+                                        className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-purple-600/40 hover:shadow-md hover:shadow-purple-500/10' : 'border-slate-200/60 bg-white/80 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-100/30'}`}
+                                        onClick={() => openAttachment(attachment)}
+                                      >
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
+                                          <img src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                          <span className="text-xl hidden">{attAppIcon.emoji}</span>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-purple-300' : 'text-slate-800 group-hover:text-indigo-600'}`}>
+                                            {attachment.name || 'Attachment'}
+                                          </h5>
+                                          <p className={`text-[10px] truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                            {attachment.source === 'drive' ? 'Drive' : attachment.source === 'gmail' ? 'Gmail' : 'Chat'}
+                                            {attachment.timestamp && ` • ${new Date(attachment.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                                          </p>
+                                        </div>
+                                        <button
+                                          onClick={(e) => { 
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                            addDocumentAsAttachment({ 
+                                              id: attachment.id, 
+                                              name: attachment.name, 
+                                              mimeType: attachment.mimeType, 
+                                              url: attachment.url || attachment.webViewLink, 
+                                              source: attachment.source || 'chat',
+                                              gmailMessageId: attachment.gmailMessageId,
+                                              gmailAttachmentId: attachment.gmailAttachmentId
+                                            }) 
+                                          }}
+                                          className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-purple-900/50 text-purple-400 hover:bg-purple-800' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}
+                                          title="Add to message"
+                                        >
+                                          <Plus className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    )
+                                  })}
+                          </div>
+                        </div>
+                      )}
+
+                      {(selectedAppFilter === 'all' || selectedAppFilter === 'drive' || selectedAppFilter === 'docs' || selectedAppFilter === 'sheets' || selectedAppFilter === 'slides') && googleDocs.length > 0 && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
-                          {googleDocs.map((doc) => {
+                          {[...googleDocs].sort((a, b) => {
+                            const timeA = a.modifiedTime ? new Date(a.modifiedTime).getTime() : 0
+                            const timeB = b.modifiedTime ? new Date(b.modifiedTime).getTime() : 0
+                            return timeB - timeA
+                          }).map((doc) => {
                             const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
                             const appIcon = GoogleService.getAppIcon(appType)
                             
                             return (
                               <div
                                 key={doc.id}
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
+                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-purple-600/40 hover:shadow-md hover:shadow-purple-500/10' : 'border-slate-200/60 bg-white/80 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-100/30'}`}
                                 onClick={() => window.open(doc.webViewLink, '_blank')}
                               >
                                 {/* Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${appIcon.color}`}>
-                                  <span className="text-xl">{appIcon.emoji}</span>
+                                  <img src={doc.iconLink || appIcon.iconUrl} alt={appType} className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{appIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-indigo-600">
+                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-purple-300' : 'text-slate-800 group-hover:text-indigo-600'}`}>
                                     {doc.name}
                                   </h5>
-                                  <p className="text-[10px] text-slate-400">
+                                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {new Date(doc.modifiedTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                   </p>
                                 </div>
@@ -6080,7 +8583,7 @@ export default function CollaborationApp() {
                                     e.stopPropagation()
                                     addDocumentAsAttachment(doc)
                                   }}
-                                  className="p-2 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors opacity-0 group-hover:opacity-100"
+                                  className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-purple-900/50 text-purple-400 hover:bg-purple-800' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}
                                   title="Add to message"
                                 >
                                   <Plus className="w-4 h-4" />
@@ -6094,30 +8597,35 @@ export default function CollaborationApp() {
 
 
                       {/* Shared Chat Documents */}
-                      {sharedChatDocs.length > 0 && (
+                      {selectedAppFilter === 'all' && sharedChatDocs.length > 0 && (
                         <div className="mb-6">
-                          <h4 className="text-sm font-bold mb-3 text-slate-600 flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-indigo-500" /> Shared in Chats
+                          <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                            <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared in Chats
                           </h4>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {sharedChatDocs.map((attachment, idx) => (
+                            {sharedChatDocs.map((attachment, idx) => {
+                              const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
+                              const attAppIcon = GoogleService.getAppIcon(attAppType)
+                              return (
                               <div 
                                 key={attachment.id || `${attachment.name}-${idx}`} 
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
+                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-purple-600/40 hover:shadow-md hover:shadow-purple-500/10' : 'border-slate-200/60 bg-white/80 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-100/30'}`}
                                 onClick={() => openAttachment(attachment)}
                               >
                                 {/* Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">📎</span>
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
+                                  <img src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{attAppIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-indigo-600">
+                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-purple-300' : 'text-slate-800 group-hover:text-indigo-600'}`}>
                                     {attachment.name || 'Attachment'}
                                   </h5>
-                                  <p className="text-[10px] text-slate-400 truncate">
+                                  <p className={`text-[10px] truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {attachment.source === 'drive' ? 'Drive' : attachment.source === 'gmail' ? 'Gmail' : 'Chat'}
+                                    {attachment.timestamp && ` • ${new Date(attachment.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                                   </p>
                                 </div>
                                 
@@ -6136,13 +8644,14 @@ export default function CollaborationApp() {
                                       gmailAttachmentId: attachment.gmailAttachmentId
                                     }) 
                                   }}
-                                  className="p-2 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors opacity-0 group-hover:opacity-100"
+                                  className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-purple-900/50 text-purple-400 hover:bg-purple-800' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}
                                   title="Add to message"
                                 >
                                   <Plus className="w-4 h-4" />
                                 </button>
                               </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}
@@ -6151,19 +8660,23 @@ export default function CollaborationApp() {
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
                         <div className="mb-6">
                           {selectedAppFilter === 'all' && googleDocs.length > 0 && (
-                            <h4 className="text-sm font-bold mb-3 text-slate-600 flex items-center gap-2">
+                            <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                               <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
                             </h4>
                           )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {gmailAttachments.map((attachment, idx) => (
+                            {gmailAttachments.map((attachment, idx) => {
+                              const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
+                              const gmailAppIcon = GoogleService.getAppIcon(gmailAppType)
+                              return (
                               <div
                                 key={`gmail-${attachment.messageId}-${attachment.id}-${idx}`}
                                 className="group flex items-center gap-3 p-3 rounded-xl border border-red-100 bg-white hover:border-red-300 hover:shadow-md transition-all"
                               >
                                 {/* File Icon */}
-                                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-xl">{attachment.fileIcon || '📎'}</span>
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${gmailAppIcon.color}`}>
+                                  <img src={gmailAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <span className="text-xl hidden">{gmailAppIcon.emoji}</span>
                                 </div>
                                 
                                 {/* Info */}
@@ -6232,7 +8745,8 @@ export default function CollaborationApp() {
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}
@@ -6259,26 +8773,30 @@ export default function CollaborationApp() {
 
       {/* Connect More Apps Modal */}
       {showConnectAppsModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl bg-white ring-1 ring-slate-900/5">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-md`}>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold text-slate-800">Connect More Apps</h3>
+              <h3 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Connect More Apps</h3>
               <button
                 onClick={() => setShowConnectAppsModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className={`p-2 rounded-full transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                }`}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-slate-500 text-sm mb-6">
+            <p className={`text-sm mb-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               Connect additional Google apps to access more documents
             </p>
             <div className="space-y-3">
               {[
-                { id: 'docs', name: 'Google Docs', emoji: '📄', color: 'bg-blue-50 hover:bg-blue-100 border-blue-200' },
-                { id: 'sheets', name: 'Google Sheets', emoji: '📊', color: 'bg-green-50 hover:bg-green-100 border-green-200' },
-                { id: 'slides', name: 'Google Slides', emoji: '📽️', color: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200' },
-                { id: 'gmail', name: 'Gmail Attachments', emoji: '📧', color: 'bg-red-50 hover:bg-red-100 border-red-200' }
+                { id: 'docs', name: 'Google Docs', emoji: '📄', lightColor: 'bg-blue-50 hover:bg-blue-100 border-blue-200', darkColor: 'bg-blue-500/20 hover:bg-blue-500/30 border-blue-500/30' },
+                { id: 'sheets', name: 'Google Sheets', emoji: '📊', lightColor: 'bg-green-50 hover:bg-green-100 border-green-200', darkColor: 'bg-green-500/20 hover:bg-green-500/30 border-green-500/30' },
+                { id: 'slides', name: 'Google Slides', emoji: '📽️', lightColor: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200', darkColor: 'bg-yellow-500/20 hover:bg-yellow-500/30 border-yellow-500/30' },
+                { id: 'gmail', name: 'Gmail Attachments', emoji: '📧', lightColor: 'bg-red-50 hover:bg-red-100 border-red-200', darkColor: 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30' }
               ].map((app) => (
                 <button
                   key={app.id}
@@ -6286,19 +8804,26 @@ export default function CollaborationApp() {
                   disabled={connectedApps.includes(app.id)}
                   className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center gap-4 ${
                     connectedApps.includes(app.id)
-                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                      : `${app.color} cursor-pointer transform hover:scale-[1.02]`
+                      ? isDarkMode 
+                        ? 'bg-slate-700/50 border-slate-600 opacity-60 cursor-not-allowed' 
+                        : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                      : `${isDarkMode ? app.darkColor : app.lightColor} cursor-pointer transform hover:scale-[1.02]`
                   }`}
                 >
-                  <span className="text-3xl">{app.emoji}</span>
+                  {
+                    (() => {
+                      const imgSrc = app.id === 'docs' ? '/google-docs.png' : app.id === 'sheets' ? '/google-sheets.png' : app.id === 'slides' ? '/slides.png' : app.id === 'gmail' ? '/gmail.png' : '/google-drive.png'
+                      return <img src={imgSrc} alt={app.name} className="w-8 h-8 rounded-md" />
+                    })()
+                  }
                   <div className="flex-1 text-left">
-                    <h4 className="font-bold text-slate-800">{app.name}</h4>
-                    <p className="text-xs text-slate-500">
+                    <h4 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{app.name}</h4>
+                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                       {connectedApps.includes(app.id) ? 'Already connected' : 'Click to connect'}
                     </p>
                   </div>
                   {connectedApps.includes(app.id) && (
-                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    <CheckCircle className={`w-5 h-5 ${isDarkMode ? 'text-green-400' : 'text-green-600'}`} />
                   )}
                 </button>
               ))}
@@ -6309,35 +8834,47 @@ export default function CollaborationApp() {
 
       {/* Google Calendar Connection Modal */}
       {showCalendarConnectModal && (
-        <div className="fixed inset-0 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-fade-in bg-slate-900/40">
-          <div className="rounded-[2rem] p-8 w-full max-w-md shadow-2xl bg-white ring-1 ring-slate-900/5">
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/40'
+        }`}>
+          <div className={`liquid-glass-modal p-8 w-full max-w-md`}>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-                <Calendar className="w-7 h-7 text-purple-600" />
+              <h3 className={`text-2xl font-bold flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                <Calendar className={`w-7 h-7 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`} />
                 Connect Google Calendar
               </h3>
               <button
                 onClick={() => setShowCalendarConnectModal(false)}
-                className="p-2 rounded-full transition-colors hover:bg-slate-100 text-slate-500"
+                className={`p-2 rounded-full transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                }`}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="mb-6">
-              <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 mx-auto bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-100">
-                <Calendar className="w-10 h-10 text-purple-600" />
+              <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-4 mx-auto border-2 ${
+                isDarkMode 
+                  ? 'bg-gradient-to-br from-purple-500/20 to-pink-500/20 border-purple-500/30' 
+                  : 'bg-gradient-to-br from-purple-50 to-pink-50 border-purple-100'
+              }`}>
+                <Calendar className={`w-10 h-10 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`} />
               </div>
-              <p className="text-slate-500 text-center mb-2">
+              <p className={`text-center mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                 Connect your Google Calendar to view and sync your events in real-time.
               </p>
-              <p className="text-xs text-slate-400 text-center">
+              <p className={`text-xs text-center ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                 You'll be asked to grant calendar access permissions.
               </p>
             </div>
             <div className="space-y-3">
               <button
                 onClick={handleConnectGoogleCalendar}
-                className="w-full px-6 py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-200"
+                className={`w-full px-6 py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 text-white shadow-lg ${
+                  isDarkMode 
+                    ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/20' 
+                    : 'bg-purple-600 hover:bg-purple-700 shadow-purple-200'
+                }`}
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -6349,7 +8886,9 @@ export default function CollaborationApp() {
               </button>
               <button
                 onClick={() => setShowCalendarConnectModal(false)}
-                className="w-full px-6 py-3 font-medium rounded-2xl transition-all text-slate-600 hover:bg-slate-100"
+                className={`w-full px-6 py-3 font-medium rounded-2xl transition-all ${
+                  isDarkMode ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100'
+                }`}
               >
                 Maybe Later
               </button>
@@ -6361,7 +8900,9 @@ export default function CollaborationApp() {
       {/* Success Toast Notification */}
       {showSuccessToast && (
         <div className="fixed bottom-8 right-8 z-[70] animate-fade-in">
-          <div className="rounded-2xl p-4 shadow-2xl bg-green-600 text-white flex items-center gap-3 min-w-[300px]">
+          <div className={`rounded-2xl p-4 shadow-2xl flex items-center gap-3 min-w-[300px] ${
+            isDarkMode ? 'bg-emerald-600 text-white' : 'bg-green-600 text-white'
+          }`}>
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
               <CheckCircle className="w-5 h-5" />
             </div>

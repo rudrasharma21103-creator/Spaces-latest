@@ -5,7 +5,7 @@ from app.ws_manager import manager
 router = APIRouter(prefix="/actions")
 
 @router.post("/send-friend-request")
-def send_friend_request(payload: dict):
+async def send_friend_request(payload: dict):
     to_id = payload["toUserId"]
     notification = payload["notification"]
 
@@ -13,10 +13,17 @@ def send_friend_request(payload: dict):
         {"id": to_id},
         {"$push": {"notifications": notification}}
     )
+    
+    # Send real-time WebSocket notification to the target user
+    try:
+        await manager.send_to_user(str(to_id), {"type": "notification", "notification": notification})
+    except Exception:
+        pass
+    
     return {"status": "sent"}
 
 @router.post("/accept-friend")
-def accept_friend(payload: dict):
+async def accept_friend(payload: dict):
     user_id = payload.get("userId")
     friend_id = payload.get("friendId")
     notification_id = payload.get("notificationId")
@@ -51,10 +58,10 @@ def accept_friend(payload: dict):
                     "timestamp": __import__('time').time()
                 }
                 users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
-                try:
-                    manager.send_to_user(friend_id, {"type": "notification", "notification": notif})
-                except Exception:
-                    pass
+                # Send real-time WebSocket notification immediately
+                await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
+                # Also notify the accepting user to refresh their friends list
+                await manager.send_to_user(str(user_id), {"type": "friends_updated"})
         except Exception:
             pass
 
@@ -63,7 +70,7 @@ def accept_friend(payload: dict):
     return {"error": "Missing user_id or friend_id"}
 
 @router.post("/reject-friend")
-def reject_friend(payload: dict):
+async def reject_friend(payload: dict):
     user_id = payload.get("userId")
     friend_id = payload.get("friendId")
     notification_id = payload.get("notificationId")
@@ -88,9 +95,9 @@ def reject_friend(payload: dict):
                     "timestamp": __import__('time').time()
                 }
                 users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
-                try:
-                    manager.send_to_user(friend_id, {"type": "notification", "notification": notif})
-                except Exception:
+                # Send real-time WebSocket notification immediately
+                await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
+        except Exception:
                     pass
         except Exception:
             pass
@@ -284,9 +291,15 @@ async def remove_member(payload: dict):
     return {"status": "member removed"}
 
 @router.post("/accept-invite")
-def accept_invite(payload: dict):
+async def accept_invite(payload: dict):
     user_id = payload.get("userId")
     notification_id = payload.get("notificationId")
+    
+    # Send real-time notification to refresh the user's spaces
+    try:
+        await manager.send_to_user(str(user_id), {"type": "sync_spaces"})
+    except Exception:
+        pass
     
     # In real app, you'd find the space from notification
     # For now, return a mock response

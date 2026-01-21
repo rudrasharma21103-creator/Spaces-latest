@@ -82,7 +82,7 @@ const authFetch = async (url, options = {}) => {
 export const getUsers = async () => {
   const cacheKey = "users_cache"
   const cacheTimeKey = "users_cache_time"
-  const CACHE_TTL = 15000 // 15 seconds TTL
+  const CACHE_TTL = 5000 // 5 seconds TTL for faster updates
   
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")

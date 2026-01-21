@@ -10,6 +10,7 @@ from app.routes.ws import router as ws_router
 from app.routes.events import router as events_router
 from app.routes.debug import router as debug_router
 from app.routes.upload import router as upload_router
+from app.routes.orgs import router as orgs_router
 import logging
 from app.core import drive as drive_core
 import os
@@ -48,6 +49,7 @@ app.include_router(ws_router)
 app.include_router(events_router)
 app.include_router(debug_router)
 app.include_router(upload_router)
+app.include_router(orgs_router)
 
 
 @app.on_event("startup")
