@@ -21,3 +21,25 @@ notifications_collection = db["notifications"]
 events_collection = db["events"]
 # Files metadata collection - store only metadata (no binaries)
 files_collection = db["files"]
+# Organizations collection for enterprise registrations
+organizations_collection = db["organizations"]
+
+# Create indexes for faster queries
+try:
+    # Index for user search by name (case-insensitive text search)
+    users_collection.create_index("name")
+    users_collection.create_index("email")
+    users_collection.create_index("id", unique=True)
+    # Index for spaces
+    spaces_collection.create_index("id", unique=True)
+    spaces_collection.create_index("members")
+    # Index for messages
+    messages_collection.create_index("channelId")
+    messages_collection.create_index("timestamp")
+    # Index for notifications
+    notifications_collection.create_index("userId")
+    # Index for organizations
+    organizations_collection.create_index("domain", unique=True)
+    organizations_collection.create_index("adminEmail")
+except Exception:
+    pass  # Indexes may already exist

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from app.auth import hash_password, verify_password, create_access_token
-from app.database import users_collection, spaces_collection
+from app.database import users_collection, spaces_collection, organizations_collection
 from app.ws_manager import manager
 import time
+import re
 
 router = APIRouter(prefix="/users")
 
@@ -37,6 +38,27 @@ def signup(user: dict):
         # Raise a clear HTTP error instead of letting a 500 bubble up; helps CORS and client visibility
         print(f"[users.signup] password hashing failed: {e}")
         raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
+
+    # Auto-link user to an organization if the domain matches a verified org
+    try:
+        email = user.get("email", "")
+        domain = ""
+        m = None
+        import re
+        m = re.search(r"@([A-Za-z0-9.-]+)$", email)
+        if m:
+            domain = m.group(1).lower()
+        org = None
+        if domain:
+            org = organizations_collection.find_one({"domain": domain, "verified": True})
+        if org:
+            user["organizationId"] = org.get("_id") or org.get("domain")
+            user["role"] = "employee"
+        else:
+            # allow caller to set role, default to basic user
+            user.setdefault("role", "user")
+    except Exception:
+        pass
 
     users_collection.insert_one(user)
 
@@ -103,6 +125,16 @@ def search_users(query: str):
             {"_id": 0}
         )
     )
+    for u in users:
+        u.pop("password", None)
+    return users
+
+
+@router.get("/by-domain/{domain}")
+def users_by_domain(domain: str):
+    # Return users whose email domain matches the requested domain
+    q = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
+    users = list(users_collection.find(q, {"_id": 0}))
     for u in users:
         u.pop("password", None)
     return users
