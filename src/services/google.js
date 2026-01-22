@@ -496,7 +496,107 @@ export const getGmailAttachmentPreviewUrl = async (accessToken, messageId, attac
     return URL.createObjectURL(blob)
   } catch (error) {
     console.error('Failed to get preview URL:', error)
+    // Fallback: sometimes the stored attachmentId is not the real Gmail attachmentId
+    // (e.g. we previously stored a composite id like `${messageId}-${partId}`). Try
+    // to fetch the message details and locate a part with a matching filename to
+    // obtain the correct attachmentId, then retry the download.
+    try {
+      const msgResp = await axios.get(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
+        {
+          params: { format: 'full' },
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+        }
+      )
+      const payload = msgResp.data.payload
+
+      const findAttachmentPart = (parts) => {
+        if (!parts) return null
+        for (const part of parts) {
+          if (part.parts) {
+            const nested = findAttachmentPart(part.parts)
+            if (nested) return nested
+          }
+          // Match by filename when available and ensure it has an attachmentId
+          if (part.filename && part.filename === filename && part.body && part.body.attachmentId) {
+            return part.body.attachmentId
+          }
+          // Some parts may include attachmentId on body even if filename is empty
+          if (part.body && part.body.attachmentId && part.filename && part.filename.length > 0) {
+            return part.body.attachmentId
+          }
+        }
+        return null
+      }
+
+      // Try to find by parts, and also check top-level payload
+      let realId = null
+      if (payload) {
+        realId = findAttachmentPart(payload.parts) || (payload.body && payload.body.attachmentId ? payload.body.attachmentId : null)
+      }
+
+      if (realId) {
+        try {
+          const bytes = await downloadGmailAttachment(accessToken, messageId, realId)
+          const blob = new Blob([bytes], { type: mimeType })
+          return URL.createObjectURL(blob)
+        } catch (e) {
+          console.error('Retry download with resolved attachmentId failed:', e)
+          return null
+        }
+      }
+    } catch (e) {
+      console.error('Fallback lookup for gmail attachment failed', e)
+    }
     return null
+  }
+}
+
+// Download Gmail Attachment with fallback to resolve composite ids
+export const downloadGmailAttachmentWithFallback = async (accessToken, messageId, attachmentId, filename) => {
+  try {
+    return await downloadGmailAttachment(accessToken, messageId, attachmentId)
+  } catch (err) {
+    console.warn('Initial download failed, attempting fallback lookup for attachmentId')
+    try {
+      const msgResp = await axios.get(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
+        {
+          params: { format: 'full' },
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+        }
+      )
+      const payload = msgResp.data.payload
+
+      const findAttachmentPart = (parts) => {
+        if (!parts) return null
+        for (const part of parts) {
+          if (part.parts) {
+            const nested = findAttachmentPart(part.parts)
+            if (nested) return nested
+          }
+          if (part.filename && filename && part.filename === filename && part.body && part.body.attachmentId) {
+            return part.body.attachmentId
+          }
+          if (part.body && part.body.attachmentId && part.filename && part.filename.length > 0) {
+            return part.body.attachmentId
+          }
+        }
+        return null
+      }
+
+      let realId = null
+      if (payload) {
+        realId = findAttachmentPart(payload.parts) || (payload.body && payload.body.attachmentId ? payload.body.attachmentId : null)
+      }
+
+      if (realId) {
+        return await downloadGmailAttachment(accessToken, messageId, realId)
+      }
+    } catch (e) {
+      console.error('Fallback lookup for gmail attachment failed', e)
+    }
+    throw err
   }
 }
 

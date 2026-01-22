@@ -40,6 +40,7 @@ import {
   ShieldAlert,
   Grid3x3,
   FileText,
+  ClipboardList,
   Download,
   Clock,
   Sun,
@@ -55,7 +56,8 @@ import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
 
 // Backend API base used for uploads and metadata fetches
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+// Use env, else fallback to window.location.origin (public URL), else localhost
+const API_BASE = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : "http://localhost:8000")
 
 // Custom hook to detect window size for responsive design
 function useWindowSize() {
@@ -5117,7 +5119,7 @@ export default function CollaborationApp() {
                 className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
                 title="Tasks"
               >
-                <FileText className="w-5 h-5" />
+                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
               </button>
             )}
             {/* Admin dashboard access - visible to org admins of verified org */}
@@ -7056,7 +7058,7 @@ export default function CollaborationApp() {
                           title="Create Task"
                           className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                         >
-                          <FileText className="w-5 h-5" />
+                          <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
                         </button>
 
                         {showEmojiPickerFor === 'input' && (
@@ -8799,18 +8801,51 @@ export default function CollaborationApp() {
                                           </p>
                                         </div>
                                         <button
-                                          onClick={(e) => { 
+                                          onClick={async (e) => {
                                             e.preventDefault()
                                             e.stopPropagation()
-                                            addDocumentAsAttachment({ 
-                                              id: attachment.id, 
-                                              name: attachment.name, 
-                                              mimeType: attachment.mimeType, 
-                                              url: attachment.url || attachment.webViewLink, 
+                                            // If this is a Gmail attachment, always upload to backend first
+                                            if (attachment.source === 'gmail' && googleAccessToken) {
+                                              try {
+                                                const bytes = await GoogleService.downloadGmailAttachmentWithFallback(googleAccessToken, attachment.gmailMessageId || attachment.messageId, attachment.gmailAttachmentId || attachment.id, attachment.name)
+                                                if (bytes) {
+                                                  const blob = new Blob([bytes], { type: attachment.mimeType })
+                                                  const fd = new FormData()
+                                                  fd.append('file', blob, attachment.name)
+                                                  const resp = await fetch(`${API_BASE}/upload/file`, {
+                                                    method: 'POST',
+                                                    body: fd
+                                                  })
+                                                  if (resp.ok) {
+                                                    const j = await resp.json()
+                                                    addDocumentAsAttachment({
+                                                      id: j.file_id || `${Date.now()}`,
+                                                      name: attachment.name,
+                                                      mimeType: attachment.mimeType,
+                                                      size: attachment.size,
+                                                      source: 'upload',
+                                                      fileId: j.file_id,
+                                                      url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
+                                                      public_url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
+                                                    })
+                                                    return
+                                                  }
+                                                }
+                                              } catch (err) {
+                                                console.error('Failed to upload gmail attachment to server:', err)
+                                                // fallthrough to add as gmail-only attachment
+                                              }
+                                            }
+                                            // For all other cases, or if upload fails, attach as normal
+                                            addDocumentAsAttachment({
+                                              id: attachment.id,
+                                              name: attachment.name,
+                                              mimeType: attachment.mimeType,
+                                              url: attachment.url || attachment.webViewLink,
                                               source: attachment.source || 'chat',
                                               gmailMessageId: attachment.gmailMessageId,
                                               gmailAttachmentId: attachment.gmailAttachmentId
-                                            }) 
+                                            })
                                           }}
                                           className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-purple-900/50 text-purple-400 hover:bg-purple-800' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}
                                           title="Add to message"
@@ -8974,9 +9009,45 @@ export default function CollaborationApp() {
                                 {/* Action Buttons */}
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <button
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                       e.preventDefault()
                                       e.stopPropagation()
+                                      // Try to download the attachment using the user's Google token and upload to backend
+                                          if (googleAccessToken) {
+                                        try {
+                                          const bytes = await GoogleService.downloadGmailAttachmentWithFallback(googleAccessToken, attachment.messageId, attachment.id, attachment.filename)
+                                          if (bytes) {
+                                            const blob = new Blob([bytes], { type: attachment.mimeType })
+                                            const fd = new FormData()
+                                            fd.append('file', blob, attachment.filename)
+
+                                            const resp = await fetch(`${API_BASE}/upload/file`, {
+                                              method: 'POST',
+                                              body: fd
+                                            })
+                                            if (resp.ok) {
+                                              const j = await resp.json()
+                                              // Attach uploaded file metadata so other users can access via backend
+                                              addDocumentAsAttachment({
+                                                id: j.file_id || `${Date.now()}`,
+                                                name: attachment.filename,
+                                                mimeType: attachment.mimeType,
+                                                size: attachment.size,
+                                                source: 'upload',
+                                                fileId: j.file_id,
+                                                url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
+                                                public_url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
+                                              })
+                                              return
+                                            }
+                                          }
+                                        } catch (err) {
+                                          console.error('Failed to upload gmail attachment to server:', err)
+                                          // fallthrough to add as gmail-only attachment
+                                        }
+                                      }
+
+                                      // Fallback: attach as gmail source (viewer may not be able to download)
                                       addDocumentAsAttachment({
                                         id: attachment.id,
                                         name: attachment.filename,
