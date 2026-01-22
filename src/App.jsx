@@ -4156,11 +4156,9 @@ export default function CollaborationApp() {
             <div className="absolute inset-0 bg-black/30" onClick={() => setShowOrgModal(false)}></div>
             <div className="relative w-full max-w-xl p-6 z-[85]">
               <div className="rounded-[1.6rem] overflow-hidden p-6 backdrop-blur-2xl bg-white/60 dark:bg-slate-800/70 border border-white/30 shadow-2xl">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 className="text-2xl font-extrabold">Register your company with Spaces</h3>
 
-                ) : activeView === "calendar" ? (
+                <div className="flex items-start justify-between mb-4">
+                  <h3 className="text-2xl font-extrabold">Register your company with Spaces</h3>
                   <button onClick={() => setShowOrgModal(false)} className="p-2 rounded-full hover:bg-white/20">
                     <X className="w-5 h-5" />
                   </button>
@@ -4313,7 +4311,7 @@ export default function CollaborationApp() {
               </div>
             </div>
           </div>
-          </div>
+          
         )}
 
       </div>

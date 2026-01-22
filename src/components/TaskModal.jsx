@@ -40,7 +40,7 @@ export default function TaskModal({ visible, onClose, members = [], currentUser,
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-lg">
+      <div className="relative bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl p-6 w-full max-w-md shadow-lg">
         <h3 className="text-lg font-bold mb-3">Create Task</h3>
         <div className="mb-3">
           <label className="block text-xs font-bold mb-1">Assign to</label>
