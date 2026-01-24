@@ -1,17 +1,82 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from app.auth import hash_password, verify_password, create_access_token
 from app.database import users_collection, spaces_collection, organizations_collection
 from app.ws_manager import manager
 import time
 import re
+from bson import ObjectId
+
+
+def sanitize(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k == "_id":
+                continue
+            out[k] = sanitize(v)
+        return out
+    if isinstance(obj, list):
+        return [sanitize(v) for v in obj]
+    return obj
 
 router = APIRouter(prefix="/users")
 
 @router.get("/")
-def get_users():
-    users = list(users_collection.find({}, {"_id": 0}))
+def get_users(request: Request):
+    # Determine requester to enforce invite visibility rules
+    requester = None
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth and auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1]
+        try:
+            from app.auth import verify_ws_token
+            requester_id = verify_ws_token(token)
+            if requester_id:
+                requester = users_collection.find_one({"id": requester_id})
+        except Exception:
+            requester = None
+    else:
+        xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
+        if xuid:
+            try:
+                requester = users_collection.find_one({"id": int(xuid)})
+            except Exception:
+                try:
+                    requester = users_collection.find_one({"id": xuid})
+                except Exception:
+                    requester = None
+
+    users_raw = list(users_collection.find({}, {"_id": 0}))
+    users = [sanitize(u) for u in users_raw]
     for u in users:
         u.pop("password", None)
+
+    # If requester exists and has company-only invite permissions, filter results
+    try:
+        if requester:
+            perms = (requester.get("invitePermissions") or {})
+            can_all = perms.get("canInviteAll")
+            can_company = perms.get("canInviteCompanyOnly")
+            if can_company and not can_all:
+                # Determine requester's domain/org
+                req_org = requester.get("organizationId")
+                req_email = requester.get("email", "") or ""
+                import re
+                m = re.search(r"@([A-Za-z0-9.-]+)$", req_email)
+                req_domain = m.group(1).lower() if m else None
+                def visible(u):
+                    if req_org and u.get("organizationId"):
+                        return str(u.get("organizationId")) == str(req_org)
+                    ue = u.get("email", "") or ""
+                    mm = re.search(r"@([A-Za-z0-9.-]+)$", ue)
+                    ud = mm.group(1).lower() if mm else None
+                    return ud == req_domain
+                users = [u for u in users if visible(u)]
+    except Exception:
+        pass
+
     return users
 
 @router.post("/signup")
@@ -54,17 +119,21 @@ def signup(user: dict):
         if org:
             user["organizationId"] = org.get("_id") or org.get("domain")
             user["role"] = "employee"
+            # default invite permissions for verified org members
+            user.setdefault("invitePermissions", {"canInviteAll": False, "canInviteCompanyOnly": True})
         else:
             # allow caller to set role, default to basic user
             user.setdefault("role", "user")
+            # default invite permissions for non-org users
+            user.setdefault("invitePermissions", {"canInviteAll": True, "canInviteCompanyOnly": False})
     except Exception:
         pass
 
     users_collection.insert_one(user)
-
     token = create_access_token({"user_id": user["id"]})
     user.pop("_id", None)
     user.pop("password", None)
+    user = sanitize(user)
 
     print(f"[users.signup] created user id: {user.get('id')}")
     return {"user": user, "token": token}
@@ -100,6 +169,7 @@ def login(data: dict):
     token = create_access_token({"user_id": user["id"]})
     user.pop("_id", None)
     user.pop("password", None)
+    user = sanitize(user)
 
     return {"user": user, "token": token}
 
@@ -113,12 +183,13 @@ def find_user_by_email(email: str):
     if user:
         print(f"[users.find_user_by_email] found user: {user.get('email')}")
         user.pop("password", None)
+        user = sanitize(user)
     else:
         print(f"[users.find_user_by_email] no user found for: {email}")
     return user
 
 @router.get("/search/{query}")
-def search_users(query: str):
+def search_users(query: str, request: Request):
     users = list(
         users_collection.find(
             {"name": {"$regex": query, "$options": "i"}},
@@ -127,6 +198,47 @@ def search_users(query: str):
     )
     for u in users:
         u.pop("password", None)
+    users = [sanitize(u) for u in users]
+
+    # Apply same visibility filtering as get_users
+    try:
+        requester = None
+        auth = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1]
+            from app.auth import verify_ws_token
+            requester_id = verify_ws_token(token)
+            if requester_id:
+                requester = users_collection.find_one({"id": requester_id})
+        else:
+            xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
+            if xuid:
+                try:
+                    requester = users_collection.find_one({"id": int(xuid)})
+                except Exception:
+                    requester = users_collection.find_one({"id": xuid})
+
+        if requester:
+            perms = (requester.get("invitePermissions") or {})
+            can_all = perms.get("canInviteAll")
+            can_company = perms.get("canInviteCompanyOnly")
+            if can_company and not can_all:
+                req_org = requester.get("organizationId")
+                req_email = requester.get("email", "") or ""
+                import re
+                m = re.search(r"@([A-Za-z0-9.-]+)$", req_email)
+                req_domain = m.group(1).lower() if m else None
+                def visible(u):
+                    if req_org and u.get("organizationId"):
+                        return str(u.get("organizationId")) == str(req_org)
+                    ue = u.get("email", "") or ""
+                    mm = re.search(r"@([A-Za-z0-9.-]+)$", ue)
+                    ud = mm.group(1).lower() if mm else None
+                    return ud == req_domain
+                users = [u for u in users if visible(u)]
+    except Exception:
+        pass
+
     return users
 
 
@@ -137,14 +249,66 @@ def users_by_domain(domain: str):
     users = list(users_collection.find(q, {"_id": 0}))
     for u in users:
         u.pop("password", None)
+    users = [sanitize(u) for u in users]
     return users
+
+
+@router.post("/set-password")
+def set_password(payload: dict):
+    email = payload.get("email")
+    password = payload.get("password")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email and password required")
+    # Find existing user (case-insensitive)
+    user = users_collection.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
+
+    try:
+        hashed = hash_password(password)
+    except Exception as e:
+        print(f"set_password: hashing failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to hash password")
+
+    if user:
+        # Update existing user
+        try:
+            users_collection.update_one({"id": user["id"]}, {"$set": {"password": hashed}})
+        except Exception as e:
+            print(f"set_password: failed to update password: {e}")
+            raise HTTPException(status_code=500, detail="Failed to set password")
+        user = users_collection.find_one({"id": user["id"]}, {"_id": 0})
+    else:
+        # Create a minimal admin user record (for first-time admin sign-in)
+        try:
+            new_id = int(time.time() * 1000)
+            new_user = {
+                "id": new_id,
+                "name": email.split("@")[0],
+                "email": email,
+                "password": hashed,
+                "role": "org_admin",
+                "status": "active",
+                "spaces": [],
+                "friends": [],
+                "notifications": []
+            }
+            users_collection.insert_one(new_user)
+            user = users_collection.find_one({"id": new_id}, {"_id": 0})
+        except Exception as e:
+            print(f"set_password: failed to create user: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create admin user")
+
+    if user:
+        user.pop("password", None)
+        user = sanitize(user)
+    token = create_access_token({"user_id": user.get("id")})
+    return {"user": user, "token": token}
 
 @router.get("/__ping")
 def users_ping():
     return {"users_router": "alive"}
 
 @router.put("/{user_id}")
-async def update_user(user_id: str, user: dict):
+async def update_user(user_id: str, user: dict, request: Request):
     # Only allow updating existing users; avoid changing password here
     update_doc = {k: v for k, v in user.items() if k != "password"}
     
@@ -160,12 +324,95 @@ async def update_user(user_id: str, user: dict):
     
     # Use the actual id from the found document for update
     actual_id = existing_user.get("id")
+
+    # If invitePermissions are being changed, enforce admin-only guard
+    try:
+        if "invitePermissions" in update_doc:
+            # Determine requester
+            requester = None
+            auth = request.headers.get("authorization") or request.headers.get("Authorization")
+            if auth and auth.lower().startswith("bearer "):
+                token = auth.split(" ", 1)[1]
+                try:
+                    from app.auth import verify_ws_token
+                    requester_id = verify_ws_token(token)
+                    if requester_id:
+                        requester = users_collection.find_one({"id": requester_id})
+                except Exception:
+                    requester = None
+            else:
+                xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
+                if xuid:
+                    try:
+                        requester = users_collection.find_one({"id": int(xuid)})
+                    except Exception:
+                        requester = users_collection.find_one({"id": xuid})
+
+            # If no requester, deny
+            if not requester:
+                raise HTTPException(status_code=403, detail="Not authorized to change invite permissions")
+
+            # Allow if requester is updating their own record
+            try:
+                req_id = requester.get("id")
+                if str(req_id) != str(actual_id):
+                    # Not self - require org_admin role
+                    if requester.get("role") != "org_admin":
+                        raise HTTPException(status_code=403, detail="Only org admins can change other users' invite permissions")
+                    # Optionally ensure same organization
+                    req_org = requester.get("organizationId")
+                    targ_org = existing_user.get("organizationId")
+                    if req_org and targ_org and str(req_org) != str(targ_org):
+                        raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="Not authorized to change invite permissions")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     res = users_collection.update_one({"id": actual_id}, {"$set": update_doc})
     if res.matched_count == 0:
         return {"error": "User not found"}
     updated = users_collection.find_one({"id": actual_id}, {"_id": 0})
     if updated:
         updated.pop("password", None)
+        updated = sanitize(updated)
+        # Broadcast invitePermissions update to org admins for this user's domain
+        try:
+            inv = updated.get("invitePermissions")
+            # normalize domain lookup
+            domain = None
+            org_id = updated.get("organizationId")
+            if org_id:
+                try:
+                    org = organizations_collection.find_one({"_id": org_id})
+                    if org:
+                        domain = org.get("domain")
+                except Exception:
+                    domain = None
+            if not domain:
+                email = updated.get("email") or ""
+                import re
+                m = re.search(r"@([A-Za-z0-9.-]+)$", email)
+                if m:
+                    domain = m.group(1).lower()
+            if domain:
+                try:
+                    import asyncio
+                    msg = {
+                        "type": "invite_permissions_updated",
+                        "userId": str(actual_id),
+                        "email": updated.get("email"),
+                        "invitePermissions": inv
+                    }
+                    # fire-and-forget broadcast to admins for this domain
+                    asyncio.create_task(manager.send_to_admins_for_domain(domain, msg))
+                except Exception:
+                    pass
+        except Exception:
+            pass
     # If avatar fields were updated, broadcast to friends and space members
     try:
         if any(k in update_doc for k in ("avatar_url", "avatar_preset", "profileImage", "avatar")):

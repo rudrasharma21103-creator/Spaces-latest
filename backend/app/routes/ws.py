@@ -1,7 +1,9 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.ws_manager import manager
 from app.auth import verify_ws_token
+from app.database import organizations_collection, users_collection
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +85,59 @@ async def websocket_notifications(websocket: WebSocket):
     if not user_id:
         logger.info("Notifications WebSocket connected without a verified user id")
 
-    await manager.connect("notifications", websocket, user_id=user_id)
+    # Determine user's domain and role (best-effort) to allow domain-scoped admin notifications
+    domain = None
+    role = None
+    try:
+        if user_id:
+            u = users_collection.find_one({"id": user_id}) or users_collection.find_one({"id": int(user_id)})
+            if u:
+                role = u.get("role")
+                # prefer explicit organizationId -> lookup org domain
+                org_id = u.get("organizationId")
+                if org_id:
+                    try:
+                        org = organizations_collection.find_one({"_id": org_id})
+                        if org:
+                            domain = org.get("domain")
+                    except Exception:
+                        pass
+                # fallback to parsing email domain
+                if not domain:
+                    email = u.get("email", "")
+                    import re
+                    m = re.search(r"@([A-Za-z0-9.-]+)$", email)
+                    if m:
+                        domain = m.group(1).lower()
+                # mark user as online
+                try:
+                    users_collection.update_one({"id": u.get("id")}, {"$set": {"isOnline": True, "lastActive": int(time.time())}})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    await manager.connect("notifications", websocket, user_id=user_id, meta={"user_id": str(user_id) if user_id else None, "domain": domain, "role": role})
+
+    # Notify connected org admins about this user's presence (domain-scoped)
+    try:
+        if domain and user_id:
+            await manager.send_to_admins_for_domain(domain, {"type": "user_presence", "event": "online", "userId": str(user_id), "email": u.get("email") if u else None, "timestamp": int(time.time())})
+    except Exception:
+        pass
+
+    # Send any recent org_verified events to the connecting socket so clients
+    # that connected after a verification don't miss the notification.
+    try:
+        cutoff = int(time.time()) - 600
+        recent = list(organizations_collection.find({"verified": True, "verifiedAt": {"$gte": cutoff}}, {"_id": 0, "domain": 1}))
+        for org in recent:
+            try:
+                await websocket.send_json({"type": "org_verified", "domain": org.get("domain")})
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug("Failed to send recent org_verified events: %s", e)
 
     try:
         while True:
@@ -101,4 +155,16 @@ async def websocket_notifications(websocket: WebSocket):
             if user_id:
                 await manager.send_to_user(user_id, data)
     except WebSocketDisconnect:
+        # mark user offline and update lastActive
+        try:
+            if user_id:
+                users_collection.update_one({"id": user_id}, {"$set": {"isOnline": False, "lastActive": int(time.time())}})
+        except Exception:
+            pass
+        # Notify admins about offline event
+        try:
+            if domain and user_id:
+                await manager.send_to_admins_for_domain(domain, {"type": "user_presence", "event": "offline", "userId": str(user_id), "email": u.get("email") if u else None, "timestamp": int(time.time())})
+        except Exception:
+            pass
         await manager.disconnect("notifications", websocket, user_id=user_id)

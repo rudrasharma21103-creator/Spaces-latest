@@ -11,6 +11,7 @@ from app.routes.events import router as events_router
 from app.routes.debug import router as debug_router
 from app.routes.upload import router as upload_router
 from app.routes.orgs import router as orgs_router
+from app.routes.admin import router as admin_router
 from app.routes.tasks import router as tasks_router
 import logging
 from app.core import drive as drive_core
@@ -53,6 +54,7 @@ app.include_router(debug_router)
 app.include_router(upload_router)
 app.include_router(orgs_router)
 app.include_router(tasks_router)
+app.include_router(admin_router)
 
 
 @app.on_event("startup")
