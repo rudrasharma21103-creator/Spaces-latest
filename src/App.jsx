@@ -54,10 +54,49 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
+import AdminDashboard from "./AdminDashboard"
 
 // Backend API base used for uploads and metadata fetches
-// Use env, else fallback to window.location.origin (public URL), else localhost
-const API_BASE = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : "http://localhost:8000")
+// Prefer explicit env `VITE_API_URL`. If it's missing or malformed (e.g. ":8000"),
+// build a proper origin using the current window location so fetch() calls don't
+// try to hit an invalid host like ":8000" which causes ERR_CONNECTION_REFUSED.
+let API_BASE = "http://localhost:8000"
+try {
+  const raw = import.meta.env.VITE_API_URL || ''
+  if (raw && typeof raw === 'string') {
+    // If raw already contains protocol, use it
+    if (/^https?:\/\//.test(raw)) {
+      API_BASE = raw
+    } else if (/^:\d+/.test(raw)) {
+      // raw like ":8000" -> build origin with current host + port
+      if (typeof window !== 'undefined') {
+        API_BASE = `${window.location.protocol}//${window.location.hostname}${raw}`
+      } else {
+        API_BASE = `http://localhost${raw}`
+      }
+    } else if (raw.startsWith('//')) {
+      // protocol-relative
+      if (typeof window !== 'undefined') API_BASE = `${window.location.protocol}${raw}`
+      else API_BASE = `http:${raw}`
+    } else if (raw.length > 0) {
+      // assume a host maybe without protocol (e.g. "localhost:8000")
+      if (/^[A-Za-z0-9.-]+:\d+$/.test(raw) && typeof window !== 'undefined') {
+        API_BASE = `${window.location.protocol}//${raw}`
+      } else if (/^[A-Za-z0-9.-]+(:\d+)?$/.test(raw)) {
+        API_BASE = `http://${raw}`
+      } else {
+        // fallback to raw value
+        API_BASE = raw
+      }
+    } else {
+      if (typeof window !== 'undefined') API_BASE = window.location.origin
+    }
+  } else if (typeof window !== 'undefined') {
+    API_BASE = window.location.origin
+  }
+} catch (e) {
+  // keep default
+}
 
 // Custom hook to detect window size for responsive design
 function useWindowSize() {
@@ -87,6 +126,9 @@ export default function CollaborationApp() {
   // Mobile responsive detection
   const { width: windowWidth } = useWindowSize()
   const isMobile = windowWidth < 768
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return <AdminDashboard />
+  }
   const [mobileView, setMobileView] = useState("chat") // "spaces" | "chat" | "friends"
   const [showMobileDrawer, setShowMobileDrawer] = useState(false) // Mobile drawer menu
 
@@ -180,9 +222,65 @@ export default function CollaborationApp() {
   const [orgMessage, setOrgMessage] = useState("")
   const [orgOtp, setOrgOtp] = useState("")
   const [orgOtpExpiresAt, setOrgOtpExpiresAt] = useState(null)
+  // Set-password modal state (shown to admin after DNS verification)
+  const [showSetPasswordModal, setShowSetPasswordModal] = useState(false)
+  const [setPasswordEmail, setSetPasswordEmail] = useState("")
+  const [setPasswordValue, setSetPasswordValue] = useState("")
+  const [setPasswordError, setSetPasswordError] = useState("")
+  const [setPasswordLoading, setSetPasswordLoading] = useState(false)
+  const [pendingAdminUserId, setPendingAdminUserId] = useState(null)
+
+  const handleSetPasswordSubmit = async () => {
+    setSetPasswordError("")
+    if (!setPasswordValue || setPasswordValue.length < 6) {
+      setSetPasswordError('Password must be at least 6 characters')
+      return
+    }
+    setSetPasswordLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/users/set-password`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: setPasswordEmail, password: setPasswordValue }) })
+      const j = await res.json()
+      if (!res.ok) {
+        setSetPasswordError(j.detail || j.error || 'Failed to set password')
+        setSetPasswordLoading(false)
+        return
+      }
+      // on success, save auth and mark authenticated
+      try {
+        const user = j.user
+        const token = j.token
+        saveAuth(user, token)
+        setCurrentUser(user)
+        setIsAuthenticated(true)
+        setActiveView('channel')
+        setShowAdminDashboard(true)
+      } catch (e) {
+        console.error('Failed during post-set-password login', e)
+      }
+      setShowSetPasswordModal(false)
+      setShowOrgModal(false)
+    } catch (e) {
+      setSetPasswordError('Request failed')
+    }
+    setSetPasswordLoading(false)
+  }
   const [orgDnsStatus, setOrgDnsStatus] = useState(null)
+  const [orgDnsChecking, setOrgDnsChecking] = useState(false)
+  const orgDnsPollRef = useRef(null)
+  const [orgDnsVerified, setOrgDnsVerified] = useState(false)
+  // Clear any DNS polling if modal closed or component unmounts
+  useEffect(() => {
+    if (!showOrgModal) {
+      try { if (orgDnsPollRef.current) { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } } catch (e) {}
+      setOrgDnsChecking(false)
+    }
+    return () => {
+      try { if (orgDnsPollRef.current) { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } } catch (e) {}
+    }
+  }, [showOrgModal])
   // Admin dashboard state
   const [orgInfo, setOrgInfo] = useState(null)
+  const [orgDnsToken, setOrgDnsToken] = useState(null)
   const [showAdminDashboard, setShowAdminDashboard] = useState(false)
   const [adminUsers, setAdminUsers] = useState([])
   const [adminSearch, setAdminSearch] = useState("")
@@ -224,6 +322,58 @@ export default function CollaborationApp() {
       try { sock.close(); adminSocketRef.current = null } catch (e) {}
     }
   }, [showAdminDashboard])
+  // When organization becomes verified, auto-close modal and open Spaces (channel) view
+  useEffect(() => {
+    console.log('orgStage changed:', orgStage)
+    if (orgStage === 'verified') {
+      console.log('orgStage is verified — running auto-login flow')
+      try { setShowOrgModal(false) } catch (e) {}
+      try { setActiveView('channel') } catch (e) {}
+      try { setShowAdminDashboard(true) } catch (e) {}
+      (async () => {
+        try {
+          const domain = (orgForm && orgForm.domain) || (orgInfo && orgInfo.domain) || ''
+          if (!domain) return
+
+          // refresh org info
+          let oj = orgInfo
+          try {
+            const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(domain)}`)
+            if (resOrg.ok) { oj = await resOrg.json(); setOrgInfo(oj) }
+          } catch (e) {}
+
+          // fetch users for domain and try to auto-login the org admin
+          try {
+            const resUsers = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(domain)}`)
+            if (resUsers.ok) {
+              const uj = await resUsers.json()
+              const usersList = Array.isArray(uj) ? uj : []
+              setAdminUsers(usersList)
+
+              // prefer admin email from the original registration form, then org record
+              const adminEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+              let adminUser = null
+              if (adminEmail) adminUser = usersList.find(u => String(u.email).toLowerCase() === String(adminEmail).toLowerCase())
+              if (!adminUser) adminUser = usersList.find(u => u.role === 'org_admin' || u.role === 'admin')
+              if (!adminUser && usersList.length > 0) adminUser = usersList[0]
+
+              // Always prompt the admin email to create a password (use form value or org record)
+              const promptEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+              if (promptEmail) {
+                try { setSetPasswordEmail(promptEmail) } catch (e) {}
+                try { if (adminUser) setPendingAdminUserId(adminUser.id) } catch (e) {}
+                try { setShowSetPasswordModal(true) } catch (e) {}
+              }
+            }
+          } catch (e) {
+            console.error('Failed fetching users for domain during auto-login', e)
+          }
+        } catch (e) {
+          console.error('Auto-open after org verified failed', e)
+        }
+      })()
+    }
+  }, [orgStage])
   const [showAccessDeniedModal, setShowAccessDeniedModal] = useState(false)
   const [showAddFriendConfirm, setShowAddFriendConfirm] = useState(null) // ID of user to add
 
@@ -1027,10 +1177,65 @@ export default function CollaborationApp() {
       // Open a background user socket to receive notifications in real-time
       import("./services/ws")
         .then(({ connectUserSocket }) => {
-          userSocket = connectUserSocket(data => {
+          userSocket = connectUserSocket(async data => {
               if (!data || !data.type) return
-            
+
               console.log('User socket received message:', data.type, data)
+
+              // When backend notifies that a domain was verified, try to auto-login the org admin
+              if (data.type === 'org_verified') {
+                try {
+                  const domain = data.domain
+                  if (!domain) return
+
+                  // refresh org info
+                  let oj = orgInfo
+                  try {
+                    const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(domain)}`)
+                    if (resOrg.ok) { oj = await resOrg.json(); setOrgInfo(oj) }
+                  } catch (e) {}
+
+                  // fetch users for domain and try to auto-login the org admin
+                  try {
+                    const resUsers = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(domain)}`)
+                    if (resUsers.ok) {
+                      const uj = await resUsers.json()
+                      const usersList = Array.isArray(uj) ? uj : []
+                      setAdminUsers(usersList)
+
+                      const adminEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+                      let adminUser = null
+                      if (adminEmail) adminUser = usersList.find(u => String(u.email).toLowerCase() === String(adminEmail).toLowerCase())
+                      if (!adminUser) adminUser = usersList.find(u => u.role === 'org_admin' || u.role === 'admin')
+                      if (!adminUser && usersList.length > 0) adminUser = usersList[0]
+
+                      const promptEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+                      if (promptEmail) {
+                        try { setSetPasswordEmail(promptEmail) } catch (e) {}
+                        try { if (adminUser) setPendingAdminUserId(adminUser.id) } catch (e) {}
+                        // Only show the Set Password modal to the registering admin (when they're the unauthenticated
+                        // user who submitted the org form) or to a connected user whose email matches the org admin email.
+                        try {
+                          const loggedEmail = (currentUser && currentUser.email) ? String(currentUser.email).toLowerCase() : ''
+                          const registeringEmail = (orgForm && orgForm.adminEmail) ? String(orgForm.adminEmail).toLowerCase() : ''
+                          const orgRecordEmail = (oj && oj.adminEmail) ? String(oj.adminEmail).toLowerCase() : ''
+                          const targetEmail = String(promptEmail).toLowerCase()
+                          const isRegisteringUser = registeringEmail && registeringEmail === targetEmail && !loggedEmail
+                          const isMatchingLoggedInUser = loggedEmail && loggedEmail === targetEmail
+                          if (isRegisteringUser || isMatchingLoggedInUser) {
+                            setShowSetPasswordModal(true)
+                          }
+                        } catch (e) {}
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Failed fetching users for domain during org_verified notification', e)
+                  }
+                } catch (e) {
+                  console.error('org_verified handler failed', e)
+                }
+                return
+              }
 
               // Real-time channel role updates
               if (data.type === 'channel_roles_updated') {
@@ -4257,6 +4462,15 @@ export default function CollaborationApp() {
                             const v = await fetch(`${API_BASE}/api/org/verify-otp`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ adminEmail: orgForm.adminEmail, code: orgOtp }) })
                             const j = await v.json()
                             if (v.status >= 400) { setOrgError(j.detail || j.error || 'OTP verify failed'); return }
+                            // capture DNS instruction token if provided
+                            try {
+                              const dnsVal = (j && j.dns_instructions && j.dns_instructions.value) || ''
+                              let extracted = dnsVal
+                              if (dnsVal && dnsVal.startsWith('spaces-verify=')) {
+                                extracted = dnsVal.split('spaces-verify=')[1]
+                              }
+                              if (extracted) setOrgDnsToken(extracted)
+                            } catch (e) {}
                             setOrgMessage('Email verified. Please add DNS TXT record to complete verification.')
                             setOrgStage('dns')
                             setOrgDnsStatus('pending')
@@ -4280,18 +4494,92 @@ export default function CollaborationApp() {
                 {orgStage === 'dns' && (
                   <div className="space-y-4">
                     <p className="text-sm">Please add the following DNS TXT record to domain <strong>{orgForm.domain}</strong>:</p>
-                    <div className="p-3 rounded-xl bg-slate-50 border">record name: <strong>@</strong><br/>type: <strong>TXT</strong><br/>value: <strong>spaces-verify=&lt;token&gt;</strong></div>
+                    <div className="p-3 rounded-xl bg-slate-50 border">record name: <strong>@</strong><br/>type: <strong>TXT</strong><br/>value: <strong>{orgDnsToken ? `spaces-verify=${orgDnsToken}` : 'spaces-verify=<token>'}</strong></div>
                     <div className="flex gap-2">
-                      <button onClick={async () => {
-                        setOrgError('')
-                        try {
-                          const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
-                          const j = await q.json()
-                          if (q.status >= 400) { setOrgError(j.detail || 'DNS check failed'); return }
-                          if (j.status === 'verified') { setOrgDnsStatus('verified'); setOrgStage('verified'); setOrgMessage('Domain verified — organization is active') }
-                          else { setOrgDnsStatus('not_found'); setOrgMessage('DNS token not found yet; try again in a few minutes') }
-                        } catch (e) { setOrgError('DNS check request failed') }
-                      }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Check DNS</button>
+                      <button
+                        onClick={async () => {
+                          setOrgError('')
+                          // prevent double start
+                          if (orgDnsChecking) return
+                          setOrgDnsChecking(true)
+
+                          const stopPolling = () => {
+                            try { if (orgDnsPollRef.current) { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } } catch (e) {}
+                            setOrgDnsChecking(false)
+                          }
+
+                          const singleCheck = async () => {
+                            try {
+                              const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
+                              const j = await q.json()
+                              if (!q.ok) { setOrgError(j.detail || 'DNS check failed'); stopPolling(); return false }
+
+                              const verifiedFlag = (j && (j.verified === true || String(j.verified).toLowerCase() === 'true' || j.status === 'verified' || String(j.status || '').toLowerCase() === 'verified'))
+                              if (verifiedFlag) {
+                                setOrgDnsStatus('verified')
+                                setOrgDnsVerified(true)
+                                setOrgStage('verified')
+                                setOrgMessage('Domain verified — organization is active')
+                                // refresh org info and navigate to main workspace
+                                try {
+                                  const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(orgForm.domain)}`)
+                                  if (resOrg.ok) { const oj = await resOrg.json(); setOrgInfo(oj) }
+                                } catch (e) {}
+                                setOrgDnsChecking(false)
+                                console.log('DNS verified in UI (second handler) — updating state and navigating')
+                                try {
+                                  const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(orgForm.domain)}`)
+                                  if (resOrg.ok) { const oj = await resOrg.json(); setOrgInfo(oj) }
+                                } catch (e) {}
+                                setShowOrgModal(false)
+                                setOrgStage('verified')
+                                setActiveView('channel')
+                                // Open Admin Dashboard and fetch admin users
+                                setShowAdminDashboard(true)
+                                try {
+                                  const resUsers = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(orgForm.domain)}`)
+                                  const uj = await resUsers.json()
+                                  setAdminUsers(Array.isArray(uj) ? uj : [])
+                                } catch (e) {
+                                  console.error('Failed fetching admin users after DNS verify', e)
+                                }
+                                stopPolling()
+                                return true
+                              } else {
+                                setOrgDnsStatus('not_found')
+                                setOrgMessage('DNS not verified yet. This can take a few minutes.')
+                                return false
+                              }
+                            } catch (e) {
+                              setOrgError('DNS check request failed')
+                              stopPolling()
+                              return false
+                            }
+                          }
+
+                          // Run first check immediately
+                          const ok = await singleCheck()
+                          if (ok) return
+
+                          // Start polling every 5s until verified
+                          orgDnsPollRef.current = setInterval(async () => {
+                            const r = await singleCheck()
+                            if (r) {
+                              try { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } catch (e) {}
+                            }
+                          }, 5000)
+                        }}
+                        disabled={orgDnsChecking}
+                        className={`px-4 py-2 rounded-2xl bg-indigo-600 text-white flex items-center gap-2 ${orgDnsChecking ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                        {orgDnsChecking ? (
+                          <>
+                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-20"/><path d="M22 12a10 10 0 00-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="opacity-80"/></svg>
+                            <span>Checking DNS...</span>
+                          </>
+                        ) : (
+                          'Check DNS'
+                        )}
+                      </button>
                       <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Close</button>
                     </div>
                   </div>
@@ -4303,16 +4591,36 @@ export default function CollaborationApp() {
                     <h4 className="text-lg font-bold">Organization Verified</h4>
                     <p className="text-sm text-slate-600">Your organization is now verified via DNS. Admins can invite employees by email.</p>
                     <div className="mt-4">
-                      <button onClick={() => { setShowOrgModal(false); setOrgStage('form') }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Done</button>
+                      <button onClick={() => { setShowOrgModal(false); setOrgStage('form'); try { setActiveView('channel') } catch(e){}; try { setShowAdminDashboard(true) } catch(e){} }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Done</button>
                     </div>
                   </div>
                 )}
+
+                
 
               </div>
             </div>
           </div>
           
         )}
+
+                {showSetPasswordModal && (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center px-4">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setShowSetPasswordModal(false)}></div>
+                    <div className="relative w-full max-w-md p-6 z-[95] bg-white rounded-2xl shadow-2xl">
+                      <h3 className="text-xl font-bold mb-2">Set password for {setPasswordEmail}</h3>
+                      <p className="text-sm text-slate-600 mb-4">Create a password for your admin account to sign in to Spaces.</p>
+                      {setPasswordError && <div className="mb-3 px-3 py-2 rounded bg-red-50 text-red-700">{setPasswordError}</div>}
+                      <input type="password" placeholder="Choose a password" value={setPasswordValue} onChange={e => setSetPasswordValue(e.target.value)} className="w-full px-4 py-3 rounded-2xl mb-3" />
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => setShowSetPasswordModal(false)} className="px-4 py-2 rounded-2xl border">Cancel</button>
+                        <button onClick={handleSetPasswordSubmit} disabled={setPasswordLoading} className={`px-4 py-2 rounded-2xl bg-indigo-600 text-white ${setPasswordLoading ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                          {setPasswordLoading ? 'Saving...' : 'Save & Sign In'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
       </div>
     )
@@ -4952,6 +5260,14 @@ export default function CollaborationApp() {
                           const v = await fetch(`${API_BASE}/api/org/verify-otp`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ adminEmail: orgForm.adminEmail, code: orgOtp }) })
                           const j = await v.json()
                           if (v.status >= 400) { setOrgError(j.detail || j.error || 'OTP verify failed'); return }
+                          try {
+                            const dnsVal = (j && j.dns_instructions && j.dns_instructions.value) || ''
+                            let extracted = dnsVal
+                            if (dnsVal && dnsVal.startsWith('spaces-verify=')) {
+                              extracted = dnsVal.split('spaces-verify=')[1]
+                            }
+                            if (extracted) setOrgDnsToken(extracted)
+                          } catch (e) {}
                           setOrgMessage('Email verified. Please add DNS TXT record to complete verification.')
                           setOrgStage('dns')
                           setOrgDnsStatus('pending')
@@ -4978,16 +5294,89 @@ export default function CollaborationApp() {
                   <p className="text-sm">Please add the following DNS TXT record to domain <strong>{orgForm.domain}</strong>:</p>
                   <div className="p-3 rounded-xl bg-slate-50 border">record name: <strong>@</strong><br/>type: <strong>TXT</strong><br/>value: <strong>spaces-verify=&lt;token&gt;</strong></div>
                   <div className="flex gap-2">
-                    <button onClick={async () => {
-                      setOrgError('')
-                      try {
-                        const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
-                        const j = await q.json()
-                        if (q.status >= 400) { setOrgError(j.detail || 'DNS check failed'); return }
-                        if (j.status === 'verified') { setOrgDnsStatus('verified'); setOrgStage('verified'); setOrgMessage('Domain verified — organization is active') }
-                        else { setOrgDnsStatus('not_found'); setOrgMessage('DNS token not found yet; try again in a few minutes') }
-                      } catch (e) { setOrgError('DNS check request failed') }
-                    }} className="px-4 py-2 rounded-2xl bg-indigo-600 text-white">Check DNS</button>
+                    <button
+                      onClick={async () => {
+                        setOrgError('')
+                        if (orgDnsChecking) return
+                        setOrgDnsChecking(true)
+
+                        const stopPolling = () => {
+                          try { if (orgDnsPollRef.current) { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } } catch (e) {}
+                          setOrgDnsChecking(false)
+                        }
+
+                        const singleCheck = async () => {
+                          try {
+                            const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
+                            const j = await q.json()
+                            console.log('DNS CHECK RESPONSE', j)
+                            if (!q.ok) { setOrgError(j.detail || 'DNS check failed'); stopPolling(); return false }
+
+                            // Accept multiple response shapes: {verified: true}, {verified: 'True'}, or legacy {status: 'verified'}
+                            const verifiedFlag = (j && (j.verified === true || String(j.verified).toLowerCase() === 'true' || j.status === 'verified' || String(j.status || '').toLowerCase() === 'verified'))
+                            if (verifiedFlag) {
+                              setOrgDnsStatus('verified')
+                              setOrgDnsVerified(true)
+                              setOrgStage('verified')
+                              setOrgMessage('Domain verified — organization is active')
+                              // close modal and open admin/dashboard
+                              try {
+                                const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(orgForm.domain)}`)
+                                if (resOrg.ok) { const oj = await resOrg.json(); setOrgInfo(oj) }
+                              } catch (e) {}
+                              setOrgDnsChecking(false)
+                              console.log('DNS verified in UI — updating state and navigating')
+                              try {
+                                const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(orgForm.domain)}`)
+                                if (resOrg.ok) { const oj = await resOrg.json(); setOrgInfo(oj) }
+                              } catch (e) {}
+                              setShowOrgModal(false)
+                              setOrgStage('verified')
+                              setActiveView('channel')
+                              // Open Admin Dashboard and fetch admin users
+                              setShowAdminDashboard(true)
+                              try {
+                                const resUsers = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(orgForm.domain)}`)
+                                const uj = await resUsers.json()
+                                setAdminUsers(Array.isArray(uj) ? uj : [])
+                              } catch (e) {
+                                console.error('Failed fetching admin users after DNS verify', e)
+                              }
+                              stopPolling()
+                              return true
+                            } else {
+                              setOrgDnsStatus('not_found')
+                              setOrgMessage('DNS not verified yet. This can take a few minutes.')
+                              return false
+                            }
+                          } catch (e) {
+                            setOrgError('DNS check request failed')
+                            stopPolling()
+                            return false
+                          }
+                        }
+
+                        const ok = await singleCheck()
+                        if (ok) return
+
+                        orgDnsPollRef.current = setInterval(async () => {
+                          const r = await singleCheck()
+                          if (r) {
+                            try { clearInterval(orgDnsPollRef.current); orgDnsPollRef.current = null } catch (e) {}
+                          }
+                        }, 5000)
+                      }}
+                      disabled={orgDnsChecking}
+                      className={`px-4 py-2 rounded-2xl bg-indigo-600 text-white flex items-center gap-2 ${orgDnsChecking ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                      {orgDnsChecking ? (
+                        <>
+                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-20"/><path d="M22 12a10 10 0 00-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="opacity-80"/></svg>
+                          <span>Checking DNS...</span>
+                        </>
+                      ) : (
+                        'Check DNS'
+                      )}
+                    </button>
                     <button onClick={() => setShowOrgModal(false)} className="px-4 py-2 rounded-2xl border">Close</button>
                   </div>
                 </div>
@@ -5123,15 +5512,13 @@ export default function CollaborationApp() {
             {/* Admin dashboard access - visible to org admins of verified org */}
             {!sidebarCollapsed && !isMobile && currentUser?.role === 'org_admin' && orgInfo?.verified && (
               <button
-                onClick={async () => {
-                  setShowAdminDashboard(true)
-                  // fetch users by domain
+                onClick={() => {
                   try {
-                    const res = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(orgInfo.domain)}`)
-                    const j = await res.json()
-                    setAdminUsers(Array.isArray(j) ? j : [])
+                    const url = `${window.location.origin}/admin/dashboard`
+                    window.open(url, '_blank')
                   } catch (e) {
-                    console.error('fetch admin users failed', e)
+                    // fallback to same-tab modal if window.open is blocked
+                    setShowAdminDashboard(true)
                   }
                 }}
                 className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"

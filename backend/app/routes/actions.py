@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from app.database import users_collection, spaces_collection
 from app.ws_manager import manager
 
@@ -8,6 +8,51 @@ router = APIRouter(prefix="/actions")
 async def send_friend_request(payload: dict):
     to_id = payload["toUserId"]
     notification = payload["notification"]
+    # Determine sender id from notification or payload
+    from_id = notification.get("fromId") or payload.get("fromId")
+
+    # Permission enforcement: if sender has company-only invite permission,
+    # ensure recipient is in the same organization or domain
+    try:
+        sender = None
+        if from_id is not None:
+            try:
+                sender = users_collection.find_one({"id": int(from_id)})
+            except Exception:
+                sender = users_collection.find_one({"id": from_id})
+        recipient = None
+        try:
+            recipient = users_collection.find_one({"id": int(to_id)})
+        except Exception:
+            recipient = users_collection.find_one({"id": to_id})
+
+        if sender and sender.get("invitePermissions"):
+            perms = sender.get("invitePermissions") or {}
+            can_all = perms.get("canInviteAll")
+            can_company = perms.get("canInviteCompanyOnly")
+            if can_company and not can_all:
+                # Compare organizationId first
+                s_org = sender.get("organizationId")
+                r_org = recipient.get("organizationId") if recipient else None
+                if s_org and r_org:
+                    if str(s_org) != str(r_org):
+                        raise HTTPException(status_code=403, detail="Not allowed to invite users outside your organization")
+                else:
+                    # Fallback to email domain comparison
+                    import re
+                    s_email = (sender.get("email") or "")
+                    r_email = (recipient.get("email") or "")
+                    sm = re.search(r"@([A-Za-z0-9.-]+)$", s_email)
+                    rm = re.search(r"@([A-Za-z0-9.-]+)$", r_email)
+                    sd = sm.group(1).lower() if sm else None
+                    rd = rm.group(1).lower() if rm else None
+                    if sd != rd:
+                        raise HTTPException(status_code=403, detail="Not allowed to invite users outside your company domain")
+    except HTTPException:
+        raise
+    except Exception:
+        # On any unexpected failure, be conservative and deny
+        raise HTTPException(status_code=403, detail="Invite not permitted")
 
     users_collection.update_one(
         {"id": to_id},
