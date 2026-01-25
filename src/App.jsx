@@ -177,7 +177,7 @@ export default function CollaborationApp() {
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(false)
+  const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
 
   // Search State
   const [searchQuery, setSearchQuery] = useState("") // Spaces Search Input
