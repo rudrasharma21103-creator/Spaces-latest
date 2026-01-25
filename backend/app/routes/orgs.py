@@ -200,7 +200,7 @@ def verify_otp(payload: dict):
         }
     }
 
-import httpx
+
 import time
 
 @router.get("/check-dns")
