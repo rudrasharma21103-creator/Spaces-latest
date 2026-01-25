@@ -2,13 +2,8 @@ import React, { useEffect, useState, useRef } from "react";
 import { connectUserSocket } from "./services/ws";
 import { getStoredUser, getToken } from "./services/auth";
 
-const API_BASE = (() => {
-  try {
-    return import.meta.env.VITE_API_URL || window.location.origin;
-  } catch (e) {
-    return import.meta.env.VITE_API_URL || "http://localhost:8000";
-  }
-})();
+const API_BASE = import.meta.env.VITE_API_URL;
+
 
 export default function AdminDashboard() {
   const [overview, setOverview] = useState(null);
