@@ -3,7 +3,7 @@ from starlette import status
 from app.database import tasks_collection
 from app.ws_manager import manager
 from app.routes.messages import _get_user_id_from_request, _check_channel_access
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/tasks")
 
@@ -23,7 +23,8 @@ async def create_task(request: Request, payload: dict):
     timestamp = payload.get("timestamp")
     # Ensure timestamp exists and is an ISO string
     if not timestamp:
-        timestamp = datetime.utcnow().isoformat()
+        # Store timestamps as UTC ISO strings with explicit Z for consistency
+        timestamp = datetime.now(timezone.utc).isoformat()
 
     task_doc = {
         "created_by": created_by,

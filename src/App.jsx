@@ -592,6 +592,21 @@ export default function CollaborationApp() {
     } catch (e) { return false }
   }
 
+  // Helper: return local YYYY-MM-DD for a Date or date string (avoids UTC shift from toISOString)
+  const toLocalDateStr = (input) => {
+    try {
+      if (!input) return ''
+      const d = input instanceof Date ? input : new Date(input)
+      if (isNaN(d.getTime())) return ''
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const da = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${da}`
+    } catch (e) {
+      return ''
+    }
+  }
+
   const getUserIdValue = user => {
     if (!user) return ""
     if (user.id !== undefined && user.id !== null) return String(user.id)
@@ -993,7 +1008,7 @@ export default function CollaborationApp() {
         const mappedGoogle = (googleCalendarEvents || []).map(ge => {
           const startIso = ge.start?.dateTime || ge.start?.date || null
           const endIso = ge.end?.dateTime || ge.end?.date || null
-          const startDate = startIso ? new Date(startIso).toISOString().split('T')[0] : ''
+          const startDate = startIso ? toLocalDateStr(startIso) : ''
           return {
             id: `gcal-${ge.id}`,
             title: ge.summary || 'Untitled',
@@ -2192,6 +2207,26 @@ export default function CollaborationApp() {
     )
   }
 
+  const handleDisconnectGoogleCalendar = () => {
+    try {
+      GoogleService.removeGoogleCalendarToken()
+    } catch (e) {}
+    setGoogleCalendarToken(null)
+    setGoogleCalendarEvents([])
+    // Remove google-sourced events from the main events list
+    setEvents(prev => (prev || []).filter(e => e.source !== 'google'))
+  }
+
+  const refreshGoogleCalendar = async () => {
+    const token = googleCalendarToken || GoogleService.getGoogleCalendarToken()
+    if (!token) return
+    try {
+      await loadGoogleCalendarEvents(token)
+    } catch (e) {
+      console.error('Failed to refresh Google Calendar events', e)
+    }
+  }
+
   const loadGoogleCalendarEvents = async (token) => {
     try {
       const gEvents = await GoogleService.fetchGoogleCalendarEvents(token)
@@ -2204,7 +2239,7 @@ export default function CollaborationApp() {
         .map(ge => {
         const startIso = ge.start?.dateTime || ge.start?.date || null
         const endIso = ge.end?.dateTime || ge.end?.date || null
-        const startDate = startIso ? new Date(startIso).toISOString().split('T')[0] : ''
+        const startDate = startIso ? toLocalDateStr(startIso) : ''
         return {
           id: `gcal-${ge.id}`,
           title: ge.summary || 'Untitled',
@@ -3735,7 +3770,7 @@ export default function CollaborationApp() {
 
   const saveCalendarEvent = async () => {
     if (!currentUser || !newEvent.title.trim()) return
-    const dateStr = selectedDate.toISOString().split("T")[0]
+    const dateStr = toLocalDateStr(selectedDate)
     const event = {
       id: Date.now(),
       title: newEvent.title,
@@ -6077,7 +6112,7 @@ export default function CollaborationApp() {
                 >
                   <Plus className="w-5 h-5" /> New Event
                 </button>
-                {!googleCalendarToken && (
+                {!googleCalendarToken ? (
                   <button
                     onClick={() => handleConnectGoogleCalendar()}
                     className={`px-4 py-2.5 rounded-2xl font-bold text-sm border transition-all flex items-center gap-2 ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-purple-600/50 hover:text-purple-300' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-indigo-200 hover:text-indigo-600 shadow-sm'}`}
@@ -6088,6 +6123,25 @@ export default function CollaborationApp() {
                     </svg>
                     Connect Calendar
                   </button>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className={`px-3 py-2 rounded-2xl text-sm font-semibold flex items-center gap-2 ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700 shadow-sm'}`}>
+                      <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
+                      Connected
+                    </div>
+                    <button
+                      onClick={refreshGoogleCalendar}
+                      className={`px-3 py-2 rounded-2xl text-sm border transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      Refresh
+                    </button>
+                    <button
+                      onClick={handleDisconnectGoogleCalendar}
+                      className={`px-3 py-2 rounded-2xl text-sm border transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 text-rose-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-rose-600 hover:bg-slate-50'}`}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -6112,16 +6166,14 @@ export default function CollaborationApp() {
                 ))}
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                   const day = i + 1
-                  const dateStr = new Date(
+                  const d = new Date(
                     currentDate.getFullYear(),
                     currentDate.getMonth(),
                     day
                   )
-                    .toISOString()
-                    .split("T")[0]
+                  const dateStr = toLocalDateStr(d)
                   const dayEvents = events.filter(e => e.startDate === dateStr)
-                  const isToday =
-                    new Date().toISOString().split("T")[0] === dateStr
+                  const isToday = toLocalDateStr(new Date()) === dateStr
 
                   return (
                     <div
@@ -6400,6 +6452,8 @@ export default function CollaborationApp() {
                   const canInvite = role === 'owner' || role === 'admin'
                   return (
                     <button
+                      title="Invite Members"
+                      aria-label="Invite Members"
                       onClick={() => {
                         if (!canInvite) return
                         setInviteSearchQuery("")
@@ -6410,7 +6464,7 @@ export default function CollaborationApp() {
                       className={`hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 ${canInvite ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]' : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
                     >
                       <UserPlus className="w-4 h-4" />
-                      <span>Invite Members</span>
+                      
                     </button>
                   )
                 })()}
@@ -8153,14 +8207,14 @@ export default function CollaborationApp() {
                   <Calendar className="w-4 h-4" /> Events
                 </h4>
                 <div className={`rounded-2xl border p-4 max-h-96 overflow-y-auto ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50/80 border-slate-200/60'}`}>
-                  {((events || []).filter(e => e.startDate === (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : '')) || []).length === 0 ? (
+                  {((events || []).filter(e => e.startDate === (selectedDate ? toLocalDateStr(selectedDate) : '')) || []).length === 0 ? (
                     <div className={`text-center py-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                       <Calendar className={`w-10 h-10 mx-auto mb-3 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
                       <p className="text-sm font-medium">No events for this day</p>
                       <p className="text-xs mt-1">Click "New Event" to create one</p>
                     </div>
                   ) : (
-                    (events || []).filter(e => e.startDate === (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : '')).map(ev => (
+                    (events || []).filter(e => e.startDate === (selectedDate ? toLocalDateStr(selectedDate) : '')).map(ev => (
                       <div key={ev.id} className={`p-4 rounded-xl border mb-3 last:mb-0 transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:border-purple-600/30' : 'bg-white border-slate-200/60 hover:border-indigo-200 hover:shadow-sm'}`}>
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
