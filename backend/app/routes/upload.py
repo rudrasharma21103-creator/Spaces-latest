@@ -5,7 +5,7 @@ from app.database import files_collection
 import tempfile
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from bson.binary import Binary
 import io
@@ -93,7 +93,8 @@ async def upload_file(request: Request, background: BackgroundTasks, file: Uploa
         "mimetype": file.content_type,
         "size": size,
         "status": "uploading",
-        "createdAt": datetime.utcnow(),
+        # Use UTC ISO string so clients can convert to local time reliably
+        "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     res = files_collection.insert_one(doc)
     doc_id = res.inserted_id
