@@ -486,57 +486,28 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 .liquid-glass-sidebar {
   position: relative;
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
-  -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
-    border-right: 1px solid rgba(255, 255, 255, 0.15);
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-right: 1px solid rgba(226, 232, 240, 0.8);
   border-radius: 0 24px 24px 0;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.15),
-    inset 0 0 0.5px rgba(255, 255, 255, 0.35),
-    inset 0 0 20px rgba(255, 255, 255, 0.05);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.06);
   transition: all 0.4s ease;
 }
 
-/* Light reflection layer */
+/* Light reflection layer - disabled for solid white */
 .liquid-glass-sidebar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.25) 0%,
-    rgba(255, 255, 255, 0.05) 35%,
-    transparent 100%
-  );
-  mix-blend-mode: screen;
-  opacity: 0.6;
-  pointer-events: none;
+  display: none;
 }
 
-/* Slight glowing line on edge */
+/* Slight glowing line on edge - disabled for solid white */
 .liquid-glass-sidebar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: -1px;
-  height: 100%;
-  width: 1px;
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 0.1) 50%,
-    rgba(255, 255, 255, 0.3) 100%
-  );
-  opacity: 0.8;
+  display: none;
 }
 
 /* Floating effect on hover */
 .liquid-glass-sidebar:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.25),
-    inset 0 0 0.5px rgba(255, 255, 255, 0.45);
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.08);
 }
 
 /* ============================================
@@ -584,31 +555,17 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 .liquid-glass-sidebar-right {
   position: relative;
-  background: rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
-  -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
-  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-left: 1px solid rgba(226, 232, 240, 0.8);
   border-radius: 24px 0 0 24px;
-  box-shadow:
-    -4px 0 32px rgba(0, 0, 0, 0.15),
-    inset 0 0 0.5px rgba(255, 255, 255, 0.35),
-    inset 0 0 20px rgba(255, 255, 255, 0.05);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.06);
   transition: all 0.4s ease;
 }
 
 .liquid-glass-sidebar-right::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    315deg,
-    rgba(255, 255, 255, 0.25) 0%,
-    rgba(255, 255, 255, 0.05) 35%,
-    transparent 100%
-  );
-  mix-blend-mode: screen;
-  opacity: 0.6;
-  pointer-events: none;
+  display: none;
 }
 
 .dark .liquid-glass-sidebar-right {
@@ -3804,7 +3761,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
    Keep mobile overlay sidebars available when App toggles them.
    App.jsx uses `.fixed` and utility classes for mobile drawers; ensure
    those are visible despite other responsive rules. */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .liquid-glass-sidebar.fixed,
   .liquid-glass-sidebar-right.fixed,
   .liquid-glass-sidebar.mobile-slide-in-left,
@@ -3814,7 +3771,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
     top: 0 !important;
     bottom: 0 !important;
     z-index: 60 !important;
-    background: var(--glass-bg) !important;
+    background: #ffffff !important;
     width: 85% !important;
     max-width: 320px !important;
     transform: translateX(0) !important;
@@ -3825,20 +3782,31 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 }
 
 /* Targeted mobile fixes: navbar stacking, drawer look, and hiding inactive sidebars */
-@media (max-width: 1023px) {
-  /* Keep navbar visible above drawers and content */
-  .liquid-glass-navbar {
-    position: sticky !important;
-    top: env(safe-area-inset-top, 0) !important;
-    left: 0 !important;
-    right: 0 !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    width: 100% !important;
-    z-index: 70 !important;
-    border-radius: 0.75rem !important;
-    padding-left: 0.75rem !important;
-    padding-right: 0.75rem !important;
+@media (max-width: 767px) {
+  /* Hide the desktop liquid-glass-navbar on mobile - it uses Tailwind's hidden class */
+  .liquid-glass-navbar.hidden {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Ensure the mobile header is visible and clickable */
+  .fixed.top-0.left-0.right-0.z-\[60\] {
+    display: flex !important;
+    position: fixed !important;
+    z-index: 60 !important;
+    pointer-events: auto !important;
+  }
+  
+  /* Ensure all buttons inside the mobile header are clickable */
+  .fixed.top-0.left-0.right-0.z-\[60\] button {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    position: relative !important;
+    z-index: 1 !important;
   }
 
   /* Soften drawer corner and ensure full-height layout */
@@ -3862,6 +3830,20 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   .liquid-glass-sidebar:not(.mobile-slide-in-left),
   .liquid-glass-sidebar-right:not(.mobile-slide-in-right) {
     display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  
+  /* Ensure hidden sidebars stay hidden with Tailwind's hidden class */
+  .liquid-glass-sidebar.hidden,
+  .liquid-glass-sidebar-right.hidden {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
   }
 
   /* Make sure mobile drawer content scrolls inside the drawer, not the body */
@@ -3872,38 +3854,5 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   }
 }
 
-/* FORCE SHOW NAVBAR ON MOBILE (override Tailwind `hidden`) */
-@media (max-width: 1023px) {
-  .liquid-glass-navbar.hidden {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    height: 68px !important;
-    padding: 0.5rem 0.75rem !important;
-    margin: 0.5rem !important;
-    width: calc(100% - 1rem) !important;
-    left: 0 !important;
-    right: 0 !important;
-    top: env(safe-area-inset-top, 0) !important;
-    z-index: 80 !important;
-    backdrop-filter: blur(18px) !important;
-    -webkit-backdrop-filter: blur(18px) !important;
-    box-shadow: 0 8px 20px rgba(2,6,23,0.12) !important;
-    background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.55)) !important;
-  }
-
-  /* Reduce navbar corner rounding on very small screens */
-  @media (max-width: 639px) {
-    .liquid-glass-navbar.hidden {
-      margin: 0.4rem !important;
-      border-radius: 0.5rem !important;
-      width: calc(100% - 0.8rem) !important;
-      height: 62px !important;
-    }
-  }
-
-  /* Give main content a top offset so messages don't sit under the navbar */
-  .flex-1.flex.flex-col.min-w-0.relative.z-0 {
-    padding-top: 88px !important;
-  }
-}
+/* Mobile navbar is handled by App.jsx mobile header component */
+/* The desktop liquid-glass-navbar should remain hidden on mobile */
