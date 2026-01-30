@@ -150,6 +150,7 @@ export default function CollaborationApp() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+  const [showLandingPage, setShowLandingPage] = useState(true) // Landing page state
   const [authMode, setAuthMode] = useState("login")
   const [authData, setAuthData] = useState({
     email: "",
@@ -4116,6 +4117,581 @@ export default function CollaborationApp() {
 
   // --- Render ---
 
+  // Landing Page Component
+  const LandingPage = () => (
+    <div className={`min-h-screen font-sans relative overflow-x-hidden ${
+      isDarkMode 
+        ? 'bg-[#0a0a0f] text-white' 
+        : 'bg-[#fafbff] text-slate-900'
+    }`}>
+      {/* Animated mesh gradient background */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className={`absolute top-0 left-1/4 w-[800px] h-[800px] rounded-full blur-[120px] animate-pulse ${
+          isDarkMode ? 'bg-violet-600/20' : 'bg-violet-300/30'
+        }`} style={{ animationDuration: '8s' }}></div>
+        <div className={`absolute bottom-0 right-1/4 w-[600px] h-[600px] rounded-full blur-[100px] animate-pulse ${
+          isDarkMode ? 'bg-pink-600/15' : 'bg-pink-300/25'
+        }`} style={{ animationDuration: '10s', animationDelay: '2s' }}></div>
+        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] rounded-full blur-[150px] ${
+          isDarkMode ? 'bg-indigo-600/10' : 'bg-indigo-200/20'
+        }`}></div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="relative z-50 px-6 py-4">
+        <div className={`max-w-7xl mx-auto flex items-center justify-between px-6 py-3 rounded-2xl backdrop-blur-xl ${
+          isDarkMode 
+            ? 'bg-slate-900/60 border border-slate-800/50' 
+            : 'bg-white/60 border border-slate-200/50 shadow-lg shadow-slate-200/20'
+        }`}>
+          <div className="flex items-center gap-3">
+            <img src="/Logo.png" alt="Spaces" className="w-9 h-9 rounded-xl" />
+            <span className={`text-xl font-bold bg-gradient-to-r bg-clip-text text-transparent ${
+              isDarkMode 
+                ? 'from-white to-slate-400' 
+                : 'from-slate-800 to-slate-600'
+            }`}>Spaces</span>
+          </div>
+          <div className="hidden md:flex items-center gap-8">
+            <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
+              className={`text-sm font-medium transition-colors ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+              Features
+            </button>
+            <button onClick={() => document.getElementById('showcase')?.scrollIntoView({ behavior: 'smooth' })}
+              className={`text-sm font-medium transition-colors ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+              Showcase
+            </button>
+            <button onClick={() => document.getElementById('usecases')?.scrollIntoView({ behavior: 'smooth' })}
+              className={`text-sm font-medium transition-colors ${isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+              Use Cases
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setIsDarkMode(!isDarkMode)
+                localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
+              }}
+              className={`p-2.5 rounded-xl transition-all duration-300 ${
+                isDarkMode 
+                  ? 'bg-slate-800 hover:bg-slate-700 text-yellow-400' 
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('login'); }}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                isDarkMode 
+                  ? 'text-slate-300 hover:text-white hover:bg-slate-800' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 hover:from-violet-500 hover:via-purple-500 hover:to-pink-500 transition-all shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:scale-105"
+            >
+              Get Started
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <section className="relative z-10 px-6 pt-20 pb-8">
+        <div className="max-w-6xl mx-auto text-center">
+          {/* Badge */}
+          <div className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold mb-8 backdrop-blur-sm ${
+            isDarkMode 
+              ? 'bg-gradient-to-r from-violet-500/10 to-pink-500/10 text-violet-300 border border-violet-500/20' 
+              : 'bg-gradient-to-r from-violet-50 to-pink-50 text-violet-700 border border-violet-200/50'
+          }`}>
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-violet-500"></span>
+            </span>
+            Trusted by 10,000+ teams worldwide
+          </div>
+          
+          {/* Main Headline */}
+          <h1 className={`text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black mb-8 leading-[0.9] tracking-tight ${
+            isDarkMode 
+              ? 'text-white' 
+              : 'text-slate-900'
+          }`}>
+            <span className="block">Team work,</span>
+            <span className="bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">
+              simplified.
+            </span>
+          </h1>
+          
+          {/* Subheadline */}
+          <p className={`text-lg sm:text-xl md:text-2xl max-w-3xl mx-auto mb-12 leading-relaxed font-medium ${
+            isDarkMode ? 'text-slate-400' : 'text-slate-600'
+          }`}>
+            One workspace for messaging, video calls, tasks, and files.
+            <span className={`block mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+              Stop juggling apps. Start shipping faster.
+            </span>
+          </p>
+          
+          {/* CTA Buttons */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+              className="group relative px-8 py-4 rounded-2xl font-bold text-lg text-white overflow-hidden transition-all duration-500 hover:scale-105 shadow-2xl shadow-purple-500/30 hover:shadow-purple-500/50"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600"></div>
+              <div className="absolute inset-0 bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              <span className="relative flex items-center gap-2">
+                Start Free Today
+                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </span>
+            </button>
+            <button
+              onClick={() => document.getElementById('showcase')?.scrollIntoView({ behavior: 'smooth' })}
+              className={`px-8 py-4 rounded-2xl font-bold text-lg transition-all border-2 hover:scale-105 ${
+                isDarkMode 
+                  ? 'border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800/50' 
+                  : 'border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-white'
+              }`}
+            >
+              See it in action
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Hero Image Showcase */}
+      <section id="showcase" className="relative z-10 px-6 pb-32">
+        <div className="max-w-7xl mx-auto">
+          {/* Main Screenshot with 3D effect */}
+          <div className="relative">
+            {/* Glow effect behind image */}
+            <div className={`absolute inset-0 rounded-3xl blur-3xl ${
+              isDarkMode ? 'bg-gradient-to-r from-violet-600/30 via-purple-600/20 to-pink-600/30' : 'bg-gradient-to-r from-violet-400/20 via-purple-400/15 to-pink-400/20'
+            }`}></div>
+            
+            {/* Main screenshot */}
+            <div className={`relative rounded-3xl overflow-hidden border-2 shadow-2xl ${
+              isDarkMode 
+                ? 'border-slate-700/50 shadow-violet-500/10' 
+                : 'border-slate-200/50 shadow-slate-400/20'
+            }`}>
+              <div className={`flex items-center gap-2 px-5 py-3 ${
+                isDarkMode ? 'bg-slate-900/90' : 'bg-slate-100/90'
+              }`}>
+                <div className="flex gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                  <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                </div>
+                <div className={`flex-1 text-center text-xs font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  spaces.app
+                </div>
+              </div>
+              <img 
+                src="/Image 2.png" 
+                alt="Spaces - Team Communication Platform" 
+                className="w-full"
+              />
+            </div>
+
+            {/* Floating feature cards */}
+            <div className={`absolute -left-4 lg:-left-12 top-1/4 p-4 rounded-2xl backdrop-blur-xl shadow-2xl max-w-[200px] hidden md:block transform hover:scale-105 transition-transform ${
+              isDarkMode 
+                ? 'bg-slate-900/80 border border-slate-700/50' 
+                : 'bg-white/80 border border-slate-200/50'
+            }`}>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Team Spaces</div>
+              </div>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                Organize by project, team, or topic
+              </p>
+            </div>
+
+            <div className={`absolute -right-4 lg:-right-12 top-1/3 p-4 rounded-2xl backdrop-blur-xl shadow-2xl max-w-[200px] hidden md:block transform hover:scale-105 transition-transform ${
+              isDarkMode 
+                ? 'bg-slate-900/80 border border-slate-700/50' 
+                : 'bg-white/80 border border-slate-200/50'
+            }`}>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center text-white">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Real-time Chat</div>
+              </div>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                Instant messaging with threads
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Problem Section */}
+      <section className={`relative z-10 px-6 py-24 ${
+        isDarkMode ? 'bg-slate-900/30' : 'bg-white/50'
+      }`}>
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-16">
+            <span className={`inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider mb-4 ${
+              isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
+            }`}>
+              The Problem
+            </span>
+            <h2 className={`text-3xl md:text-5xl font-bold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-slate-900'
+            }`}>
+              Sound familiar?
+            </h2>
+            <p className={`text-lg max-w-2xl mx-auto ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-600'
+            }`}>
+              Your team is drowning in tool chaos
+            </p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              {
+                emoji: '😵‍💫',
+                title: 'App overload',
+                desc: 'Slack, Zoom, Notion, Trello, Drive... 5+ tabs open just to collaborate.',
+                gradient: 'from-red-500/10 to-orange-500/10',
+                border: 'border-red-500/20'
+              },
+              {
+                emoji: '🔍',
+                title: 'Lost context',
+                desc: 'Critical decisions buried across email, chat, and docs.',
+                gradient: 'from-amber-500/10 to-yellow-500/10',
+                border: 'border-amber-500/20'
+              },
+              {
+                emoji: '😤',
+                title: 'Notification fatigue',
+                desc: 'Constant pings, @mentions, and FOMO destroying focus.',
+                gradient: 'from-rose-500/10 to-pink-500/10',
+                border: 'border-rose-500/20'
+              }
+            ].map((item, i) => (
+              <div key={i} className={`group relative p-8 rounded-3xl transition-all duration-500 hover:scale-105 backdrop-blur-sm border ${
+                isDarkMode 
+                  ? `bg-gradient-to-br ${item.gradient} ${item.border}` 
+                  : `bg-white border-slate-200 shadow-lg hover:shadow-xl`
+              }`}>
+                <div className="text-5xl mb-6 transform group-hover:scale-110 transition-transform">{item.emoji}</div>
+                <h3 className={`text-xl font-bold mb-3 ${
+                  isDarkMode ? 'text-white' : 'text-slate-900'
+                }`}>{item.title}</h3>
+                <p className={`text-sm leading-relaxed ${
+                  isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                }`}>{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section id="features" className="relative z-10 px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-20">
+            <span className={`inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider mb-4 ${
+              isDarkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+            }`}>
+              The Solution
+            </span>
+            <h2 className={`text-3xl md:text-5xl font-bold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-slate-900'
+            }`}>
+              Everything in one place
+            </h2>
+            <p className={`text-lg max-w-2xl mx-auto ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-600'
+            }`}>
+              Replace your scattered tools with one beautiful, powerful workspace
+            </p>
+          </div>
+
+          {/* Feature Bento Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Large Feature Card - Messaging */}
+            <div className={`lg:col-span-2 group relative overflow-hidden rounded-3xl p-8 transition-all duration-500 hover:scale-[1.02] ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-violet-600/20 via-purple-600/10 to-transparent border border-violet-500/20' 
+                : 'bg-gradient-to-br from-violet-50 via-purple-50 to-white border border-violet-200/50 shadow-xl'
+            }`}>
+              <div className="flex flex-col h-full">
+                <div className="flex items-start justify-between mb-6">
+                  <div>
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white mb-4 shadow-lg shadow-violet-500/30">
+                      <MessageSquare className="w-7 h-7" />
+                    </div>
+                    <h3 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      Real-time Messaging
+                    </h3>
+                    <p className={`max-w-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Organized channels, threaded conversations, and direct messages that keep context intact.
+                    </p>
+                  </div>
+                </div>
+                <div className={`mt-auto rounded-2xl overflow-hidden border ${
+                  isDarkMode ? 'border-slate-700/50' : 'border-slate-200/50'
+                }`}>
+                  <img src="/Image 3.png" alt="Chat Interface" className="w-full object-cover object-top h-48" />
+                </div>
+              </div>
+            </div>
+
+            {/* Google Integration Card */}
+            <div className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-500 hover:scale-[1.02] ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-blue-600/20 via-cyan-600/10 to-transparent border border-blue-500/20' 
+                : 'bg-gradient-to-br from-blue-50 via-cyan-50 to-white border border-blue-200/50 shadow-xl'
+            }`}>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white mb-4 shadow-lg shadow-blue-500/30">
+                <Grid3x3 className="w-6 h-6" />
+              </div>
+              <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                Google Integration
+              </h3>
+              <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                Connect Gmail, Drive, Docs, Meet & more.
+              </p>
+              <div className={`rounded-xl overflow-hidden border ${isDarkMode ? 'border-slate-700/50' : 'border-slate-200/50'}`}>
+                <img src="/Image 4.png" alt="Google Apps" className="w-full object-cover h-32" />
+              </div>
+            </div>
+
+            {/* Documents Card */}
+            <div className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-500 hover:scale-[1.02] ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-emerald-600/20 via-teal-600/10 to-transparent border border-emerald-500/20' 
+                : 'bg-gradient-to-br from-emerald-50 via-teal-50 to-white border border-emerald-200/50 shadow-xl'
+            }`}>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white mb-4 shadow-lg shadow-emerald-500/30">
+                <FileText className="w-6 h-6" />
+              </div>
+              <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                My Documents
+              </h3>
+              <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                All your files in one organized place.
+              </p>
+              <div className={`rounded-xl overflow-hidden border ${isDarkMode ? 'border-slate-700/50' : 'border-slate-200/50'}`}>
+                <img src="/Image 5.png" alt="Documents" className="w-full object-cover object-top h-32" />
+              </div>
+            </div>
+
+            {/* Video Calls Card */}
+            <div className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-500 hover:scale-[1.02] ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-pink-600/20 via-rose-600/10 to-transparent border border-pink-500/20' 
+                : 'bg-gradient-to-br from-pink-50 via-rose-50 to-white border border-pink-200/50 shadow-xl'
+            }`}>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center text-white mb-4 shadow-lg shadow-pink-500/30">
+                <Video className="w-6 h-6" />
+              </div>
+              <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                Video Meetings
+              </h3>
+              <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                One-click video calls. Crystal clear quality. No scheduling hassle.
+              </p>
+            </div>
+
+            {/* Tasks Card */}
+            <div className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-500 hover:scale-[1.02] ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-orange-600/20 via-amber-600/10 to-transparent border border-orange-500/20' 
+                : 'bg-gradient-to-br from-orange-50 via-amber-50 to-white border border-orange-200/50 shadow-xl'
+            }`}>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white mb-4 shadow-lg shadow-orange-500/30">
+                <ClipboardList className="w-6 h-6" />
+              </div>
+              <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                Built-in Tasks
+              </h3>
+              <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                Assign, track, and ship tasks without ever leaving the conversation.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Use Cases Section */}
+      <section id="usecases" className={`relative z-10 px-6 py-24 ${
+        isDarkMode ? 'bg-slate-900/30' : 'bg-gradient-to-br from-violet-50/50 via-purple-50/30 to-pink-50/30'
+      }`}>
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <span className={`inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider mb-4 ${
+              isDarkMode ? 'bg-purple-500/10 text-purple-400' : 'bg-purple-50 text-purple-600'
+            }`}>
+              Use Cases
+            </span>
+            <h2 className={`text-3xl md:text-5xl font-bold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-slate-900'
+            }`}>
+              Built for every team
+            </h2>
+          </div>
+          <div className="grid md:grid-cols-2 gap-8">
+            {[
+              {
+                icon: <Briefcase className="w-7 h-7" />,
+                title: 'Remote & Hybrid Teams',
+                desc: 'Bridge the gap between office and remote. Stay connected anywhere.',
+                features: ['Async-friendly workflows', 'Time zone awareness', 'Virtual water cooler'],
+                gradient: 'from-blue-500 to-cyan-500'
+              },
+              {
+                icon: <GraduationCap className="w-7 h-7" />,
+                title: 'Startups & Small Teams',
+                desc: 'Move fast without complexity. Free for small teams.',
+                features: ['Setup in minutes', 'Free tier available', 'Scales with you'],
+                gradient: 'from-emerald-500 to-teal-500'
+              },
+              {
+                icon: <Grid3x3 className="w-7 h-7" />,
+                title: 'Agencies & Consultants',
+                desc: 'Manage clients and projects without chaos.',
+                features: ['Client spaces', 'Project organization', 'Easy handoffs'],
+                gradient: 'from-orange-500 to-amber-500'
+              },
+              {
+                icon: <ShieldAlert className="w-7 h-7" />,
+                title: 'Enterprise Teams',
+                desc: 'Security and compliance for large organizations.',
+                features: ['SSO & SAML', 'Admin dashboard', 'Audit logs'],
+                gradient: 'from-violet-500 to-purple-500'
+              }
+            ].map((useCase, i) => (
+              <div key={i} className={`group p-8 rounded-3xl transition-all duration-500 hover:scale-[1.02] ${
+                isDarkMode 
+                  ? 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600' 
+                  : 'bg-white border border-slate-200/50 shadow-lg hover:shadow-xl'
+              }`}>
+                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${useCase.gradient} flex items-center justify-center text-white mb-5 shadow-lg group-hover:scale-110 transition-transform`}>
+                  {useCase.icon}
+                </div>
+                <h3 className={`text-xl font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {useCase.title}
+                </h3>
+                <p className={`mb-5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {useCase.desc}
+                </p>
+                <ul className="space-y-2">
+                  {useCase.features.map((f, j) => (
+                    <li key={j} className={`flex items-center gap-2 text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Final CTA Section */}
+      <section className="relative z-10 px-6 py-24">
+        <div className="max-w-4xl mx-auto">
+          <div className="relative overflow-hidden rounded-[2.5rem] p-1 bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500">
+            <div className={`relative rounded-[2.25rem] p-12 md:p-16 text-center overflow-hidden ${
+              isDarkMode ? 'bg-slate-900' : 'bg-white'
+            }`}>
+              {/* Background decorations */}
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className={`absolute -top-32 -right-32 w-64 h-64 rounded-full blur-3xl ${
+                  isDarkMode ? 'bg-violet-600/20' : 'bg-violet-200/50'
+                }`}></div>
+                <div className={`absolute -bottom-32 -left-32 w-64 h-64 rounded-full blur-3xl ${
+                  isDarkMode ? 'bg-pink-600/20' : 'bg-pink-200/50'
+                }`}></div>
+              </div>
+              
+              <div className="relative z-10">
+                <h2 className={`text-3xl md:text-5xl font-black mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  Ready to simplify
+                  <span className="block bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">
+                    teamwork?
+                  </span>
+                </h2>
+                <p className={`text-lg md:text-xl mb-10 max-w-2xl mx-auto ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Join thousands of teams shipping faster with Spaces. Get started in minutes.
+                </p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                  <button
+                    onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+                    className="group px-10 py-5 rounded-2xl font-bold text-lg text-white bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 hover:from-violet-500 hover:via-purple-500 hover:to-pink-500 transition-all duration-300 hover:scale-105 shadow-2xl shadow-purple-500/30 hover:shadow-purple-500/50"
+                  >
+                    <span className="flex items-center gap-2">
+                      Get Started Free
+                      <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => { setShowLandingPage(false); setAuthMode('login'); }}
+                    className={`px-10 py-5 rounded-2xl font-bold text-lg transition-all border-2 hover:scale-105 ${
+                      isDarkMode 
+                        ? 'border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800' 
+                        : 'border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    Sign In
+                  </button>
+                </div>
+                <p className={`mt-8 text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                  ✨ Free forever for teams up to 10 • No credit card required
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className={`relative z-10 px-6 py-12 border-t ${
+        isDarkMode ? 'border-slate-800' : 'border-slate-200'
+      }`}>
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <img src="/Logo.png" alt="Spaces" className="w-8 h-8 rounded-lg" />
+            <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Spaces</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <a href="#" className={`text-sm transition-colors ${isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}>Privacy</a>
+            <a href="#" className={`text-sm transition-colors ${isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}>Terms</a>
+            <a href="#" className={`text-sm transition-colors ${isDarkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}>Contact</a>
+          </div>
+          <p className={`text-sm ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
+            © 2026 Spaces. Built for modern teams.
+          </p>
+        </div>
+      </footer>
+    </div>
+  )
+
+  // Show landing page for unauthenticated users who haven't clicked sign in/up
+  if (!isAuthenticated && showLandingPage) {
+    return <LandingPage />
+  }
+
   if (!isAuthenticated) {
     return (
       <div className={`min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden ${
@@ -4124,19 +4700,33 @@ export default function CollaborationApp() {
           : 'bg-gradient-to-br from-slate-100 via-indigo-50/50 to-purple-50/30 text-slate-900'
       }`}>
         {/* Theme Toggle for Login */}
-        <button
-          onClick={() => {
-            setIsDarkMode(!isDarkMode)
-            localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
-          }}
-          className={`absolute top-6 right-6 z-20 p-3 rounded-2xl transition-all duration-300 ${
-            isDarkMode 
-              ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
-              : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
-          } backdrop-blur-xl`}
-        >
-          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
+        {/* Back to Landing & Theme Toggle */}
+        <div className="absolute top-6 left-6 right-6 z-20 flex items-center justify-between">
+          <button
+            onClick={() => setShowLandingPage(true)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-medium transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300' 
+                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+            } backdrop-blur-xl`}
+          >
+            <ChevronRight className="w-4 h-4 rotate-180" />
+            Back
+          </button>
+          <button
+            onClick={() => {
+              setIsDarkMode(!isDarkMode)
+              localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
+            }}
+            className={`p-3 rounded-2xl transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
+                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+            } backdrop-blur-xl`}
+          >
+            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+        </div>
 
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
