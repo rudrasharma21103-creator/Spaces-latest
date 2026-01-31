@@ -45,7 +45,8 @@ import {
   Clock,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  PenTool
 } from "lucide-react"
 import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
@@ -441,8 +442,10 @@ export default function CollaborationApp() {
   const [activeMeetingTitle, setActiveMeetingTitle] = useState("Meeting")
   const [activeCallId, setActiveCallId] = useState(null)
   const [incomingCall, setIncomingCall] = useState(null)
+  const [incomingCallCountdown, setIncomingCallCountdown] = useState(10) // 10 second countdown
   const videoRef = useRef(null)
   const incomingTimeoutRef = useRef(null)
+  const incomingCountdownRef = useRef(null)
   // Feature flag to enable live video calls in channels and chats
   const VIDEO_ENABLED = true
 
@@ -458,6 +461,7 @@ export default function CollaborationApp() {
   const [isWebRTCVideoOn, setIsWebRTCVideoOn] = useState(true)
   const [callStartTime, setCallStartTime] = useState(null)
   const [callDuration, setCallDuration] = useState(0)
+  const [callerCountdown, setCallerCountdown] = useState(10) // 10 second countdown for caller
   const [callParticipants, setCallParticipants] = useState([]) // Array of participants in the call
   const [pendingCallParticipants, setPendingCallParticipants] = useState([]) // Friends being called
   const localVideoRef = useRef(null)
@@ -467,6 +471,7 @@ export default function CollaborationApp() {
   const callSocketRef = useRef(null)
   const userSocketRef = useRef(null)
   const callTimerRef = useRef(null)
+  const callerCountdownRef = useRef(null)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -1300,11 +1305,19 @@ export default function CollaborationApp() {
                 // Incoming call - check if this message is for current user
                 if (String(data.targetUserId) === String(currentUser?.id)) {
                   console.log('Incoming WebRTC call from:', data.fromUserName)
-                  // Clear any existing timeout
+                  // Clear any existing timeouts and countdown
                   if (incomingTimeoutRef.current) {
                     clearTimeout(incomingTimeoutRef.current)
                     incomingTimeoutRef.current = null
                   }
+                  if (incomingCountdownRef.current) {
+                    clearInterval(incomingCountdownRef.current)
+                    incomingCountdownRef.current = null
+                  }
+                  
+                  // Reset countdown to 10 seconds
+                  setIncomingCallCountdown(10)
+                  
                   setIncomingCall({
                     id: `webrtc-${Date.now()}`,
                     fromId: data.fromUserId,
@@ -1313,9 +1326,29 @@ export default function CollaborationApp() {
                     webrtcOffer: data.offer,
                     isWebRTC: true
                   })
-                  // Auto-dismiss after 10 seconds if not answered
+                  
+                  // Start countdown interval
+                  incomingCountdownRef.current = setInterval(() => {
+                    setIncomingCallCountdown(prev => {
+                      if (prev <= 1) {
+                        // Time's up - clear and dismiss
+                        clearInterval(incomingCountdownRef.current)
+                        incomingCountdownRef.current = null
+                        setIncomingCall(null)
+                        return 10
+                      }
+                      return prev - 1
+                    })
+                  }, 1000)
+                  
+                  // Auto-dismiss after 10 seconds if not answered (backup)
                   incomingTimeoutRef.current = setTimeout(() => {
+                    if (incomingCountdownRef.current) {
+                      clearInterval(incomingCountdownRef.current)
+                      incomingCountdownRef.current = null
+                    }
                     setIncomingCall(null)
+                    setIncomingCallCountdown(10)
                     incomingTimeoutRef.current = null
                   }, 10000)
                 }
@@ -2510,6 +2543,7 @@ export default function CollaborationApp() {
     setWebrtcCallPartner(targetUser)
     setWebrtcCallStatus('calling')
     setShowWebRTCCall(true)
+    setCallerCountdown(10) // Reset countdown to 10 seconds
 
     try {
       // Get local media stream
@@ -2559,13 +2593,37 @@ export default function CollaborationApp() {
         console.error('No WebSocket available to send call request!')
       }
 
-      // Set timeout for unanswered call
+      // Start countdown for caller (10 seconds)
+      if (callerCountdownRef.current) {
+        clearInterval(callerCountdownRef.current)
+      }
+      callerCountdownRef.current = setInterval(() => {
+        setCallerCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(callerCountdownRef.current)
+            callerCountdownRef.current = null
+            // Only end call if still in calling state
+            if (webrtcCallStatus === 'calling') {
+              setWebrtcError('Call not answered')
+              endWebRTCCall()
+            }
+            return 10
+          }
+          return prev - 1
+        })
+      }, 1000)
+
+      // Backup timeout for unanswered call (10 seconds)
       setTimeout(() => {
         if (webrtcCallStatus === 'calling') {
+          if (callerCountdownRef.current) {
+            clearInterval(callerCountdownRef.current)
+            callerCountdownRef.current = null
+          }
           setWebrtcError('Call not answered')
           endWebRTCCall()
         }
-      }, 60000)
+      }, 10000)
 
     } catch (err) {
       console.error('Failed to start video call:', err)
@@ -2585,6 +2643,17 @@ export default function CollaborationApp() {
     const callerName = incomingCall.fromName
     const callerAvatar = incomingCall.fromAvatar
     const offer = incomingCall.webrtcOffer
+
+    // Clear incoming call countdown
+    if (incomingCountdownRef.current) {
+      clearInterval(incomingCountdownRef.current)
+      incomingCountdownRef.current = null
+    }
+    if (incomingTimeoutRef.current) {
+      clearTimeout(incomingTimeoutRef.current)
+      incomingTimeoutRef.current = null
+    }
+    setIncomingCallCountdown(10)
 
     setWebrtcError(null)
     setWebrtcCallPartner({
@@ -2837,6 +2906,13 @@ export default function CollaborationApp() {
       case 'webrtc-call-answer':
         // Call was answered - set remote description
         if (peerConnectionRef.current && String(data.targetUserId) === String(currentUser?.id)) {
+          // Clear caller countdown since call was answered
+          if (callerCountdownRef.current) {
+            clearInterval(callerCountdownRef.current)
+            callerCountdownRef.current = null
+          }
+          setCallerCountdown(10)
+          
           try {
             await peerConnectionRef.current.setRemoteDescription(
               new RTCSessionDescription(data.answer)
@@ -3858,6 +3934,17 @@ export default function CollaborationApp() {
 
   const declineCall = async () => {
     if (incomingCall) {
+      // Clear countdown timers
+      if (incomingCountdownRef.current) {
+        clearInterval(incomingCountdownRef.current)
+        incomingCountdownRef.current = null
+      }
+      if (incomingTimeoutRef.current) {
+        clearTimeout(incomingTimeoutRef.current)
+        incomingTimeoutRef.current = null
+      }
+      setIncomingCallCountdown(10)
+      
       // Handle WebRTC calls
       if (incomingCall.isWebRTC) {
         declineWebRTCCall()
@@ -5259,40 +5346,90 @@ export default function CollaborationApp() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-all ease-in-out duration-500 ${isDarkMode ? 'dark bg-[var(--bg-primary)] text-[var(--text-primary)]' : 'text-slate-700 bg-[#f4f6fb]'} mesh-gradient`}>
-      {/* Incoming Call Popup - Small banner at top */}
+      {/* Professional Incoming Call Popup */}
       {incomingCall && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-          <div className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-gradient-to-r from-slate-900/95 via-purple-900/95 to-slate-900/95 backdrop-blur-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/30">
-            {/* Caller Avatar */}
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-md"></div>
-              <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 border-white/20">
-                {incomingCall.fromAvatar}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in">
+          {/* Backdrop with blur */}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+          
+          {/* Call Card */}
+          <div className="relative z-10 w-full max-w-sm mx-4">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl border border-white/10">
+              {/* Animated Background */}
+              <div className="absolute inset-0 opacity-30">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 rounded-full blur-3xl animate-pulse" />
               </div>
-            </div>
-            
-            {/* Caller Info */}
-            <div className="flex flex-col mr-4">
-              <span className="text-white font-bold text-lg">{incomingCall.fromName}</span>
-              <span className="text-purple-300 text-sm font-medium animate-pulse">Incoming Video Call...</span>
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={declineCall}
-                className="w-12 h-12 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all duration-200 hover:scale-110"
-                title="Decline"
-              >
-                <PhoneOff className="w-5 h-5" />
-              </button>
-              <button
-                onClick={answerCall}
-                className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all duration-200 hover:scale-110"
-                title="Accept"
-              >
-                <Video className="w-6 h-6" />
-              </button>
+              
+              {/* Content */}
+              <div className="relative p-8 text-center">
+                {/* Timer Circle */}
+                <div className="absolute top-4 right-4 flex items-center gap-2">
+                  <div className="relative w-10 h-10">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                      <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
+                      <circle 
+                        cx="18" cy="18" r="16" 
+                        fill="none" 
+                        stroke="#10b981" 
+                        strokeWidth="3" 
+                        strokeLinecap="round"
+                        strokeDasharray={`${(incomingCallCountdown / 10) * 100}, 100`}
+                        className="transition-all duration-1000"
+                      />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-white text-xs font-bold">
+                      {incomingCallCountdown}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Caller Avatar with Ring Animation */}
+                <div className="relative inline-block mb-6">
+                  <div className="absolute inset-0 bg-emerald-500/30 rounded-full animate-ping" style={{ animationDuration: '1.5s' }} />
+                  <div className="absolute -inset-2 bg-gradient-to-r from-emerald-400 to-teal-400 rounded-full animate-spin" style={{ animationDuration: '3s' }} />
+                  <div className="relative w-28 h-28 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-5xl shadow-xl border-4 border-white/20 overflow-hidden">
+                    {renderAvatar({ avatar: incomingCall.fromAvatar, avatar_url: incomingCall.fromAvatar, name: incomingCall.fromName }, 112) || incomingCall.fromAvatar}
+                  </div>
+                </div>
+                
+                {/* Caller Info */}
+                <h2 className="text-2xl font-bold text-white mb-1">{incomingCall.fromName}</h2>
+                <p className="text-emerald-400 font-medium flex items-center justify-center gap-2 mb-8">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Incoming Video Call
+                </p>
+                
+                {/* Action Buttons */}
+                <div className="flex items-center justify-center gap-6">
+                  {/* Decline Button */}
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={declineCall}
+                      className="w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-lg shadow-red-500/40 transition-all duration-200 hover:scale-110 active:scale-95"
+                      title="Decline"
+                    >
+                      <PhoneOff className="w-7 h-7" />
+                    </button>
+                    <span className="text-xs text-slate-400 font-medium">Decline</span>
+                  </div>
+                  
+                  {/* Accept Button */}
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={answerCall}
+                      className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-xl shadow-emerald-500/50 transition-all duration-200 hover:scale-110 active:scale-95 animate-pulse"
+                      style={{ animationDuration: '2s' }}
+                      title="Accept"
+                    >
+                      <Video className="w-9 h-9" />
+                    </button>
+                    <span className="text-xs text-slate-400 font-medium">Accept</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -5367,185 +5504,307 @@ export default function CollaborationApp() {
         </div>
       )}
 
-      {/* WebRTC Video Call Modal */}
+      {/* Professional WebRTC Video Call UI */}
       {showWebRTCCall && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/95 via-purple-900/90 to-slate-900/95 backdrop-blur-2xl">
-          {/* In Call Indicator with Timer */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
-            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></span>
-            <span className="text-white font-bold text-sm uppercase tracking-wider">
-              {webrtcCallStatus === 'calling' ? 'Calling...' : 
-               webrtcCallStatus === 'connecting' ? 'Connecting...' : 
-               webrtcCallStatus === 'connected' ? 'In Call' : 'Call'}
-            </span>
-            <span className="text-white/60 text-sm">with {webrtcCallPartner?.name || 'Unknown'}</span>
-            {webrtcCallStatus === 'connected' && (
-              <span className="text-emerald-400 font-mono text-sm ml-2 bg-emerald-500/20 px-3 py-1 rounded-full">
-                {formatCallDuration(callDuration)}
-              </span>
-            )}
-          </div>
-          
-          {/* Pending Participants Being Called */}
-          {pendingCallParticipants.length > 0 && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/20 backdrop-blur-xl border border-yellow-500/30">
-              <Phone className="w-4 h-4 text-yellow-400 animate-pulse" />
-              <span className="text-yellow-300 text-sm">
-                Calling {pendingCallParticipants.map(p => p.name).join(', ')}...
-              </span>
-            </div>
-          )}
+        <div className="fixed inset-0 z-[80] animate-fade-in bg-[#0f0f0f]">
+          {/* Top Bar - Professional Call Info */}
+          <div className="absolute top-0 left-0 right-0 z-20 px-6 py-4 bg-gradient-to-b from-black/80 to-transparent">
+            <div className="flex items-center justify-between max-w-7xl mx-auto">
+              {/* Left: Call Info */}
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className={`w-10 h-10 rounded-full overflow-hidden border-2 ${webrtcCallStatus === 'connected' ? 'border-emerald-500' : 'border-amber-500'}`}>
+                    {renderAvatar(webrtcCallPartner, 40) || (
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold">
+                        {(webrtcCallPartner?.name || '?')[0]?.toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f0f0f] ${webrtcCallStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold text-lg">{webrtcCallPartner?.name || 'Unknown'}</h3>
+                  <div className="flex items-center gap-2">
+                    {webrtcCallStatus === 'connected' ? (
+                      <span className="text-emerald-400 text-sm font-medium flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        {formatCallDuration(callDuration)}
+                      </span>
+                    ) : webrtcCallStatus === 'calling' ? (
+                      <span className="text-amber-400 text-sm font-medium flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        Calling... {callerCountdown}s
+                      </span>
+                    ) : (
+                      <span className="text-blue-400 text-sm font-medium flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                        Connecting...
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-          {/* Video Containers */}
+              {/* Center: Call Status Badge */}
+              <div className={`px-4 py-1.5 rounded-full text-sm font-semibold flex items-center gap-2 ${
+                webrtcCallStatus === 'connected' 
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${webrtcCallStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+                {webrtcCallStatus === 'connected' ? 'Connected' : webrtcCallStatus === 'calling' ? 'Ringing' : 'Connecting'}
+              </div>
+
+              {/* Right: Participants */}
+              {pendingCallParticipants.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/20 border border-yellow-500/30">
+                  <Phone className="w-4 h-4 text-yellow-400 animate-pulse" />
+                  <span className="text-yellow-300 text-sm">Calling {pendingCallParticipants.length} more</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Video Container */}
           <div className="relative w-full h-full">
             {/* Remote Video (Full Screen) */}
-            <div className="absolute inset-0 bg-black">
+            <div className="absolute inset-0">
               <video 
                 ref={remoteVideoRef}
                 autoPlay 
                 playsInline
                 className="w-full h-full object-cover"
               />
+              
+              {/* Waiting/Calling State */}
               {!remoteStream && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900/50 to-slate-900">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-2xl scale-150"></div>
-                    <div className="relative w-48 h-48 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-8xl shadow-2xl border-4 border-white/30">
-                      {webrtcCallPartner?.avatar || '👤'}
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f]">
+                  {/* Animated Background Rings */}
+                  <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                    <div className="absolute w-[600px] h-[600px] rounded-full border border-white/5 animate-ping" style={{ animationDuration: '3s' }} />
+                    <div className="absolute w-[500px] h-[500px] rounded-full border border-white/5 animate-ping" style={{ animationDuration: '2.5s', animationDelay: '0.5s' }} />
+                    <div className="absolute w-[400px] h-[400px] rounded-full border border-white/10 animate-ping" style={{ animationDuration: '2s', animationDelay: '1s' }} />
+                  </div>
+                  
+                  {/* Avatar with Pulse */}
+                  <div className="relative z-10">
+                    <div className={`absolute -inset-4 rounded-full ${webrtcCallStatus === 'calling' ? 'bg-emerald-500/20 animate-ping' : 'bg-blue-500/20 animate-pulse'}`} style={{ animationDuration: '1.5s' }} />
+                    <div className="relative w-36 h-36 rounded-full overflow-hidden border-4 border-white/20 shadow-2xl">
+                      {renderAvatar(webrtcCallPartner, 144) || (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-5xl font-bold">
+                          {(webrtcCallPartner?.name || '?')[0]?.toUpperCase()}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <h3 className="mt-8 text-4xl font-bold text-white drop-shadow-lg">{webrtcCallPartner?.name || 'Unknown'}</h3>
-                  <p className="mt-3 text-xl text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
-                    {webrtcCallStatus === 'calling' ? 'Ringing...' : 
-                     webrtcCallStatus === 'connecting' ? 'Connecting...' : 
-                     'Waiting for video...'}
-                  </p>
+                  
+                  <h2 className="mt-8 text-3xl font-bold text-white">{webrtcCallPartner?.name || 'Unknown'}</h2>
+                  
+                  {webrtcCallStatus === 'calling' && (
+                    <div className="mt-4 flex flex-col items-center">
+                      <div className="flex items-center gap-2 text-emerald-400 text-lg">
+                        <Phone className="w-5 h-5 animate-bounce" />
+                        <span>Ringing...</span>
+                      </div>
+                      {/* Countdown Timer */}
+                      <div className="mt-4 flex items-center gap-2">
+                        <div className="relative w-14 h-14">
+                          <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2" />
+                            <circle 
+                              cx="18" cy="18" r="16" 
+                              fill="none" 
+                              stroke="#10b981" 
+                              strokeWidth="2" 
+                              strokeLinecap="round"
+                              strokeDasharray={`${(callerCountdown / 10) * 100}, 100`}
+                              className="transition-all duration-1000"
+                            />
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-white text-lg font-bold">
+                            {callerCountdown}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-slate-400 text-sm">Call will end if not answered</p>
+                    </div>
+                  )}
+                  
+                  {webrtcCallStatus === 'connecting' && (
+                    <div className="mt-4 flex items-center gap-3 text-blue-400">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span>Connecting...</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Local Video (Small, Picture-in-Picture) */}
-            <div className="absolute bottom-28 right-8 w-56 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/30 shadow-2xl hover:scale-105 transition-transform cursor-move group z-10">
-              <video 
-                ref={localVideoRef}
-                autoPlay 
-                playsInline 
-                muted
-                className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
-              />
-              {!isWebRTCVideoOn && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
-                  <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl">
-                    {currentUser?.avatar || '👤'}
+            {/* Local Video PIP */}
+            <div className="absolute bottom-32 right-6 group z-10">
+              <div className="relative w-48 aspect-video rounded-2xl overflow-hidden bg-slate-800 border-2 border-white/10 shadow-2xl transition-all duration-300 hover:scale-105 hover:border-white/30">
+                <video 
+                  ref={localVideoRef}
+                  autoPlay 
+                  playsInline 
+                  muted
+                  className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
+                />
+                {!isWebRTCVideoOn && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
+                    <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-white/20">
+                      {renderAvatar(currentUser, 56) || (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xl font-bold">
+                          {(currentUser?.name || '?')[0]?.toUpperCase()}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                )}
+                
+                {/* Labels */}
+                <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-black/60 backdrop-blur-sm">
+                  <span className="text-white text-xs font-medium">You</span>
                 </div>
-              )}
-              <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/50 backdrop-blur-sm">
-                <span className="text-white text-xs font-medium">You</span>
+                
+                {/* Mic Status */}
+                {!isWebRTCMicOn && (
+                  <div className="absolute top-2 right-2 p-1.5 rounded-md bg-red-500">
+                    <MicOff className="w-3 h-3 text-white" />
+                  </div>
+                )}
               </div>
-              {!isWebRTCMicOn && (
-                <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/90">
-                  <MicOff className="w-3 h-3 text-white" />
-                </div>
-              )}
             </div>
           </div>
 
           {/* Error Message */}
           {webrtcError && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl bg-red-500/20 border border-red-500/50 backdrop-blur-xl">
-              <p className="text-red-300 font-medium">{webrtcError}</p>
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-6 py-3 rounded-xl bg-red-500/20 border border-red-500/50 backdrop-blur-xl">
+              <p className="text-red-400 font-medium flex items-center gap-2">
+                <XCircle className="w-5 h-5" />
+                {webrtcError}
+              </p>
             </div>
           )}
 
-          {/* Call Controls */}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6">
-            {/* Toggle Mic */}
-            <button
-              onClick={toggleWebRTCMic}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
-                isWebRTCMicOn 
-                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
-                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
-              }`}
-              title={isWebRTCMicOn ? 'Mute microphone' : 'Unmute microphone'}
-            >
-              {isWebRTCMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
-            </button>
+          {/* Bottom Control Bar */}
+          <div className="absolute bottom-0 left-0 right-0 z-20 px-6 py-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
+            <div className="flex items-center justify-center gap-4 max-w-2xl mx-auto">
+              {/* Toggle Mic */}
+              <button
+                onClick={toggleWebRTCMic}
+                className={`group relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${
+                  isWebRTCMicOn 
+                    ? 'bg-slate-700/80 hover:bg-slate-600 text-white' 
+                    : 'bg-red-500 hover:bg-red-400 text-white'
+                }`}
+                title={isWebRTCMicOn ? 'Mute' : 'Unmute'}
+              >
+                {isWebRTCMicOn ? <Mic className="w-6 h-6" /> : <MicOff className="w-6 h-6" />}
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  {isWebRTCMicOn ? 'Mute' : 'Unmute'}
+                </span>
+              </button>
 
-            {/* Toggle Video */}
-            <button
-              onClick={toggleWebRTCVideo}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
-                isWebRTCVideoOn 
-                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
-                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
-              }`}
-              title={isWebRTCVideoOn ? 'Turn off camera' : 'Turn on camera'}
-            >
-              {isWebRTCVideoOn ? <Video className="w-7 h-7" /> : <VideoOff className="w-7 h-7" />}
-            </button>
+              {/* Toggle Video */}
+              <button
+                onClick={toggleWebRTCVideo}
+                className={`group relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${
+                  isWebRTCVideoOn 
+                    ? 'bg-slate-700/80 hover:bg-slate-600 text-white' 
+                    : 'bg-red-500 hover:bg-red-400 text-white'
+                }`}
+                title={isWebRTCVideoOn ? 'Stop Video' : 'Start Video'}
+              >
+                {isWebRTCVideoOn ? <Video className="w-6 h-6" /> : <VideoOff className="w-6 h-6" />}
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  {isWebRTCVideoOn ? 'Stop Video' : 'Start Video'}
+                </span>
+              </button>
 
-            {/* End Call */}
-            <button
-              onClick={endWebRTCCall}
-              className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-2xl shadow-red-500/50 transition-all duration-300 hover:scale-110"
-              title="End call"
-            >
-              <PhoneOff className="w-9 h-9" />
-            </button>
+              {/* Screen Share */}
+              <button
+                className="group relative w-14 h-14 rounded-full bg-slate-700/80 hover:bg-slate-600 text-white/50 flex items-center justify-center transition-all duration-200 cursor-not-allowed"
+                title="Screen share (coming soon)"
+                disabled
+              >
+                <Monitor className="w-6 h-6" />
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  Coming Soon
+                </span>
+              </button>
 
-            {/* Screen Share (placeholder for future) */}
-            <button
-              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl opacity-50 cursor-not-allowed"
-              title="Screen share (coming soon)"
-              disabled
-            >
-              <Monitor className="w-7 h-7" />
-            </button>
+              {/* Add People */}
+              <button
+                onClick={() => setShowAddFriendsToCall(true)}
+                className="group relative w-14 h-14 rounded-full bg-slate-700/80 hover:bg-slate-600 text-white flex items-center justify-center transition-all duration-200"
+                title="Add people"
+              >
+                <UserPlus className="w-6 h-6" />
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  Add People
+                </span>
+              </button>
 
-            {/* Add Friends Button */}
-            <button
-              onClick={() => setShowAddFriendsToCall(true)}
-              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl"
-              title="Add friends to call"
-            >
-              <UserPlus className="w-7 h-7" />
-            </button>
+              {/* End Call */}
+              <button
+                onClick={endWebRTCCall}
+                className="group relative w-16 h-14 rounded-full bg-red-500 hover:bg-red-400 text-white flex items-center justify-center transition-all duration-200 hover:scale-105"
+                title="End call"
+              >
+                <PhoneOff className="w-6 h-6" />
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-red-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  End Call
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Add Friends Modal */}
           {showAddFriendsToCall && (
-            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-              <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-3xl p-6 shadow-2xl animate-fade-in">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-white">Add Friends to Call</h3>
+            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+              <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl animate-fade-in overflow-hidden">
+                <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">Add to Call</h3>
                   <button
                     onClick={() => setShowAddFriendsToCall(false)}
-                    className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <div className="max-h-64 overflow-y-auto space-y-2">
+                <div className="max-h-80 overflow-y-auto p-4 space-y-2">
                   {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).map(friend => (
                     <button
                       key={friend.id}
                       onClick={() => addFriendToCall(friend)}
-                      className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-white/10 transition-all text-left"
+                      className="w-full flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-all text-left group"
                     >
-                      <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl">
-                        {friend.avatar || friend.avatar_url || '👤'}
+                      <div className="w-12 h-12 rounded-full overflow-hidden">
+                        {renderAvatar(friend, 48) || (
+                          <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold">
+                            {(friend.name || '?')[0]?.toUpperCase()}
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1">
-                        <div className="font-bold text-white">{friend.name}</div>
-                        <div className="text-sm text-white/60">{friend.email || ''}</div>
+                        <div className="font-medium text-white">{friend.name}</div>
+                        <div className="text-sm text-slate-400">{friend.email || ''}</div>
                       </div>
-                      <Phone className="w-5 h-5 text-emerald-400" />
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                        <Phone className="w-5 h-5" />
+                      </div>
                     </button>
                   ))}
                   {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).length === 0 && (
-                    <p className="text-center text-white/50 py-4">No other friends available</p>
+                    <div className="text-center py-8 text-slate-400">
+                      <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p>No other contacts available</p>
+                    </div>
                   )}
                 </div>
               </div>
@@ -6827,50 +7086,194 @@ export default function CollaborationApp() {
             </div>
           </div>
         ) : activeView === "tasks" ? (
-          <div className={`flex-1 flex flex-col overflow-auto p-6 ${isDarkMode ? 'bg-[var(--bg-tertiary)]' : 'bg-white'}`}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Tasks</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 border rounded bg-white/50">
-                <h3 className="font-bold mb-2">Assigned to me</h3>
-                {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
-                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
-                    <div>
-                      <div className="font-bold">{t.message}</div>
-                      <div className="text-xs text-slate-500">{t.timestamp}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
-                      {t.status !== 'completed' && (
-                        <button className="text-sm text-indigo-600" onClick={async () => {
-                          const id = t.id || t.timestamp
-                          setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
-                          try {
-                            await TasksService.updateTask(id, { status: 'completed' })
-                          } catch (e) {
-                            console.warn('task update failed', e)
-                          }
-                        }}>Mark complete</button>
-                      )}
-                    </div>
+          <div className={`flex-1 flex flex-col overflow-auto ${isDarkMode ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/30' : 'bg-gradient-to-br from-slate-50 via-white to-indigo-50/30'}`}>
+            {/* Tasks Header */}
+            <div className={`sticky top-0 z-10 px-6 py-5 border-b backdrop-blur-xl ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200/60'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${isDarkMode ? 'bg-gradient-to-br from-violet-600 to-purple-700' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
+                    <ClipboardList className="w-6 h-6 text-white" />
                   </div>
-                ))}
+                  <div>
+                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>My Tasks</h2>
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id)).length} total tasks
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    {(tasksList || []).filter(t => t.status === 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} completed
+                  </div>
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    {(tasksList || []).filter(t => t.status !== 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} pending
+                  </div>
+                </div>
               </div>
+            </div>
 
-              <div className="p-4 border rounded bg-white/50">
-                <h3 className="font-bold mb-2">Created by me</h3>
-                {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
-                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
-                    <div>
-                      <div className="font-bold">{t.message}</div>
-                      <div className="text-xs text-slate-500">{t.timestamp}</div>
+            {/* Tasks Content */}
+            <div className="flex-1 p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
+                {/* Assigned to me */}
+                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-violet-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-indigo-50/50 to-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-violet-900/50 text-violet-400' : 'bg-indigo-100 text-indigo-600'}`}>
+                      <UserPlus className="w-5 h-5" />
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
+                    <div>
+                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Assigned to me</h3>
+                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length} tasks
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length === 0 ? (
+                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                          <CheckCircle className="w-8 h-8" />
+                        </div>
+                        <p className="font-medium">No tasks assigned</p>
+                        <p className="text-xs mt-1">You're all caught up!</p>
+                      </div>
+                    ) : (
+                      (tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
+                        <div 
+                          key={t.id || t.timestamp} 
+                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
+                            t.status === 'completed' 
+                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
+                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-violet-500/30' : 'bg-white border-slate-200 hover:border-indigo-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <button 
+                              onClick={async () => {
+                                if (t.status === 'completed') return
+                                const id = t.id || t.timestamp
+                                setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
+                                try {
+                                  await TasksService.updateTask(id, { status: 'completed' })
+                                } catch (e) {
+                                  console.warn('task update failed', e)
+                                }
+                              }}
+                              className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                t.status === 'completed'
+                                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                                  : isDarkMode ? 'border-slate-500 hover:border-violet-500 hover:bg-violet-500/20' : 'border-slate-300 hover:border-indigo-500 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {t.status === 'completed' && <Check className="w-4 h-4" />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                {t.message}
+                              </div>
+                              <div className="flex items-center gap-3 mt-2">
+                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  <Clock className="w-3 h-3" />
+                                  {t.timestamp}
+                                </span>
+                                {t.channel_id && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              t.status === 'completed' 
+                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
+                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {t.status === 'completed' ? 'Done' : 'Pending'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Created by me */}
+                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-purple-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-purple-50/50 to-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-purple-100 text-purple-600'}`}>
+                      <PenTool className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Created by me</h3>
+                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length} tasks
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length === 0 ? (
+                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                          <Plus className="w-8 h-8" />
+                        </div>
+                        <p className="font-medium">No tasks created</p>
+                        <p className="text-xs mt-1">Create tasks by typing /task in chat</p>
+                      </div>
+                    ) : (
+                      (tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
+                        <div 
+                          key={t.id || t.timestamp} 
+                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
+                            t.status === 'completed' 
+                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
+                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-purple-500/30' : 'bg-white border-slate-200 hover:border-purple-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              t.status === 'completed'
+                                ? 'bg-emerald-500 text-white'
+                                : isDarkMode ? 'bg-slate-600 text-slate-400' : 'bg-slate-200 text-slate-500'
+                            }`}>
+                              {t.status === 'completed' ? <Check className="w-4 h-4" /> : <Clock className="w-3 h-3" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                {t.message}
+                              </div>
+                              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  <Clock className="w-3 h-3" />
+                                  {t.timestamp}
+                                </span>
+                                {t.channel_id && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
+                                  </span>
+                                )}
+                                {(t.assigned_to || []).length > 0 && (
+                                  <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                    <Users className="w-3 h-3" />
+                                    {(t.assigned_to || []).length} assignee{(t.assigned_to || []).length > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              t.status === 'completed' 
+                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
+                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {t.status === 'completed' ? 'Done' : 'Pending'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
