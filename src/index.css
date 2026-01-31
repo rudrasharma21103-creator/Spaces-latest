@@ -3777,6 +3777,14 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
     transform: translateX(0) !important;
   }
 
+  /* Dark mode: black background for mobile sidebars */
+  .dark .liquid-glass-sidebar.fixed,
+  .dark .liquid-glass-sidebar-right.fixed,
+  .dark .liquid-glass-sidebar.mobile-slide-in-left,
+  .dark .liquid-glass-sidebar-right.mobile-slide-in-right {
+    background: #000000 !important;
+  }
+
   .liquid-glass-sidebar.mobile-slide-in-left { left: 0 !important; }
   .liquid-glass-sidebar-right.mobile-slide-in-right { right: 0 !important; }
 }
