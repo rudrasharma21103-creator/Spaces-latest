@@ -4613,7 +4613,7 @@ export default function CollaborationApp() {
                 My Documents
               </h3>
               <p className={`text-sm mb-3 sm:mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                All your files in one organized place — no more hunting across drives.
+                All your files in one organized place — no more hunting across different Apps.
               </p>
               <div className={`rounded-lg sm:rounded-xl overflow-hidden border ${isDarkMode ? 'border-slate-700/50' : 'border-slate-200/50'}`}>
                 <img src="/Image 5.png" alt="Documents" className="w-full object-cover object-top h-28 sm:h-32" />
