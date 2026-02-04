@@ -4377,28 +4377,6 @@ export default function CollaborationApp() {
                 </svg>
               </span>
             </button>
-            <button
-              onClick={() => {
-                // Track analytics event
-                try { window.dispatchEvent(new CustomEvent('analytics', { detail: { event: 'cta_see_demo_clicked' } })); } catch(e) {}
-                setShowDemoModal(true);
-              }}
-              aria-label="Watch Spacess demo"
-              className={`group w-full sm:w-auto px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl font-bold text-base sm:text-lg transition-all duration-300 border-2 hover:scale-105 active:scale-[0.98] backdrop-blur-sm ${
-                isDarkMode 
-                  ? 'border-slate-600 text-slate-300 hover:border-violet-500/50 hover:bg-violet-500/10 hover:text-violet-300' 
-                  : 'border-slate-300 text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700'
-              }`}
-            >
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                  <svg className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
-                </span>
-                See it in action
-              </span>
-            </button>
           </div>
         </div>
       </section>
