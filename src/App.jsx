@@ -8700,12 +8700,6 @@ export default function CollaborationApp() {
                         >
                           <Paperclip className="w-5 h-5" />
                         </button>
-                        <button
-                          onClick={() => setShowEmojiPickerFor('input')}
-                          className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
-                        >
-                          <span className="text-lg">😀</span>
-                        </button>
 
                         <button
                           onClick={() => setShowTaskModal(true)}
