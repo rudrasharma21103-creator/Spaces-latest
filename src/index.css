@@ -5030,3 +5030,872 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 .ease-bounce { transition-timing-function: var(--ease-bounce); }
 .ease-elastic { transition-timing-function: var(--ease-elastic); }
 .ease-out-expo { transition-timing-function: var(--ease-out-expo); }
+
+/* ============================================
+   MODERN PROFESSIONAL THEME OVERRIDES
+   Replaces liquid-glass styling with clean surfaces
+   ============================================ */
+
+:root {
+  --bg-primary: #f6f8fb !important;
+  --bg-secondary: #ffffff !important;
+  --bg-tertiary: #eef2f7 !important;
+  --bg-elevated: #ffffff !important;
+  --bg-hover: #f1f5f9 !important;
+  --bg-active: #e8edf5 !important;
+
+  --surface-1: #ffffff !important;
+  --surface-2: #f8fafc !important;
+  --surface-3: #eef2f7 !important;
+
+  --text-primary: #0f172a !important;
+  --text-secondary: #334155 !important;
+  --text-tertiary: #64748b !important;
+  --text-muted: #94a3b8 !important;
+  --text-inverse: #ffffff !important;
+
+  --accent-primary: #2563eb !important;
+  --accent-secondary: #1d4ed8 !important;
+  --accent-tertiary: #0ea5e9 !important;
+
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  --gradient-secondary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  --gradient-accent: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%) !important;
+  --gradient-mesh: none !important;
+
+  --glass-bg: #ffffff !important;
+  --glass-bg-strong: #ffffff !important;
+  --glass-border: #d7dee8 !important;
+  --glass-blur: 0px !important;
+  --glass-saturate: 100% !important;
+
+  --border-light: #e2e8f0 !important;
+  --border-medium: #d7dee8 !important;
+  --border-accent: #bfdbfe !important;
+  --border-subtle: #e2e8f0 !important;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+  --shadow-md: 0 4px 10px rgba(15, 23, 42, 0.08) !important;
+  --shadow-lg: 0 10px 24px rgba(15, 23, 42, 0.10) !important;
+  --shadow-xl: 0 16px 32px rgba(15, 23, 42, 0.12) !important;
+  --shadow-2xl: 0 24px 48px rgba(15, 23, 42, 0.15) !important;
+  --shadow-glow: none !important;
+  --shadow-glow-accent: none !important;
+  --shadow-inner-glow: none !important;
+}
+
+.dark {
+  --bg-primary: #0b1220 !important;
+  --bg-secondary: #111827 !important;
+  --bg-tertiary: #1f2937 !important;
+  --bg-elevated: #111827 !important;
+  --bg-hover: #1f2937 !important;
+  --bg-active: #263244 !important;
+
+  --surface-1: #111827 !important;
+  --surface-2: #1f2937 !important;
+  --surface-3: #263244 !important;
+
+  --text-primary: #e5e7eb !important;
+  --text-secondary: #cbd5e1 !important;
+  --text-tertiary: #94a3b8 !important;
+  --text-muted: #64748b !important;
+  --text-inverse: #0b1220 !important;
+
+  --accent-primary: #60a5fa !important;
+  --accent-secondary: #3b82f6 !important;
+  --accent-tertiary: #38bdf8 !important;
+
+  --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%) !important;
+  --gradient-secondary: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%) !important;
+  --gradient-accent: linear-gradient(135deg, #38bdf8 0%, #60a5fa 100%) !important;
+  --gradient-mesh: none !important;
+
+  --glass-bg: #111827 !important;
+  --glass-bg-strong: #111827 !important;
+  --glass-border: #334155 !important;
+  --glass-blur: 0px !important;
+  --glass-saturate: 100% !important;
+
+  --border-light: #334155 !important;
+  --border-medium: #334155 !important;
+  --border-accent: #1d4ed8 !important;
+  --border-subtle: #334155 !important;
+
+  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.45) !important;
+  --shadow-md: 0 4px 12px rgba(2, 6, 23, 0.50) !important;
+  --shadow-lg: 0 10px 24px rgba(2, 6, 23, 0.55) !important;
+  --shadow-xl: 0 16px 36px rgba(2, 6, 23, 0.60) !important;
+  --shadow-2xl: 0 24px 48px rgba(2, 6, 23, 0.70) !important;
+  --shadow-glow: none !important;
+  --shadow-glow-accent: none !important;
+  --shadow-inner-glow: none !important;
+}
+
+body {
+  background-image: none !important;
+}
+
+.glass,
+.glass-subtle,
+.glass-dark,
+.glass-card,
+.glass-intense,
+.liquid-glass-navbar,
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right,
+.liquid-glass-chat-area,
+.liquid-glass-message,
+.liquid-glass-message-own,
+.liquid-glass-button,
+.liquid-glass-card,
+.liquid-glass-header,
+.liquid-glass-modal,
+.liquid-glass-nav-item,
+.liquid-glass-input,
+.feature-card,
+.testimonial-card,
+.cta-section {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background-image: none !important;
+  border: 1px solid var(--border-medium) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.liquid-glass-navbar::before,
+.liquid-glass-navbar::after,
+.liquid-glass-sidebar::before,
+.liquid-glass-sidebar::after,
+.liquid-glass-sidebar-right::before,
+.liquid-glass-card::before,
+.liquid-glass-header::before,
+.liquid-glass-header::after,
+.liquid-glass-modal::before,
+.liquid-glass-modal::after,
+.liquid-glass-nav-item::before,
+.feature-card::before,
+.cta-section::before {
+  display: none !important;
+  content: none !important;
+}
+
+.liquid-glass-sidebar-icon,
+.liquid-glass-sidebar-icon.active {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  border-radius: 0.75rem !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border-medium) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transform: none !important;
+}
+
+.liquid-glass-sidebar-icon:hover,
+.dark .liquid-glass-sidebar-icon:hover {
+  background: var(--bg-hover) !important;
+  border-color: var(--border-accent) !important;
+  box-shadow: var(--shadow-md) !important;
+  transform: none !important;
+}
+
+.liquid-glass-button:hover,
+.liquid-glass-card:hover,
+.liquid-glass-message:hover,
+.liquid-glass-message-own:hover,
+.feature-card:hover,
+.testimonial-card:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.gradient-text,
+.gradient-text-aurora,
+.gradient-text-ocean {
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: var(--text-primary) !important;
+  animation: none !important;
+}
+
+/* ============================================
+   LIGHT THEME CONTRAST HOTFIX
+   Restores readable surfaces over patterned chat bg
+   ============================================ */
+
+html:not(.dark) body {
+  background-color: #f3f6fb !important;
+}
+
+html:not(.dark) .liquid-glass-navbar,
+html:not(.dark) .liquid-glass-sidebar,
+html:not(.dark) .liquid-glass-sidebar-right,
+html:not(.dark) .liquid-glass-card,
+html:not(.dark) .liquid-glass-header,
+html:not(.dark) .liquid-glass-modal,
+html:not(.dark) .feature-card,
+html:not(.dark) .testimonial-card,
+html:not(.dark) .cta-section {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: #d6deea !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.10) !important;
+}
+
+html:not(.dark) .liquid-glass-chat-area {
+  background-color: rgba(248, 250, 252, 0.88) !important;
+}
+
+html:not(.dark) .liquid-glass-message {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #d6deea !important;
+}
+
+html:not(.dark) .liquid-glass-message-own {
+  background-color: #e8f1ff !important;
+  color: #0f172a !important;
+  border-color: #bfdbfe !important;
+}
+
+html:not(.dark) .liquid-glass-input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html:not(.dark) .liquid-glass-input::placeholder {
+  color: #64748b !important;
+}
+
+html:not(.dark) .liquid-glass-button,
+html:not(.dark) .liquid-glass-nav-item {
+  background-color: #ffffff !important;
+  color: #1e293b !important;
+  border-color: #d6deea !important;
+}
+
+body:not(.dark) .liquid-glass-navbar,
+body:not(.dark) .liquid-glass-sidebar,
+body:not(.dark) .liquid-glass-sidebar-right,
+body:not(.dark) .liquid-glass-card,
+body:not(.dark) .liquid-glass-header,
+body:not(.dark) .liquid-glass-modal,
+body:not(.dark) .feature-card,
+body:not(.dark) .testimonial-card,
+body:not(.dark) .cta-section {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: #d6deea !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.10) !important;
+}
+
+body:not(.dark) .liquid-glass-chat-area {
+  background-color: rgba(248, 250, 252, 0.88) !important;
+}
+
+body:not(.dark) .liquid-glass-message {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #d6deea !important;
+}
+
+body:not(.dark) .liquid-glass-message-own {
+  background-color: #e8f1ff !important;
+  color: #0f172a !important;
+  border-color: #bfdbfe !important;
+}
+
+body:not(.dark) .liquid-glass-input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+body:not(.dark) .liquid-glass-input::placeholder {
+  color: #64748b !important;
+}
+
+body:not(.dark) .liquid-glass-button,
+body:not(.dark) .liquid-glass-nav-item {
+  background-color: #ffffff !important;
+  color: #1e293b !important;
+  border-color: #d6deea !important;
+}
+
+/* ============================================
+   DARK THEME CONTRAST HOTFIX
+   Prevents light-mode overrides from leaking into dark mode
+   ============================================ */
+
+html.dark body,
+body.dark {
+  background-color: #0b1220 !important;
+  color: #e5e7eb !important;
+}
+
+html.dark .liquid-glass-navbar,
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+html.dark .liquid-glass-card,
+html.dark .liquid-glass-header,
+html.dark .liquid-glass-modal,
+html.dark .feature-card,
+html.dark .testimonial-card,
+html.dark .cta-section,
+body.dark .liquid-glass-navbar,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-card,
+body.dark .liquid-glass-header,
+body.dark .liquid-glass-modal,
+body.dark .feature-card,
+body.dark .testimonial-card,
+body.dark .cta-section {
+  background-color: rgba(17, 24, 39, 0.96) !important;
+  border-color: #334155 !important;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55) !important;
+  color: #e5e7eb !important;
+}
+
+html.dark .liquid-glass-chat-area,
+body.dark .liquid-glass-chat-area {
+  background-color: rgba(11, 18, 32, 0.74) !important;
+}
+
+html.dark .liquid-glass-message,
+body.dark .liquid-glass-message {
+  background-color: #111827 !important;
+  color: #e5e7eb !important;
+  border-color: #334155 !important;
+}
+
+html.dark .liquid-glass-message-own,
+body.dark .liquid-glass-message-own {
+  background-color: #1e3a8a !important;
+  color: #e5e7eb !important;
+  border-color: #3b82f6 !important;
+}
+
+html.dark .liquid-glass-input,
+body.dark .liquid-glass-input {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+  border-color: #334155 !important;
+}
+
+html.dark .liquid-glass-input::placeholder,
+body.dark .liquid-glass-input::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.dark .liquid-glass-button,
+html.dark .liquid-glass-nav-item,
+body.dark .liquid-glass-button,
+body.dark .liquid-glass-nav-item {
+  background-color: #111827 !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+html.dark .liquid-glass-sidebar-icon,
+html.dark .liquid-glass-sidebar-icon.active,
+body.dark .liquid-glass-sidebar-icon,
+body.dark .liquid-glass-sidebar-icon.active {
+  background: #1f2937 !important;
+  border-color: #334155 !important;
+  color: #e5e7eb !important;
+}
+
+/* ============================================
+   FAST THEME TOGGLE
+   Keeps light<->dark transitions quick and clean
+   ============================================ */
+
+:root,
+.dark,
+html.dark,
+body.dark {
+  --duration-normal: 120ms !important;
+  --duration-slow: 160ms !important;
+  --duration-slower: 200ms !important;
+}
+
+body,
+.liquid-glass-navbar,
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right,
+.liquid-glass-chat-area,
+.liquid-glass-message,
+.liquid-glass-message-own,
+.liquid-glass-input,
+.liquid-glass-button,
+.liquid-glass-card,
+.liquid-glass-nav-item,
+.feature-card,
+.testimonial-card,
+.cta-section {
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 140ms ease-out !important;
+}
+
+/* ============================================
+   PROFESSIONAL WORKSPACE UI V3
+   Unified clean, modern, production-ready visual system
+   ============================================ */
+
+:root {
+  --accent-primary: #2563eb !important;
+  --accent-secondary: #1d4ed8 !important;
+  --accent-tertiary: #0ea5e9 !important;
+  --bg-primary: #f4f7fb !important;
+  --bg-secondary: #ffffff !important;
+  --bg-tertiary: #eef3fa !important;
+  --surface-1: #ffffff !important;
+  --surface-2: #f8fbff !important;
+  --surface-3: #edf3fa !important;
+  --text-primary: #0f172a !important;
+  --text-secondary: #334155 !important;
+  --text-tertiary: #64748b !important;
+  --border-medium: #d8e1ec !important;
+  --border-subtle: #e2e8f0 !important;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
+  --shadow-lg: 0 16px 34px rgba(15, 23, 42, 0.12) !important;
+}
+
+html.dark,
+body.dark,
+.dark {
+  --accent-primary: #60a5fa !important;
+  --accent-secondary: #3b82f6 !important;
+  --accent-tertiary: #22d3ee !important;
+  --bg-primary: #060b16 !important;
+  --bg-secondary: #0b1220 !important;
+  --bg-tertiary: #111a2c !important;
+  --surface-1: #0b1220 !important;
+  --surface-2: #111a2c !important;
+  --surface-3: #17233a !important;
+  --text-primary: #e2e8f0 !important;
+  --text-secondary: #cbd5e1 !important;
+  --text-tertiary: #94a3b8 !important;
+  --border-medium: #2a3a56 !important;
+  --border-subtle: #26364f !important;
+  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.40) !important;
+  --shadow-md: 0 12px 26px rgba(2, 6, 23, 0.45) !important;
+  --shadow-lg: 0 22px 44px rgba(2, 6, 23, 0.60) !important;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: "Manrope", "Plus Jakarta Sans", "Segoe UI Variable", "Segoe UI", sans-serif !important;
+  letter-spacing: -0.01em;
+}
+
+body {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+.liquid-glass-navbar,
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right,
+.liquid-glass-chat-area,
+.liquid-glass-card,
+.liquid-glass-header,
+.liquid-glass-modal,
+.card-modern,
+.card-elevated,
+.feature-card,
+.testimonial-card,
+.cta-section {
+  background: var(--surface-1) !important;
+  border: 1px solid var(--border-medium) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.liquid-glass-navbar {
+  border-radius: 20px !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+}
+
+.liquid-glass-chat-area {
+  background: rgba(255, 255, 255, 0.82) !important;
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent) !important;
+}
+
+.liquid-glass-message,
+.message-bubble,
+.message-bubble-received {
+  background: var(--surface-1) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.liquid-glass-message-own,
+.message-bubble-sent {
+  background: #e8f1ff !important;
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-1)) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid #bfdbfe !important;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-medium)) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.liquid-glass-input,
+.chat-input {
+  background: var(--surface-1) !important;
+  border: 1px solid var(--border-medium) !important;
+  color: var(--text-primary) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), var(--shadow-sm) !important;
+}
+
+.liquid-glass-input::placeholder,
+.chat-input input::placeholder,
+.chat-input textarea::placeholder {
+  color: var(--text-tertiary) !important;
+}
+
+.liquid-glass-button,
+.liquid-glass-nav-item,
+.btn-secondary,
+.btn-ghost,
+.btn-icon {
+  background: var(--surface-2) !important;
+  color: var(--text-secondary) !important;
+  border: 1px solid var(--border-medium) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.btn-primary,
+.liquid-glass-nav-item.active,
+.sidebar-item.active {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.30) !important;
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--accent-primary) 40%, transparent) !important;
+}
+
+.sidebar-item {
+  border-radius: 12px !important;
+  color: var(--text-secondary) !important;
+  border: 1px solid transparent !important;
+}
+
+.sidebar-item:hover {
+  background: var(--surface-2) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+.liquid-glass-sidebar-icon,
+.liquid-glass-sidebar-icon.active {
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 12px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border-medium) !important;
+  color: var(--text-secondary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.liquid-glass-sidebar-icon.active {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+}
+
+.liquid-glass-navbar::before,
+.liquid-glass-navbar::after,
+.liquid-glass-sidebar::before,
+.liquid-glass-sidebar::after,
+.liquid-glass-sidebar-right::before,
+.liquid-glass-card::before,
+.liquid-glass-header::before,
+.liquid-glass-header::after,
+.liquid-glass-modal::before,
+.liquid-glass-modal::after,
+.liquid-glass-nav-item::before,
+.sidebar-item::before,
+.message-bubble-sent::before {
+  display: none !important;
+  content: none !important;
+}
+
+.liquid-glass-button:hover,
+.liquid-glass-nav-item:hover,
+.sidebar-item:hover,
+.card-modern:hover,
+.card-elevated:hover,
+.feature-card:hover,
+.testimonial-card:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.gradient-text,
+.gradient-text-aurora,
+.gradient-text-ocean {
+  background: none !important;
+  color: var(--text-primary) !important;
+  -webkit-text-fill-color: currentColor !important;
+  font-weight: 700 !important;
+}
+
+html.dark .liquid-glass-chat-area,
+body.dark .liquid-glass-chat-area {
+  background: rgba(11, 18, 32, 0.82) !important;
+}
+
+html.dark .liquid-glass-message-own,
+html.dark .message-bubble-sent,
+body.dark .liquid-glass-message-own,
+body.dark .message-bubble-sent {
+  background: rgba(29, 78, 216, 0.28) !important;
+  border-color: rgba(96, 165, 250, 0.45) !important;
+}
+
+@media (max-width: 767px) {
+  .liquid-glass-navbar {
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+
+  .liquid-glass-chat-area,
+  .chat-input,
+  .liquid-glass-input {
+    border-radius: 12px !important;
+  }
+}
+
+/* ============================================
+   NAVBAR + SIDEBAR POLISH
+   Clean, professional final overrides
+   ============================================ */
+
+:root {
+  --workspace-panel-radius: 22px;
+  --workspace-nav-radius: 14px;
+}
+
+.liquid-glass-navbar {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: var(--workspace-nav-radius) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.liquid-glass-navbar::before,
+.liquid-glass-navbar::after {
+  display: none !important;
+  content: none !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item,
+.liquid-glass-navbar .liquid-glass-button {
+  background: #f8fbff !important;
+  border: 1px solid #d8e1ec !important;
+  color: #334155 !important;
+  border-radius: 11px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item:hover,
+.liquid-glass-navbar .liquid-glass-button:hover {
+  background: #f1f5f9 !important;
+  border-color: #c9d5e4 !important;
+  color: #0f172a !important;
+  transform: none !important;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08) !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item.active {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.32) !important;
+}
+
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid #d7e0eb !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08) !important;
+}
+
+.liquid-glass-sidebar {
+  border-radius: 0 var(--workspace-panel-radius) var(--workspace-panel-radius) 0 !important;
+}
+
+.liquid-glass-sidebar-right {
+  border-radius: var(--workspace-panel-radius) 0 0 var(--workspace-panel-radius) !important;
+}
+
+.liquid-glass-sidebar-icon {
+  border-radius: 10px !important;
+}
+
+.sidebar-item {
+  border-radius: 10px !important;
+}
+
+html.dark .liquid-glass-navbar,
+body.dark .liquid-glass-navbar {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item,
+html.dark .liquid-glass-navbar .liquid-glass-button,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item,
+body.dark .liquid-glass-navbar .liquid-glass-button {
+  background: #16233a !important;
+  border-color: #2d3f5f !important;
+  color: #cbd5e1 !important;
+  box-shadow: 0 1px 2px rgba(2, 6, 23, 0.45) !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+html.dark .liquid-glass-navbar .liquid-glass-button:hover,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+body.dark .liquid-glass-navbar .liquid-glass-button:hover {
+  background: #1b2b46 !important;
+  border-color: #3b5378 !important;
+  color: #e2e8f0 !important;
+}
+
+@media (max-width: 767px) {
+  .liquid-glass-navbar {
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+}
+
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: rgba(8, 14, 28, 0.97) !important;
+  border-color: rgba(148, 163, 184, 0.14) !important;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.32) !important;
+}
+
+/* ============================================
+   FINAL NAVBAR + CHAT SURFACE + DARK BUBBLES
+   ============================================ */
+
+html:not(.dark) .liquid-glass-navbar,
+body:not(.dark) .liquid-glass-navbar {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .flex-1.flex.flex-col:has(.liquid-glass-navbar),
+body:not(.dark) .flex-1.flex.flex-col:has(.liquid-glass-navbar),
+html:not(.dark) .flex-1.flex.flex-col.min-w-0.relative.z-0,
+body:not(.dark) .flex-1.flex.flex-col.min-w-0.relative.z-0,
+html:not(.dark) .liquid-glass-chat-area,
+body:not(.dark) .liquid-glass-chat-area {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-message,
+body.dark .liquid-glass-message,
+html.dark .message-bubble,
+html.dark .message-bubble-received,
+body.dark .message-bubble,
+body.dark .message-bubble-received {
+  background: #0f172a !important;
+  border: 1px solid #2a3a56 !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.dark .liquid-glass-message-own,
+body.dark .liquid-glass-message-own,
+html.dark .message-bubble-sent,
+body.dark .message-bubble-sent {
+  background: #1e3a8a !important;
+  border: 1px solid #3b82f6 !important;
+  color: #eff6ff !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.dark .liquid-glass-message::before,
+html.dark .liquid-glass-message::after,
+html.dark .liquid-glass-message-own::before,
+html.dark .liquid-glass-message-own::after,
+body.dark .liquid-glass-message::before,
+body.dark .liquid-glass-message::after,
+body.dark .liquid-glass-message-own::before,
+body.dark .liquid-glass-message-own::after {
+  display: none !important;
+  content: none !important;
+}
+
+html.dark .flex-1.flex.flex-col:has(.liquid-glass-navbar),
+body.dark .flex-1.flex.flex-col:has(.liquid-glass-navbar),
+html.dark .flex-1.flex.flex-col.min-w-0.relative.z-0,
+body.dark .flex-1.flex.flex-col.min-w-0.relative.z-0,
+html.dark .liquid-glass-chat-area,
+body.dark .liquid-glass-chat-area {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ============================================
+   FINAL NAVBAR BAR STYLE (BOTH THEMES)
+   ============================================ */
+
+html:not(.dark) .liquid-glass-navbar,
+body:not(.dark) .liquid-glass-navbar {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border: 1px solid #d8e1ec !important;
+  border-radius: 14px !important;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08) !important;
+  margin-top: -10px !important;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+html.dark .liquid-glass-navbar,
+body.dark .liquid-glass-navbar {
+  background: rgba(8, 14, 28, 0.95) !important;
+  border: 1px solid rgba(148, 163, 184, 0.14) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.34) !important;
+  margin-top: -10px !important;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
