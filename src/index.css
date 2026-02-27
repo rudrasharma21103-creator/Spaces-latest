@@ -5545,17 +5545,23 @@ body {
   color: var(--text-primary) !important;
   border: 1px solid var(--border-subtle) !important;
   border-radius: 14px !important;
+  padding: 0.6rem 0.9rem !important;
+  font-size: 14px !important;
+  line-height: 1.45 !important;
   box-shadow: var(--shadow-sm) !important;
 }
 
 .liquid-glass-message-own,
 .message-bubble-sent {
-  background: #e8f1ff !important;
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-1)) !important;
+  background: #dbeafe !important;
+  background: color-mix(in srgb, var(--accent-primary) 22%, var(--surface-1)) !important;
   color: var(--text-primary) !important;
   border: 1px solid #bfdbfe !important;
   border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-medium)) !important;
   border-radius: 14px !important;
+  padding: 0.6rem 0.9rem !important;
+  font-size: 14px !important;
+  line-height: 1.45 !important;
   box-shadow: var(--shadow-sm) !important;
 }
 
