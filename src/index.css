@@ -5858,6 +5858,40 @@ body.dark .message-bubble-sent {
   -webkit-backdrop-filter: none !important;
 }
 
+/* ============================================
+   NAVBAR ADD PEOPLE BUTTON - SUBTLE COLORS
+   ============================================ */
+
+html:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled),
+body:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled) {
+  background: #eef2ff !important;
+  border: 1px solid #c7d2fe !important;
+  color: #4338ca !important;
+  box-shadow: 0 6px 14px rgba(99, 102, 241, 0.14) !important;
+}
+
+html:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover,
+body:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
+  background: #e0e7ff !important;
+  border-color: #a5b4fc !important;
+  color: #3730a3 !important;
+}
+
+html.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled),
+body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled) {
+  background: #1e293b !important;
+  border: 1px solid #334155 !important;
+  color: #c7d2fe !important;
+  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.38) !important;
+}
+
+html.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover,
+body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
+  background: #24324a !important;
+  border-color: #475569 !important;
+  color: #e0e7ff !important;
+}
+
 html.dark .liquid-glass-message::before,
 html.dark .liquid-glass-message::after,
 html.dark .liquid-glass-message-own::before,
