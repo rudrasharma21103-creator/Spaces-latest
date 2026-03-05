@@ -5957,7 +5957,8 @@ body,
 }
 
 body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 #root {
@@ -5976,3 +5977,4 @@ body {
 .min-h-screen {
   min-height: var(--app-ui-vh) !important;
 }
+
