@@ -4251,7 +4251,7 @@ export default function CollaborationApp() {
             : 'bg-white/60 border border-slate-200/50 shadow-lg shadow-slate-200/20'
         }`}>
           <div className="flex items-center gap-2 sm:gap-3">
-            <img src="/Logo.png" alt="Spaces" className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl" />
+            <div aria-hidden="true" className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl" />
             <span className={`text-lg sm:text-xl font-bold bg-gradient-to-r bg-clip-text text-transparent ${
               isDarkMode 
                 ? 'from-white to-slate-400' 
@@ -4807,7 +4807,7 @@ export default function CollaborationApp() {
       }`}>
         <div className="max-w-6xl mx-auto flex flex-col items-center gap-4 sm:gap-6 text-center sm:text-left sm:flex-row sm:justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
-            <img src="/Logo.png" alt="Spaces" className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg" />
+            <div aria-hidden="true" className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg" />
             <span className={`font-bold text-sm sm:text-base ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Spaces</span>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
@@ -4976,10 +4976,10 @@ export default function CollaborationApp() {
           <div className="text-center mb-10">
             <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-110 hover:rotate-6 transition-all duration-500 animate-float ${
               isDarkMode 
-                ? 'bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 shadow-violet-500/30' 
-                : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50'
+                ? 'shadow-violet-500/30' 
+                : 'shadow-slate-300/50'
             }`}>
-              <Sparkles className="w-12 h-12 text-white drop-shadow-lg" />
+              <div aria-hidden="true" className="w-full h-full rounded-[2rem]" />
             </div>
             <h1 className={`text-5xl font-extrabold mb-3 tracking-tight bg-clip-text text-transparent ${
               isDarkMode 
@@ -6629,11 +6629,8 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <div className="p-2.5 rounded-2xl shadow-lg transition-all bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-indigo-300/50 group-hover:shadow-indigo-400/60 group-hover:scale-105 animate-gradient">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
               <h1 className={`font-extrabold text-xl tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                Spaces
+                Spacess
               </h1>
             </div>
           )}
@@ -9567,7 +9564,7 @@ export default function CollaborationApp() {
                   : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <Sparkles className={`w-5 h-5 transition-transform duration-200`} />
+              <div aria-hidden="true" className="w-5 h-5 rounded-md transition-transform duration-200" />
               <span className="text-[10px] font-semibold">Spaces</span>
             </button>
             <button
