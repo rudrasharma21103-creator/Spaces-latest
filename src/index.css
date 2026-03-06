@@ -5863,32 +5863,36 @@ body.dark .message-bubble-sent {
 
 html:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled),
 body:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled) {
-  background: #eef2ff !important;
-  border: 1px solid #c7d2fe !important;
-  color: #4338ca !important;
-  box-shadow: 0 6px 14px rgba(99, 102, 241, 0.14) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  color: #475569 !important;
+  box-shadow: none !important;
 }
 
 html:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover,
 body:not(.dark) .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
-  background: #e0e7ff !important;
-  border-color: #a5b4fc !important;
-  color: #3730a3 !important;
+  background: #EEEDEC !important;
+  border-color: transparent !important;
+  color: #334155 !important;
+  box-shadow: none !important;
 }
 
 html.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled),
 body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled) {
-  background: #1e293b !important;
-  border: 1px solid #334155 !important;
-  color: #c7d2fe !important;
-  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.38) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  color: #cbd5e1 !important;
+  box-shadow: none !important;
 }
 
 html.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover,
 body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
-  background: #24324a !important;
-  border-color: #475569 !important;
-  color: #e0e7ff !important;
+  background: #2C2C2C !important;
+  border-color: transparent !important;
+  color: #e8e9eb !important;
+  box-shadow: none !important;
 }
 
 html.dark .liquid-glass-message::before,
@@ -5978,3 +5982,292 @@ body {
   min-height: var(--app-ui-vh) !important;
 }
 
+/* ============================================
+   NOTION-LIKE DARK PALETTE (USER REQUEST)
+   Keep doodle chat backgrounds unchanged.
+   ============================================ */
+
+html.dark,
+body.dark,
+.dark {
+  --bg-primary: #111315 !important;
+  --bg-secondary: #15171a !important;
+  --bg-tertiary: #1a1d21 !important;
+  --surface-1: #191b1f !important;
+  --surface-2: #1f2227 !important;
+  --surface-3: #262a31 !important;
+  --text-primary: #e8e9eb !important;
+  --text-secondary: #c6c9cf !important;
+  --text-tertiary: #9aa0aa !important;
+  --border-medium: #2b3038 !important;
+  --border-subtle: #252a31 !important;
+}
+
+html.dark body,
+body.dark {
+  background: #111315 !important;
+  color: #e8e9eb !important;
+}
+
+html.dark .liquid-glass-navbar,
+body.dark .liquid-glass-navbar {
+  background: #111315 !important;
+  border: 1px solid #23272e !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item,
+html.dark .liquid-glass-navbar .liquid-glass-button,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item,
+body.dark .liquid-glass-navbar .liquid-glass-button {
+  background: #1f2329 !important;
+  border: 1px solid #2f343d !important;
+  color: #c6c9cf !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+html.dark .liquid-glass-navbar .liquid-glass-button:hover,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+body.dark .liquid-glass-navbar .liquid-glass-button:hover {
+  background: #262b33 !important;
+  border-color: #3a404a !important;
+  color: #e8e9eb !important;
+}
+
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: #191b1f !important;
+  border-color: #2b3038 !important;
+  box-shadow: none !important;
+}
+
+html.dark .sidebar-item,
+body.dark .sidebar-item {
+  color: #c6c9cf !important;
+  border-color: transparent !important;
+}
+
+html.dark .sidebar-item:hover,
+body.dark .sidebar-item:hover {
+  background: #24282f !important;
+  color: #e8e9eb !important;
+  border-color: #323842 !important;
+}
+
+html.dark .liquid-glass-sidebar-icon,
+body.dark .liquid-glass-sidebar-icon {
+  background: #20242b !important;
+  border-color: #2f343d !important;
+  color: #c6c9cf !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-sidebar-icon.active,
+body.dark .liquid-glass-sidebar-icon.active {
+  background: #2b3038 !important;
+  border-color: #404753 !important;
+  color: #f3f4f6 !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-message,
+html.dark .message-bubble,
+html.dark .message-bubble-received,
+body.dark .liquid-glass-message,
+body.dark .message-bubble,
+body.dark .message-bubble-received {
+  background: #1d2127 !important;
+  border-color: #2d323a !important;
+  color: #e6e7eb !important;
+}
+
+html.dark .liquid-glass-message-own,
+html.dark .message-bubble-sent,
+body.dark .liquid-glass-message-own,
+body.dark .message-bubble-sent {
+  background: #2a313c !important;
+  border-color: #424b59 !important;
+  color: #f1f3f5 !important;
+}
+
+/* Sidebar background override */
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right {
+  background: #000000 !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.liquid-glass-sidebar::before,
+.liquid-glass-sidebar::after,
+.liquid-glass-sidebar-right::before,
+.liquid-glass-sidebar-right::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Ensure sidebar container layers stay pure black behind components */
+.liquid-glass-sidebar > div,
+.liquid-glass-sidebar-right > div {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Navbar icon squircle behavior: show only on hover, match sidebar style */
+html.dark .liquid-glass-navbar .liquid-glass-nav-item,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item.active,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item.active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item:hover {
+  background: #2C2C2C !important;
+  border-color: transparent !important;
+  color: #e8e9eb !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-header,
+body.dark .liquid-glass-navbar .liquid-glass-header {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-header:hover,
+body.dark .liquid-glass-navbar .liquid-glass-header:hover {
+  background: #2C2C2C !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-navbar .liquid-glass-header::before,
+html.dark .liquid-glass-navbar .liquid-glass-header::after,
+body.dark .liquid-glass-navbar .liquid-glass-header::before,
+body.dark .liquid-glass-navbar .liquid-glass-header::after {
+  display: none !important;
+  content: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item.active,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item.active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item:hover,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item:hover {
+  background: #EEEDEC !important;
+  border-color: transparent !important;
+  color: #334155 !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-header,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-header {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-header:hover,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-header:hover {
+  background: #EEEDEC !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-navbar .liquid-glass-header::before,
+html:not(.dark) .liquid-glass-navbar .liquid-glass-header::after,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-header::before,
+body:not(.dark) .liquid-glass-navbar .liquid-glass-header::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Final dark navbar squircle color lock */
+html.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+body.dark .liquid-glass-navbar .liquid-glass-nav-item:hover,
+html.dark .liquid-glass-navbar .liquid-glass-header:hover,
+body.dark .liquid-glass-navbar .liquid-glass-header:hover,
+html.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover,
+body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
+  background: #2C2C2C !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Light theme navbar background */
+html:not(.dark) .liquid-glass-navbar,
+body:not(.dark) .liquid-glass-navbar {
+  background: #f9f8f7 !important;
+}
+
+/* Dark theme navbar background */
+html.dark .liquid-glass-navbar,
+body.dark .liquid-glass-navbar {
+  background: #191b1f !important;
+}
+
+/* Global scrollbar colors: black shades */
+* {
+  scrollbar-color: #2C2C2C transparent !important;
+}
+
+.dark * {
+  scrollbar-color: #1F1F1F transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #2C2C2C 0%, #1F1F1F 100%) !important;
+  border-radius: 9999px !important;
+  border: 1px solid transparent !important;
+  background-clip: padding-box !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #3A3A3A 0%, #262626 100%) !important;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #1F1F1F 0%, #141414 100%) !important;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #2A2A2A 0%, #1A1A1A 100%) !important;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* Light theme sidebars */
+html:not(.dark) .liquid-glass-sidebar,
+html:not(.dark) .liquid-glass-sidebar-right {
+  background: #F9F8F7 !important;
+}
