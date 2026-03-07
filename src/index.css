@@ -6271,3 +6271,13 @@ html:not(.dark) .liquid-glass-sidebar,
 html:not(.dark) .liquid-glass-sidebar-right {
   background: #F9F8F7 !important;
 }
+
+/* Dark theme navbar + sidebars background */
+html.dark .liquid-glass-navbar,
+body.dark .liquid-glass-navbar,
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: #191919 !important;
+}
