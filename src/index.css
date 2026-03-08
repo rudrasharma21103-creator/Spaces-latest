@@ -696,11 +696,11 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   bottom: 0;
   z-index: -1;
   pointer-events: none;
-  background-color: #e7ebee;
-  background-image: url('/doodle-light.png');
-  background-repeat: repeat;
-  background-size: 350px auto;
-  background-position: center;
+  background-color: #ffffff;
+  background-image: none;
+  background-repeat: no-repeat;
+  background-size: initial;
+  background-position: initial;
 }
 
 .channel-chat-background-dark::before {
@@ -712,7 +712,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   bottom: 0;
   z-index: -1;
   pointer-events: none;
-  background-color: #000000;
+  background-color: #0d0001;
   background-image: none;
   background-repeat: no-repeat;
   background-size: initial;
@@ -733,7 +733,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 }
 
 .dm-chat-background::before {
-  background-color: #e7ebee;
+  background-color: #ffffff;
   background-image: url('/doodle-light.png');
   background-repeat: repeat;
   background-size: 350px auto;
@@ -741,11 +741,11 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 }
 
 .dm-chat-background-dark::before {
-  background-color: #000000; /* pure black, matches channel dark mode */
-  background-image: none;
-  background-repeat: no-repeat;
-  background-size: initial;
-  background-position: initial;
+  background-color: #0d0001;
+  background-image: url('/doodle-dark.png');
+  background-repeat: repeat;
+  background-size: 400px auto;
+  background-position: center;
 }
 
 /* Override the solid background in main content area */
@@ -1023,7 +1023,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   color: #1e293b;
-  animation: messageSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: messageSlideIn 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes messageSlideIn {
@@ -1063,7 +1063,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
     0 3px 10px rgba(139, 92, 246, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
   color: #ffffff;
-  animation: messageSlideInOwn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: messageSlideInOwn 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes messageSlideInOwn {
@@ -3272,7 +3272,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 /* DM Chat Background - WhatsApp Style */
 .dm-chat-background {
-  background-color: #e7ebee;
+  background-color: #ffffff;
   background-image: url('/doodle-light.png');
   background-repeat: repeat;
   background-size: 350px auto;
@@ -3282,7 +3282,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 /* DM Chat Background - WhatsApp Style Dark Mode */
 .dm-chat-background-dark {
-  background-color: var(--bg-primary);
+  background-color: #0d0001;
   background-image: url('/doodle-dark.png');
   background-repeat: repeat;
   background-size: 400px auto;
@@ -3293,20 +3293,20 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 /* Channel Chat Background - Light Gradient */
 .channel-chat-background {
-  background-color: #e7ebee;
-  background-image: url('/doodle-light.png');
-  background-repeat: repeat;
-  background-size: 350px auto;
-  background-position: center;
+  background-color: #ffffff;
+  background-image: none;
+  background-repeat: no-repeat;
+  background-size: initial;
+  background-position: initial;
   background-attachment: local;
 }
 
 .channel-chat-background-dark {
-  background-color: var(--bg-primary);
-  background-image: url('/doodle-dark.png');
-  background-repeat: repeat;
-  background-size: 400px auto;
-  background-position: center;
+  background-color: #0d0001;
+  background-image: none;
+  background-repeat: no-repeat;
+  background-size: initial;
+  background-position: initial;
   background-attachment: local;
 }
 
@@ -4606,7 +4606,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   .dark .liquid-glass-sidebar-right.fixed,
   .dark .liquid-glass-sidebar.mobile-slide-in-left,
   .dark .liquid-glass-sidebar-right.mobile-slide-in-right {
-    background: #000000 !important;
+    background: #111111 !important;
   }
 
   .liquid-glass-sidebar.mobile-slide-in-left { left: 0 !important; }
@@ -5246,21 +5246,26 @@ html:not(.dark) .liquid-glass-chat-area {
 }
 
 html:not(.dark) .liquid-glass-message {
-  background-color: #ffffff !important;
+  background-color: #f2f2f2 !important;
   color: #0f172a !important;
   border-color: #d6deea !important;
 }
 
 html:not(.dark) .liquid-glass-message-own {
-  background-color: #e8f1ff !important;
+  background-color: #c2e7ff !important;
   color: #0f172a !important;
   border-color: #bfdbfe !important;
 }
 
 html:not(.dark) .liquid-glass-input {
-  background-color: #ffffff !important;
+  background-color: #e9eef6 !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
+}
+
+html:not(.dark) .chat-input,
+body:not(.dark) .chat-input {
+  background-color: #e9eef6 !important;
 }
 
 html:not(.dark) .liquid-glass-input::placeholder {
@@ -5293,19 +5298,19 @@ body:not(.dark) .liquid-glass-chat-area {
 }
 
 body:not(.dark) .liquid-glass-message {
-  background-color: #ffffff !important;
+  background-color: #f2f2f2 !important;
   color: #0f172a !important;
   border-color: #d6deea !important;
 }
 
 body:not(.dark) .liquid-glass-message-own {
-  background-color: #e8f1ff !important;
+  background-color: #c2e7ff !important;
   color: #0f172a !important;
   border-color: #bfdbfe !important;
 }
 
 body:not(.dark) .liquid-glass-input {
-  background-color: #ffffff !important;
+  background-color: #e9eef6 !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
 }
@@ -6011,7 +6016,7 @@ body.dark {
 
 html.dark .liquid-glass-navbar,
 body.dark .liquid-glass-navbar {
-  background: #111315 !important;
+  background: #111111 !important;
   border: 1px solid #23272e !important;
   box-shadow: none !important;
 }
@@ -6039,7 +6044,7 @@ html.dark .liquid-glass-sidebar,
 html.dark .liquid-glass-sidebar-right,
 body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
-  background: #191b1f !important;
+  background: #111111 !important;
   border-color: #2b3038 !important;
   box-shadow: none !important;
 }
@@ -6227,13 +6232,13 @@ body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
 /* Light theme navbar background */
 html:not(.dark) .liquid-glass-navbar,
 body:not(.dark) .liquid-glass-navbar {
-  background: #f9f8f7 !important;
+  background: #f8fafd !important;
 }
 
 /* Dark theme navbar background */
 html.dark .liquid-glass-navbar,
 body.dark .liquid-glass-navbar {
-  background: #191b1f !important;
+  background: #111111 !important;
 }
 
 /* Global scrollbar colors: black shades */
@@ -6269,7 +6274,7 @@ body.dark .liquid-glass-navbar {
 /* Light theme sidebars */
 html:not(.dark) .liquid-glass-sidebar,
 html:not(.dark) .liquid-glass-sidebar-right {
-  background: #F9F8F7 !important;
+  background: #f9f8f7 !important;
 }
 
 /* Dark theme navbar + sidebars background */
@@ -6279,5 +6284,5 @@ html.dark .liquid-glass-sidebar,
 html.dark .liquid-glass-sidebar-right,
 body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
-  background: #191919 !important;
+  background: #111111 !important;
 }
