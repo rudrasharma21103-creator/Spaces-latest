@@ -1096,6 +1096,12 @@ export default function CollaborationApp() {
     // Clear unread when entering a channel
     if (activeView === "channel" && activeChannel && currentUser) {
       setUnreadChannels(prev => prev.filter(id => id !== activeChannel))
+      const inMemory = messages[activeChannel]
+      if (Array.isArray(inMemory)) {
+        messageCounts[activeChannel] = inMemory.length
+        setMessageCounts({ ...messageCounts })
+        return
+      }
       // Update current count reference
       ;(async () => {
         try {
@@ -1112,7 +1118,7 @@ export default function CollaborationApp() {
         }
       })()
     }
-  }, [activeChannel, activeView, currentUser])
+  }, [activeChannel, activeView, currentUser, messages])
 
   useEffect(() => {
     let userSocket = null
@@ -1120,12 +1126,11 @@ export default function CollaborationApp() {
 
     if (isAuthenticated && currentUser) {
       const loadInitialData = async () => {
-        // Load spaces, users, friends, and events in parallel for faster startup
-        const [userSpaces, allUsers, friendsList, evts] = await Promise.all([
+        // Load core chat data first so UI becomes interactive quickly.
+        const [userSpaces, allUsers, friendsList] = await Promise.all([
           Storage.getSpacesForUser(currentUser.spaces).catch(() => []),
           Storage.getUsers().catch(() => []),
-          Storage.getFriends(currentUser.friends || []).catch(() => []),
-          Storage.getEvents().catch(() => [])
+          Storage.getFriends(currentUser.friends || []).catch(() => [])
         ])
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
@@ -1145,14 +1150,14 @@ export default function CollaborationApp() {
         setSpaces(enrichedSpaces)
         setUsers(Array.isArray(allUsers) ? allUsers : [])
         setFriends(Array.isArray(friendsList) ? friendsList : [])
-        setEvents(evts || [])
-        // Load tasks for current user (assigned or created)
-        try {
-          const t = await TasksService.getTasksForUser(currentUser.id)
-          setTasksList(Array.isArray(t) ? t : [])
-        } catch (e) {
-          console.warn('Failed to load tasks', e)
-        }
+
+        // Non-blocking: load secondary data after core UI is ready.
+        Storage.getEvents()
+          .then(evts => setEvents(evts || []))
+          .catch(() => {})
+        TasksService.getTasksForUser(currentUser.id)
+          .then(t => setTasksList(Array.isArray(t) ? t : []))
+          .catch(e => console.warn('Failed to load tasks', e))
 
         return enrichedSpaces
       }
@@ -1183,7 +1188,7 @@ export default function CollaborationApp() {
           }
         }
         
-        // Refresh again after a short delay to pick up background-refreshed data
+        // Refresh once shortly after first paint to pick up background-cached updates.
         refreshTimeout = setTimeout(async () => {
           const refreshedSpaces = await loadInitialData()
           // Update active space if we didn't have any before but now we do
@@ -1198,7 +1203,7 @@ export default function CollaborationApp() {
             setActiveSpace(firstSpace.id)
             if (accessibleChannel) setActiveChannel(accessibleChannel.id)
           }
-        }, 1500)
+        }, 600)
       })()
 
       // Open a background user socket to receive notifications in real-time
@@ -1542,7 +1547,7 @@ export default function CollaborationApp() {
     
     const loadMessages = async () => {
       try {
-        const storedMessages = await Storage.getMessages(chatId)
+        const storedMessages = await Storage.getMessages(chatId, { forceRefresh: true })
         const normalized = Array.isArray(storedMessages)
           ? storedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
           : []
@@ -1572,7 +1577,7 @@ export default function CollaborationApp() {
     }
     loadMessages()
     // Poll for messages as backup to WebSocket (WebSocket handles real-time delivery)
-    const interval = setInterval(loadMessages, 5000)
+    const interval = setInterval(loadMessages, 1000)
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
 
@@ -3340,7 +3345,7 @@ export default function CollaborationApp() {
           updateMessageMeta(chatId, localId, msg => ({ ...msg, status: "failed" }))
         } else {
           updateMessageMeta(chatId, localId, msg => ({ ...msg, status: "retrying" }))
-          const delay = Math.min(5000, 1200 * (attempt + 1))
+          const delay = Math.min(1200, 300 * (attempt + 1))
           setTimeout(() => persistMessageWithRetry(chatId, payload, localId, attempt + 1), delay)
         }
       })
@@ -8665,7 +8670,7 @@ export default function CollaborationApp() {
                 <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
 <div className={`rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 
-${isDarkMode ? 'bg-[#191b1f] border border-slate-700/50 focus-within:ring-purple-500/30' : 'bg-white focus-within:ring-indigo-500/20'}`}>                    {/* Attachments Preview */}
+${isDarkMode ? 'bg-[#191b1f] border border-slate-700/50 focus-within:ring-purple-500/30' : 'bg-[#e9eef6] focus-within:ring-indigo-500/20'}`}>                    {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
                       <div className={`flex gap-3 p-3 mb-2 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
                         {selectedFiles.map(file => (
