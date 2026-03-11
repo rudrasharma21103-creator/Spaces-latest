@@ -2,6 +2,7 @@ import { getToken, saveAuth } from "./auth"
 
 // Use environment variable when deployed (Vite): VITE_API_URL
 const API_BASE = import.meta.env.VITE_API_URL || "https://spaces-wc1z.onrender.com"
+const DEBUG_STORAGE = false
 
 // --------------------
 // Helpers
@@ -25,6 +26,49 @@ const ensureArray = data => {
 
 import { getStoredUser, logout as clearAuth } from "./auth"
 
+const messageRequestCache = new Map()
+const messageCountRequestCache = new Map()
+
+const getMessagesCacheKeys = chatId => ({
+  cacheKey: `messages_cache_${chatId}`,
+  cacheTimeKey: `messages_cache_time_${chatId}`
+})
+
+const readMessagesCache = chatId => {
+  try {
+    const { cacheKey, cacheTimeKey } = getMessagesCacheKeys(chatId)
+    const messages = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const timestamp = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+    return {
+      messages: Array.isArray(messages) ? messages : null,
+      timestamp: Number.isFinite(timestamp) ? timestamp : 0
+    }
+  } catch {
+    return { messages: null, timestamp: 0 }
+  }
+}
+
+const writeMessagesCache = (chatId, messages) => {
+  try {
+    const { cacheKey, cacheTimeKey } = getMessagesCacheKeys(chatId)
+    localStorage.setItem(cacheKey, JSON.stringify(Array.isArray(messages) ? messages : []))
+    localStorage.setItem(cacheTimeKey, String(Date.now()))
+  } catch (e) {}
+}
+
+const writeMessageCountCache = (chatId, count) => {
+  try {
+    localStorage.setItem(`messages_count_${chatId}`, JSON.stringify(Number(count) || 0))
+    localStorage.setItem(`messages_count_time_${chatId}`, String(Date.now()))
+  } catch (e) {}
+}
+
+export const peekMessages = chatId => {
+  if (!chatId) return []
+  const { messages } = readMessagesCache(chatId)
+  return Array.isArray(messages) ? messages : []
+}
+
 const authFetch = async (url, options = {}) => {
   const token = getToken()
   const storedUser = getStoredUser()
@@ -34,8 +78,10 @@ const authFetch = async (url, options = {}) => {
     ? (storedUser.id || storedUser._id || (storedUser._id && storedUser._id.$oid) || storedUser.userId)
     : null
   try {
-    console.log("authFetch ->", url, options && options.method ? options.method : "GET")
-    console.log("authFetch headers ->", { token: !!token, userId: userId, extraHeaders: options && options.headers })
+    if (DEBUG_STORAGE) {
+      console.log("authFetch ->", url, options && options.method ? options.method : "GET")
+      console.log("authFetch headers ->", { token: !!token, userId: userId, extraHeaders: options && options.headers })
+    }
     const res = await fetch(url, {
       ...options,
       headers: {
@@ -46,7 +92,9 @@ const authFetch = async (url, options = {}) => {
       }
     })
 
-    console.log("authFetch response status", res.status, "for", url)
+    if (DEBUG_STORAGE) {
+      console.log("authFetch response status", res.status, "for", url)
+    }
 
     if (res.status === 401) {
       try {
@@ -61,7 +109,7 @@ const authFetch = async (url, options = {}) => {
       // Log response body for debugging before rejecting
       try {
         const text = await res.text()
-        console.warn("authFetch forbidden response body:", text)
+        if (DEBUG_STORAGE) console.warn("authFetch forbidden response body:", text)
       } catch (e) {}
       // Surface forbidden errors to caller
       return Promise.reject({ status: 403, message: "Forbidden" })
@@ -121,15 +169,15 @@ export const saveUser = async user => {
   if (!user.notifications) user.notifications = []
 
   try {
-    console.log("saveUser -> posting to /users/signup", { email: user.email })
+    if (DEBUG_STORAGE) console.log("saveUser -> posting to /users/signup", { email: user.email })
     const res = await authFetch(`${API_BASE}/users/signup`, {
       method: "POST",
       body: JSON.stringify(user)
     })
-    console.log("saveUser -> status", res.status)
+    if (DEBUG_STORAGE) console.log("saveUser -> status", res.status)
 
     const data = await safeJson(res)
-    console.log("saveUser -> response json", data)
+    if (DEBUG_STORAGE) console.log("saveUser -> response json", data)
 
     if (data?.user && data?.token) {
       saveAuth(data.user, data.token)
@@ -144,15 +192,15 @@ export const saveUser = async user => {
 
 export const login = async ({ email, password }) => {
   try {
-    console.log("login -> posting to /users/login", { email })
+    if (DEBUG_STORAGE) console.log("login -> posting to /users/login", { email })
     const res = await authFetch(`${API_BASE}/users/login`, {
       method: "POST",
       body: JSON.stringify({ email, password })
     })
-    console.log("login -> status", res.status)
+    if (DEBUG_STORAGE) console.log("login -> status", res.status)
 
     const data = await safeJson(res)
-    console.log("login -> response json", data)
+    if (DEBUG_STORAGE) console.log("login -> response json", data)
 
     if (data?.user && data?.token) {
       saveAuth(data.user, data.token)
@@ -168,11 +216,11 @@ export const login = async ({ email, password }) => {
 export const findUserByEmail = async email => {
   try {
     const encoded = encodeURIComponent(email)
-    console.log("findUserByEmail ->", encoded)
+    if (DEBUG_STORAGE) console.log("findUserByEmail ->", encoded)
     const res = await authFetch(`${API_BASE}/users/by-email/${encoded}`)
-    console.log("findUserByEmail status", res.status)
+    if (DEBUG_STORAGE) console.log("findUserByEmail status", res.status)
     const data = await safeJson(res)
-    console.log("findUserByEmail response", data)
+    if (DEBUG_STORAGE) console.log("findUserByEmail response", data)
     return data || null
   } catch (err) {
     console.error("findUserByEmail failed", err)
@@ -280,63 +328,103 @@ export const getSpacesForUser = async userSpaceIds => {
 // Message Management
 // --------------------
 
-export const getMessages = async chatId => {
+export const getMessages = async (chatId, options = {}) => {
   if (!chatId) return []
-  const cacheKey = `messages_cache_${chatId}`
-  const cacheTimeKey = `messages_cache_time_${chatId}`
-  const CACHE_TTL = 3000 // 3 seconds - only use very fresh cache
-  
-  try {
-    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
-    const cacheTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
-    
-    // Only return cache if it's VERY fresh (within 3 seconds)
-    // Otherwise always fetch from server to ensure we have latest messages
-    if (Array.isArray(cached) && (Date.now() - cacheTime < CACHE_TTL)) {
-      return cached
-    }
-  } catch (e) {}
+  const { forceRefresh = false, cacheTtl = 15000 } = options
+  const requestKey = String(chatId)
+  const { messages: cached, timestamp } = readMessagesCache(chatId)
 
-  // Fetch fresh data from server
-  try {
+  if (!forceRefresh && Array.isArray(cached) && Date.now() - timestamp < cacheTtl) {
+    return cached
+  }
+
+  if (messageRequestCache.has(requestKey)) {
+    return messageRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
     const res = await authFetch(`${API_BASE}/messages/${chatId}`)
     const data = await safeJson(res)
     const arr = ensureArray(data)
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(arr))
-      localStorage.setItem(cacheTimeKey, String(Date.now()))
-    } catch(e){}
+    writeMessagesCache(chatId, arr)
+    writeMessageCountCache(chatId, arr.length)
     return arr
-  } catch (err) {
-    // On network error, fall back to cache if available
-    try {
-      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+  })()
+    .catch(err => {
       if (Array.isArray(cached)) return cached
-    } catch (e) {}
-    if (err && err.status === 403) return []
-    throw err
-  }
+      if (err && err.status === 403) return []
+      throw err
+    })
+    .finally(() => {
+      messageRequestCache.delete(requestKey)
+    })
+
+  messageRequestCache.set(requestKey, request)
+  return request
 }
 
 export const saveMessage = async (chatId, message) => {
   // Optimistically persist to local cache so refreshes and other tabs see it immediately
   try {
-    const cacheKey = `messages_cache_${chatId}`
-    const cacheTimeKey = `messages_cache_time_${chatId}`
-    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const cached = peekMessages(chatId)
     const arr = Array.isArray(cached) ? cached : []
     // Avoid duplicates by checking if message ID already exists
     if (!arr.some(m => m.id === message.id)) {
       arr.push(message)
     }
-    localStorage.setItem(cacheKey, JSON.stringify(arr))
-    localStorage.setItem(cacheTimeKey, String(Date.now()))
+    writeMessagesCache(chatId, arr)
+    writeMessageCountCache(chatId, arr.length)
   } catch (e) {}
 
   await authFetch(`${API_BASE}/messages/${chatId}`, {
     method: "POST",
     body: JSON.stringify(message)
   })
+}
+
+export const getMessageCount = async (chatId, options = {}) => {
+  if (!chatId) return 0
+  const { forceRefresh = false, cacheTtl = 5000 } = options
+  const cacheKey = `messages_count_${chatId}`
+  const cacheTimeKey = `messages_count_time_${chatId}`
+  const requestKey = String(chatId)
+
+  let cachedCount = null
+  let cachedTime = 0
+  try {
+    cachedCount = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    cachedTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+  } catch (e) {}
+
+  if (!forceRefresh && Number.isFinite(cachedCount) && Date.now() - cachedTime < cacheTtl) {
+    return cachedCount
+  }
+
+  if (messageCountRequestCache.has(requestKey)) {
+    return messageCountRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/messages/${chatId}/count`)
+    const data = await safeJson(res)
+    const count = Number(data?.count) || 0
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(count))
+      localStorage.setItem(cacheTimeKey, String(Date.now()))
+    } catch (e) {}
+    return count
+  })()
+    .catch(err => {
+      if (Number.isFinite(cachedCount)) return cachedCount
+      if (err && err.status === 403) return 0
+      throw err
+    })
+    .finally(() => {
+      messageCountRequestCache.delete(requestKey)
+    })
+
+  messageCountRequestCache.set(requestKey, request)
+  return request
 }
 
 export const updateMessage = async (chatId, message) => {
