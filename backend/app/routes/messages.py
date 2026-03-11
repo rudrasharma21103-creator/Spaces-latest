@@ -82,8 +82,6 @@ def _check_channel_access(chat_id: str, user_id: int):
 
     channel_members = channel.get("members") or []
 
-    print(f"DEBUG _check_channel_access: user_id={user_id}, owner_id={owner_id}, space_members={space_members}, channel_members={channel_members}")
-
     # Helper: compare ids type-insensitively (str/int)
     def _id_in_list(uid, lst):
         if uid is None or not lst:
@@ -161,24 +159,25 @@ def _check_channel_access(chat_id: str, user_id: int):
 def get_messages(request: Request, chat_id: str):
     user_id = _get_user_id_from_request(request)
     has_access = _check_channel_access(chat_id, user_id) if user_id else False
-    print(f"DEBUG get_messages: chat_id={chat_id}, user_id={user_id}, has_access={has_access}")
 
     if user_id is None or not has_access:
-        # For development UX, return an empty list for chats the user cannot access.
-        # This avoids repeated 403 exceptions and reduces frontend polling overhead
-        # (the frontend already silently ignores empty lists for restricted channels).
-        try:
-            hdrs = dict(request.headers.items())
-            print("DEBUG get_messages denied headers:", {k: hdrs.get(k) for k in ["x-user-id", "X-User-Id", "authorization", "Authorization"]})
-        except Exception:
-            pass
         return []
 
     docs = messages_collection.find(
         {"chatId": chat_id},
         {"_id": 0}
-    )
+    ).sort("message.timestamp", 1)
     return [d["message"] for d in docs]
+
+
+@router.get("/{chat_id}/count")
+def get_message_count(request: Request, chat_id: str):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None or not _check_channel_access(chat_id, user_id):
+        return {"count": 0}
+
+    count = messages_collection.count_documents({"chatId": chat_id})
+    return {"count": count}
 
 
 @router.post("/{chat_id}")

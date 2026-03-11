@@ -35,8 +35,9 @@ try:
     spaces_collection.create_index("id", unique=True)
     spaces_collection.create_index("members")
     # Index for messages
-    messages_collection.create_index("channelId")
-    messages_collection.create_index("timestamp")
+    messages_collection.create_index("chatId")
+    messages_collection.create_index([("chatId", 1), ("message.id", 1)])
+    messages_collection.create_index([("chatId", 1), ("message.timestamp", 1)])
     # Tasks collection - index by assigned users and space for quick lookup
     tasks_collection.create_index("assigned_to")
     tasks_collection.create_index("space_id")

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react"
+import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from "react"
 import {
   Send,
   Hash,
@@ -45,13 +45,33 @@ import {
   Clock,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  PenTool,
+  Settings,
+  MoreVertical,
+  Smile,
+  LogOut
 } from "lucide-react"
+import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
 import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
+import {
+  AddToContextPopover,
+  ChannelTabs,
+  ContextBadge,
+  ContextsTabView,
+  CreateContextModal,
+  DecisionList,
+  FilesList,
+  LivingContextPanel,
+  MessageActionButton,
+  MessageActionsMenu,
+  MessageSelectionToggle,
+} from "./components/LivingContext"
+import { createContextRecord } from "./components/LivingContext.helpers"
 import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
 import AdminDashboard from "./AdminDashboard"
@@ -150,6 +170,7 @@ export default function CollaborationApp() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+  const [showLandingPage, setShowLandingPage] = useState(true) // Landing page state
   const [authMode, setAuthMode] = useState("login")
   const [authData, setAuthData] = useState({
     email: "",
@@ -178,6 +199,7 @@ export default function CollaborationApp() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
+  const [collapsedSpaceMenu, setCollapsedSpaceMenu] = useState(null)
 
   // Search State
   const [searchQuery, setSearchQuery] = useState("") // Spaces Search Input
@@ -194,6 +216,17 @@ export default function CollaborationApp() {
   const [pinnedMessageId, setPinnedMessageId] = useState(null)
   const [hoveredMessageId, setHoveredMessageId] = useState(null)
   const [showEmojiPickerFor, setShowEmojiPickerFor] = useState(null)
+  const [activeChannelTab, setActiveChannelTab] = useState("messages")
+  const [selectedMessageIds, setSelectedMessageIds] = useState([])
+  const [messageActionMenu, setMessageActionMenu] = useState(null)
+  const [messageContextPicker, setMessageContextPicker] = useState(null)
+  const [contextItems, setContextItems] = useState([])
+  const [contextDecisions, setContextDecisions] = useState([])
+  const [contextTasks, setContextTasks] = useState([])
+  const [openContextId, setOpenContextId] = useState(null)
+  const [contextDraft, setContextDraft] = useState(null)
+  const [editingContextId, setEditingContextId] = useState(null)
+  const [taskModalDraft, setTaskModalDraft] = useState(null)
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
@@ -207,6 +240,7 @@ export default function CollaborationApp() {
   const [showEventModal, setShowEventModal] = useState(false)
   const [showNewEventForm, setShowNewEventForm] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
+  const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
   const [tasksList, setTasksList] = useState([])
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -440,8 +474,10 @@ export default function CollaborationApp() {
   const [activeMeetingTitle, setActiveMeetingTitle] = useState("Meeting")
   const [activeCallId, setActiveCallId] = useState(null)
   const [incomingCall, setIncomingCall] = useState(null)
+  const [incomingCallCountdown, setIncomingCallCountdown] = useState(10) // 10 second countdown
   const videoRef = useRef(null)
   const incomingTimeoutRef = useRef(null)
+  const incomingCountdownRef = useRef(null)
   // Feature flag to enable live video calls in channels and chats
   const VIDEO_ENABLED = true
 
@@ -457,8 +493,10 @@ export default function CollaborationApp() {
   const [isWebRTCVideoOn, setIsWebRTCVideoOn] = useState(true)
   const [callStartTime, setCallStartTime] = useState(null)
   const [callDuration, setCallDuration] = useState(0)
+  const [callerCountdown, setCallerCountdown] = useState(30) // 30 second countdown for caller (only while waiting for answer)
   const [callParticipants, setCallParticipants] = useState([]) // Array of participants in the call
   const [pendingCallParticipants, setPendingCallParticipants] = useState([]) // Friends being called
+  const [pinnedParticipant, setPinnedParticipant] = useState(null) // Pinned user in video call
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const peerConnectionRef = useRef(null)
@@ -466,6 +504,7 @@ export default function CollaborationApp() {
   const callSocketRef = useRef(null)
   const userSocketRef = useRef(null)
   const callTimerRef = useRef(null)
+  const callerCountdownRef = useRef(null)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -494,10 +533,14 @@ export default function CollaborationApp() {
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const prevScrollHeightRef = useRef(0)
+  const messageScrollPositionsRef = useRef({})
   const chatSocketRef = useRef(null)
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
   const justSwitchedThreadRef = useRef(false)
+  const previousChannelTabRef = useRef("messages")
+  const restoreMessageScrollRef = useRef(false)
+  const collapsedSpaceMenuRef = useRef(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
@@ -957,8 +1000,7 @@ export default function CollaborationApp() {
           }
         }
 
-        // Poll for Unread Messages in Channels - only check channels user isn't currently viewing
-        // Use cached message counts instead of fetching all messages for every channel
+        // Poll for unread channels using lightweight counts instead of full history fetches.
         const allSpaces = await Storage.getSpaces()
         const channelsToCheck = []
         for (const space of allSpaces) {
@@ -970,16 +1012,12 @@ export default function CollaborationApp() {
         }
         
         // Only check a few channels per poll cycle to avoid overloading
-        const maxChannelsPerPoll = 3
+        const maxChannelsPerPoll = 5
         const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
         
         for (const ch of channelsThisCycle) {
           try {
-            const msgs = await Storage.getMessages(ch.id)
-            if (msgs === null) {
-              continue
-            }
-            const count = (msgs && msgs.length) || 0
+            const count = await Storage.getMessageCount(ch.id)
             const prevCount = messageCounts[ch.id] || 0
 
             // If new message AND channel not active, mark unread
@@ -1057,8 +1095,8 @@ export default function CollaborationApp() {
       }
     }
 
-    // Fast polling for real-time notifications
-    const interval = setInterval(pollData, 1000)
+    // Avoid hammering the API while still keeping unread badges reasonably fresh.
+    const interval = setInterval(pollData, 5000)
     return () => clearInterval(interval)
   }, [
     isAuthenticated,
@@ -1084,11 +1122,17 @@ export default function CollaborationApp() {
     // Clear unread when entering a channel
     if (activeView === "channel" && activeChannel && currentUser) {
       setUnreadChannels(prev => prev.filter(id => id !== activeChannel))
+      const inMemory = messages[activeChannel]
+      if (Array.isArray(inMemory)) {
+        messageCounts[activeChannel] = inMemory.length
+        setMessageCounts({ ...messageCounts })
+        return
+      }
       // Update current count reference
       ;(async () => {
         try {
-          const msgs = await Storage.getMessages(activeChannel)
-          messageCounts[activeChannel] = (msgs && msgs.length) || 0
+          const count = await Storage.getMessageCount(activeChannel, { forceRefresh: true })
+          messageCounts[activeChannel] = count
           setMessageCounts({ ...messageCounts })
         } catch (e) {
           if (e && e.status === 403) {
@@ -1100,7 +1144,7 @@ export default function CollaborationApp() {
         }
       })()
     }
-  }, [activeChannel, activeView, currentUser])
+  }, [activeChannel, activeView, currentUser, messages])
 
   useEffect(() => {
     let userSocket = null
@@ -1108,12 +1152,11 @@ export default function CollaborationApp() {
 
     if (isAuthenticated && currentUser) {
       const loadInitialData = async () => {
-        // Load spaces, users, friends, and events in parallel for faster startup
-        const [userSpaces, allUsers, friendsList, evts] = await Promise.all([
+        // Load core chat data first so UI becomes interactive quickly.
+        const [userSpaces, allUsers, friendsList] = await Promise.all([
           Storage.getSpacesForUser(currentUser.spaces).catch(() => []),
           Storage.getUsers().catch(() => []),
-          Storage.getFriends(currentUser.friends || []).catch(() => []),
-          Storage.getEvents().catch(() => [])
+          Storage.getFriends(currentUser.friends || []).catch(() => [])
         ])
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
@@ -1133,14 +1176,14 @@ export default function CollaborationApp() {
         setSpaces(enrichedSpaces)
         setUsers(Array.isArray(allUsers) ? allUsers : [])
         setFriends(Array.isArray(friendsList) ? friendsList : [])
-        setEvents(evts || [])
-        // Load tasks for current user (assigned or created)
-        try {
-          const t = await TasksService.getTasksForUser(currentUser.id)
-          setTasksList(Array.isArray(t) ? t : [])
-        } catch (e) {
-          console.warn('Failed to load tasks', e)
-        }
+
+        // Non-blocking: load secondary data after core UI is ready.
+        Storage.getEvents()
+          .then(evts => setEvents(evts || []))
+          .catch(() => {})
+        TasksService.getTasksForUser(currentUser.id)
+          .then(t => setTasksList(Array.isArray(t) ? t : []))
+          .catch(e => console.warn('Failed to load tasks', e))
 
         return enrichedSpaces
       }
@@ -1171,7 +1214,7 @@ export default function CollaborationApp() {
           }
         }
         
-        // Refresh again after a short delay to pick up background-refreshed data
+        // Refresh once shortly after first paint to pick up background-cached updates.
         refreshTimeout = setTimeout(async () => {
           const refreshedSpaces = await loadInitialData()
           // Update active space if we didn't have any before but now we do
@@ -1186,7 +1229,7 @@ export default function CollaborationApp() {
             setActiveSpace(firstSpace.id)
             if (accessibleChannel) setActiveChannel(accessibleChannel.id)
           }
-        }, 1500)
+        }, 600)
       })()
 
       // Open a background user socket to receive notifications in real-time
@@ -1299,11 +1342,19 @@ export default function CollaborationApp() {
                 // Incoming call - check if this message is for current user
                 if (String(data.targetUserId) === String(currentUser?.id)) {
                   console.log('Incoming WebRTC call from:', data.fromUserName)
-                  // Clear any existing timeout
+                  // Clear any existing timeouts and countdown
                   if (incomingTimeoutRef.current) {
                     clearTimeout(incomingTimeoutRef.current)
                     incomingTimeoutRef.current = null
                   }
+                  if (incomingCountdownRef.current) {
+                    clearInterval(incomingCountdownRef.current)
+                    incomingCountdownRef.current = null
+                  }
+                  
+                  // Reset countdown to 10 seconds
+                  setIncomingCallCountdown(10)
+                  
                   setIncomingCall({
                     id: `webrtc-${Date.now()}`,
                     fromId: data.fromUserId,
@@ -1312,9 +1363,29 @@ export default function CollaborationApp() {
                     webrtcOffer: data.offer,
                     isWebRTC: true
                   })
-                  // Auto-dismiss after 10 seconds if not answered
+                  
+                  // Start countdown interval
+                  incomingCountdownRef.current = setInterval(() => {
+                    setIncomingCallCountdown(prev => {
+                      if (prev <= 1) {
+                        // Time's up - clear and dismiss
+                        clearInterval(incomingCountdownRef.current)
+                        incomingCountdownRef.current = null
+                        setIncomingCall(null)
+                        return 10
+                      }
+                      return prev - 1
+                    })
+                  }, 1000)
+                  
+                  // Auto-dismiss after 10 seconds if not answered (backup)
                   incomingTimeoutRef.current = setTimeout(() => {
+                    if (incomingCountdownRef.current) {
+                      clearInterval(incomingCountdownRef.current)
+                      incomingCountdownRef.current = null
+                    }
                     setIncomingCall(null)
+                    setIncomingCallCountdown(10)
                     incomingTimeoutRef.current = null
                   }, 10000)
                 }
@@ -1500,9 +1571,20 @@ export default function CollaborationApp() {
     // Don't try to load messages if spaces haven't been loaded yet
     if (activeView === "channel" && spaces.length === 0) return
     
-    const loadMessages = async () => {
+    const cachedMessages = Storage.peekMessages(chatId)
+    if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
+      setMessages(prev => {
+        if (prev[chatId] === cachedMessages) return prev
+        return {
+          ...prev,
+          [chatId]: cachedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
+        }
+      })
+    }
+
+    const loadMessages = async (forceRefresh = false) => {
       try {
-        const storedMessages = await Storage.getMessages(chatId)
+        const storedMessages = await Storage.getMessages(chatId, { forceRefresh, cacheTtl: 15000 })
         const normalized = Array.isArray(storedMessages)
           ? storedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
           : []
@@ -1516,6 +1598,7 @@ export default function CollaborationApp() {
             [chatId]: [...normalized, ...optimisticOnly]
           }
         })
+        setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
       } catch (e) {
         if (e && e.status === 403) {
           // Only show access denied modal if user has spaces loaded (not initial load)
@@ -1530,9 +1613,9 @@ export default function CollaborationApp() {
         // Silently ignore other errors
       }
     }
-    loadMessages()
-    // Poll for messages as backup to WebSocket (WebSocket handles real-time delivery)
-    const interval = setInterval(loadMessages, 5000)
+    loadMessages(Boolean(cachedMessages.length === 0))
+    // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
+    const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
 
@@ -1690,6 +1773,11 @@ export default function CollaborationApp() {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
       setIsAtBottom(true)
       justSwitchedThreadRef.current = false
+      return
+    }
+
+    // 3.5) When restoring from Contexts/Files/Decisions back to Messages, don't auto-jump.
+    if (restoreMessageScrollRef.current) {
       return
     }
 
@@ -2485,6 +2573,11 @@ export default function CollaborationApp() {
     pc.oniceconnectionstatechange = () => {
       console.log('ICE connection state:', pc.iceConnectionState)
       if (pc.iceConnectionState === 'connected') {
+        // Clear the caller countdown since call is now connected
+        if (callerCountdownRef.current) {
+          clearInterval(callerCountdownRef.current)
+          callerCountdownRef.current = null
+        }
         setWebrtcCallStatus('connected')
       } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
         endWebRTCCall()
@@ -2509,6 +2602,8 @@ export default function CollaborationApp() {
     setWebrtcCallPartner(targetUser)
     setWebrtcCallStatus('calling')
     setShowWebRTCCall(true)
+    setPinnedParticipant(null) // Reset pinned participant
+    setCallerCountdown(30) // Reset countdown to 30 seconds
 
     try {
       // Get local media stream
@@ -2558,13 +2653,37 @@ export default function CollaborationApp() {
         console.error('No WebSocket available to send call request!')
       }
 
-      // Set timeout for unanswered call
+      // Start countdown for caller (30 seconds) - only while waiting for answer
+      if (callerCountdownRef.current) {
+        clearInterval(callerCountdownRef.current)
+      }
+      callerCountdownRef.current = setInterval(() => {
+        setCallerCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(callerCountdownRef.current)
+            callerCountdownRef.current = null
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+
+      // Backup timeout for unanswered call (30 seconds) - only ends if still in 'calling' state
       setTimeout(() => {
-        if (webrtcCallStatus === 'calling') {
-          setWebrtcError('Call not answered')
-          endWebRTCCall()
-        }
-      }, 60000)
+        // Check current status - the closure captures the old value, so we need to check via ref or state
+        setWebrtcCallStatus(currentStatus => {
+          if (currentStatus === 'calling') {
+            if (callerCountdownRef.current) {
+              clearInterval(callerCountdownRef.current)
+              callerCountdownRef.current = null
+            }
+            setWebrtcError('Call not answered')
+            // Delay the end call to allow error to show
+            setTimeout(() => endWebRTCCall(), 100)
+          }
+          return currentStatus
+        })
+      }, 30000)
 
     } catch (err) {
       console.error('Failed to start video call:', err)
@@ -2584,6 +2703,17 @@ export default function CollaborationApp() {
     const callerName = incomingCall.fromName
     const callerAvatar = incomingCall.fromAvatar
     const offer = incomingCall.webrtcOffer
+
+    // Clear incoming call countdown
+    if (incomingCountdownRef.current) {
+      clearInterval(incomingCountdownRef.current)
+      incomingCountdownRef.current = null
+    }
+    if (incomingTimeoutRef.current) {
+      clearTimeout(incomingTimeoutRef.current)
+      incomingTimeoutRef.current = null
+    }
+    setIncomingCallCountdown(10)
 
     setWebrtcError(null)
     setWebrtcCallPartner({
@@ -2737,6 +2867,12 @@ export default function CollaborationApp() {
       callTimerRef.current = null
     }
     
+    // Clear caller countdown if still running
+    if (callerCountdownRef.current) {
+      clearInterval(callerCountdownRef.current)
+      callerCountdownRef.current = null
+    }
+    
     // Stop all local tracks
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop())
@@ -2789,6 +2925,7 @@ export default function CollaborationApp() {
     setCallDuration(0)
     setCallParticipants([])
     setPendingCallParticipants([])
+    setPinnedParticipant(null)
     pendingIceCandidatesRef.current = []
   }
 
@@ -2836,6 +2973,13 @@ export default function CollaborationApp() {
       case 'webrtc-call-answer':
         // Call was answered - set remote description
         if (peerConnectionRef.current && String(data.targetUserId) === String(currentUser?.id)) {
+          // Clear caller countdown since call was answered
+          if (callerCountdownRef.current) {
+            clearInterval(callerCountdownRef.current)
+            callerCountdownRef.current = null
+          }
+          setCallerCountdown(30) // Reset to initial value
+          
           try {
             await peerConnectionRef.current.setRemoteDescription(
               new RTCSessionDescription(data.answer)
@@ -3047,6 +3191,73 @@ export default function CollaborationApp() {
   const EMOJIS = ['👍','❤️','😂','😮','😢','🎉','🔥']
   const longPressTimerRef = useRef(null)
 
+  const getAccessibleChannelsForSpace = space => {
+    if (!space || !currentUser) return []
+    return (space.channels || []).filter(channel => {
+      const chMembers = channel?.members || []
+      if (chMembers.length > 0) {
+        return chMembers.includes(currentUser.id) || space.ownerId === currentUser.id
+      }
+      const spaceMembers = space?.members || []
+      return space.ownerId === currentUser.id || spaceMembers.includes(currentUser.id)
+    })
+  }
+
+  const openCollapsedSpaceMenu = (space, event) => {
+    if (!space || !event?.currentTarget) return
+    const buttonRect = event.currentTarget.getBoundingClientRect()
+    const accessibleChannels = getAccessibleChannelsForSpace(space)
+
+    setCollapsedSpaceMenu(prev => {
+      if (prev?.spaceId === space.id) return null
+      return {
+        spaceId: space.id,
+        spaceName: space.name,
+        channels: accessibleChannels,
+        top: Math.max(16, buttonRect.top),
+        left: buttonRect.right + 12
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!collapsedSpaceMenu) return undefined
+
+    const handlePointerDown = event => {
+      if (collapsedSpaceMenuRef.current && !collapsedSpaceMenuRef.current.contains(event.target)) {
+        setCollapsedSpaceMenu(null)
+      }
+    }
+
+    const handleEscape = event => {
+      if (event.key === "Escape") {
+        setCollapsedSpaceMenu(null)
+      }
+    }
+
+    const handleViewportChange = () => {
+      setCollapsedSpaceMenu(null)
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleEscape)
+    window.addEventListener("resize", handleViewportChange)
+    window.addEventListener("scroll", handleViewportChange, true)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleEscape)
+      window.removeEventListener("resize", handleViewportChange)
+      window.removeEventListener("scroll", handleViewportChange, true)
+    }
+  }, [collapsedSpaceMenu])
+
+  useEffect(() => {
+    if (!sidebarCollapsed || isMobile) {
+      setCollapsedSpaceMenu(null)
+    }
+  }, [sidebarCollapsed, isMobile])
+
   const toggleReaction = async (chatId, messageId, emoji) => {
     if (!chatId || !currentUser) return
     const msgs = messages[chatId] || []
@@ -3244,7 +3455,7 @@ export default function CollaborationApp() {
           updateMessageMeta(chatId, localId, msg => ({ ...msg, status: "failed" }))
         } else {
           updateMessageMeta(chatId, localId, msg => ({ ...msg, status: "retrying" }))
-          const delay = Math.min(5000, 1200 * (attempt + 1))
+          const delay = Math.min(1200, 300 * (attempt + 1))
           setTimeout(() => persistMessageWithRetry(chatId, payload, localId, attempt + 1), delay)
         }
       })
@@ -3283,6 +3494,558 @@ export default function CollaborationApp() {
     return ""
   }
 
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("spacexyz-living-contexts-v1") || "{}")
+      setContextItems(Array.isArray(stored.contextItems) ? stored.contextItems : [])
+      setContextDecisions(Array.isArray(stored.contextDecisions) ? stored.contextDecisions : [])
+      setContextTasks(Array.isArray(stored.contextTasks) ? stored.contextTasks : [])
+    } catch (e) {
+      setContextItems([])
+      setContextDecisions([])
+      setContextTasks([])
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "spacexyz-living-contexts-v1",
+        JSON.stringify({ contextItems, contextDecisions, contextTasks })
+      )
+    } catch (e) {}
+  }, [contextItems, contextDecisions, contextTasks])
+
+  useEffect(() => {
+    setSelectedMessageIds([])
+    setMessageActionMenu(null)
+    setMessageContextPicker(null)
+    setOpenContextId(null)
+    setActiveChannelTab("messages")
+  }, [activeChannel, activeView])
+
+  useEffect(() => {
+    if (!openContextId) return undefined
+    const handleEscape = event => {
+      if (event.key === "Escape") {
+        setOpenContextId(null)
+        setMessageActionMenu(null)
+        setMessageContextPicker(null)
+      }
+    }
+    document.addEventListener("keydown", handleEscape)
+    return () => document.removeEventListener("keydown", handleEscape)
+  }, [openContextId])
+
+  useEffect(() => {
+    if (!messageActionMenu && !messageContextPicker) return undefined
+    const closeMenus = () => {
+      setMessageActionMenu(null)
+      setMessageContextPicker(null)
+    }
+    document.addEventListener("click", closeMenus)
+    return () => document.removeEventListener("click", closeMenus)
+  }, [messageActionMenu, messageContextPicker])
+
+  const currentChannelContexts = activeView === "channel"
+    ? contextItems.filter(context => String(context.channelId) === String(activeChannel))
+    : []
+
+  const contextsById = useMemo(
+    () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),
+    [contextItems]
+  )
+
+  const getContextOwnerName = ownerId => getUser(ownerId)?.name || "Unknown"
+
+  const formatContextTime = timestamp => {
+    if (!timestamp) return "now"
+    const time = new Date(timestamp).getTime()
+    if (Number.isNaN(time)) return "now"
+    const diffMinutes = Math.max(0, Math.round((Date.now() - time) / 60000))
+    if (diffMinutes < 1) return "just now"
+    if (diffMinutes < 60) return `${diffMinutes}m ago`
+    const diffHours = Math.round(diffMinutes / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    const diffDays = Math.round(diffHours / 24)
+    return `${diffDays}d ago`
+  }
+
+  const getMessageById = messageId => getCurrentMessages().find(message => String(message.id) === String(messageId))
+  const getTaskById = taskId => (tasksList || []).find(task => String(task.id) === String(taskId))
+
+  const getMessageContexts = message =>
+    (message?.contextIds || [])
+      .map(contextId => contextsById[String(contextId)])
+      .filter(Boolean)
+
+  const isContextManager = context => {
+    if (!context || !currentUser) return false
+    const role = getChannelRole(currentUser.id)
+    return String(context.ownerId) === String(currentUser.id) || role === "owner" || role === "admin"
+  }
+
+  const patchMessage = async (messageId, updater) => {
+    const chatId = getActiveChatId()
+    if (!chatId || !messageId) return null
+    const current = (messages[chatId] || []).find(message => String(message.id) === String(messageId))
+    if (!current) return null
+    const updated = updater({
+      ...current,
+      contextIds: Array.isArray(current.contextIds) ? current.contextIds : [],
+      attachments: Array.isArray(current.attachments) ? current.attachments : [],
+    })
+    setMessages(prev => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map(message =>
+        String(message.id) === String(messageId) ? updated : message
+      ),
+    }))
+    try {
+      await Storage.updateMessage(chatId, sanitizeMessagePayload(updated))
+    } catch (e) {
+      console.error("Failed to update message metadata", e)
+    }
+    return updated
+  }
+
+  const appendContextActivity = (context, activity) => ({
+    ...context,
+    contributorIds: Array.from(new Set([...(context.contributorIds || []), activity.userId])),
+    activity: [...(context.activity || []), activity],
+    updatedAt: activity.timestamp,
+  })
+
+  const ensureDecisionForContext = (contextId, message) => {
+    if (!contextId || !message || !message.isDecision) return null
+    const existing = contextDecisions.find(
+      item => String(item.contextId) === String(contextId) && String(item.messageId) === String(message.id)
+    )
+    if (existing) return existing.id
+    const decision = {
+      id: `decision-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      contextId,
+      messageId: message.id,
+      text: message.text || "Decision captured",
+      createdBy: currentUser?.id,
+      createdAt: new Date().toISOString(),
+    }
+    setContextDecisions(prev => [...prev, decision])
+    return decision.id
+  }
+
+  const ensureTaskForContext = (contextId, taskPayload) => {
+    if (!contextId || !taskPayload?.id) return null
+    const exists = contextTasks.find(
+      item => String(item.contextId) === String(contextId) && String(item.id) === String(taskPayload.id)
+    )
+    if (exists) return exists.id
+    const item = {
+      id: taskPayload.id,
+      contextId,
+      taskId: taskPayload.id,
+      messageId: taskPayload.sourceMessageId || null,
+      text: taskPayload.message,
+      assigneeIds: taskPayload.assigned_to || [],
+      status: taskPayload.status || "pending",
+      createdBy: taskPayload.created_by,
+      createdAt: taskPayload.timestamp || new Date().toISOString(),
+    }
+    setContextTasks(prev => [...prev, item])
+    return item.id
+  }
+
+  const createOrUpdateContextFromDraft = async () => {
+    if (!contextDraft?.title?.trim() || !currentUser || activeView !== "channel") return
+    const now = new Date().toISOString()
+    const messageIds = Array.from(new Set(contextDraft.messageIds || []))
+    if (editingContextId) {
+      setContextItems(prev =>
+        prev.map(context => {
+          if (String(context.id) !== String(editingContextId)) return context
+          if (!isContextManager(context)) return context
+          const updated = { ...context }
+          const statusChanged = updated.status !== contextDraft.status
+          updated.title = contextDraft.title.trim()
+          updated.summary = contextDraft.summary.trim()
+          updated.status = contextDraft.status
+          updated.ownerId = contextDraft.ownerId
+          updated.updatedAt = now
+          if (statusChanged) {
+            updated.activity = [
+              ...(updated.activity || []),
+              {
+                id: `activity-status-${Date.now()}`,
+                type: "status_changed",
+                userId: currentUser.id,
+                from: context.status,
+                to: contextDraft.status,
+                timestamp: now,
+              },
+            ]
+          }
+          return updated
+        })
+      )
+      setContextDraft(null)
+      setEditingContextId(null)
+      return
+    }
+
+    const created = createContextRecord({
+      channelId: activeChannel,
+      title: contextDraft.title.trim(),
+      summary: contextDraft.summary.trim(),
+      status: contextDraft.status,
+      ownerId: contextDraft.ownerId,
+      createdBy: currentUser.id,
+      linkedMessageIds: messageIds,
+    })
+
+    let nextContext = { ...created }
+
+    for (const messageId of messageIds) {
+      const updatedMessage = await patchMessage(messageId, message => ({
+        ...message,
+        contextIds: Array.from(new Set([...(message.contextIds || []), created.id])),
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+      }))
+      if (!updatedMessage) continue
+      const attachmentIds = (updatedMessage.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
+      const decisionId = ensureDecisionForContext(created.id, updatedMessage)
+      nextContext = appendContextActivity(nextContext, {
+        id: `activity-message-${messageId}-${Date.now()}`,
+        type: "message_added",
+        userId: currentUser.id,
+        messageId,
+        timestamp: now,
+      })
+      attachmentIds.forEach(fileId => {
+        nextContext = appendContextActivity(nextContext, {
+          id: `activity-file-${fileId}-${Date.now()}`,
+          type: "file_added",
+          userId: currentUser.id,
+          fileId,
+          timestamp: now,
+        })
+      })
+      nextContext.linkedFileIds = Array.from(new Set([...(nextContext.linkedFileIds || []), ...attachmentIds]))
+      if (decisionId) {
+        nextContext = appendContextActivity(nextContext, {
+          id: `activity-decision-seed-${decisionId}-${Date.now()}`,
+          type: "decision_added",
+          userId: currentUser.id,
+          decisionId,
+          timestamp: now,
+        })
+        nextContext.decisionIds = Array.from(new Set([...(nextContext.decisionIds || []), decisionId]))
+      }
+      if (updatedMessage.taskId) {
+        const sourceTask = getTaskById(updatedMessage.taskId)
+        const taskId = ensureTaskForContext(created.id, sourceTask || {
+          id: updatedMessage.taskId,
+          message: updatedMessage.text || "Task captured from message",
+          assigned_to: [],
+          status: "pending",
+          created_by: updatedMessage.userId,
+          timestamp: updatedMessage.timestamp,
+          sourceMessageId: updatedMessage.id,
+        })
+        if (taskId) {
+          nextContext = appendContextActivity(nextContext, {
+            id: `activity-task-seed-${taskId}-${Date.now()}`,
+            type: "task_added",
+            userId: currentUser.id,
+            taskId,
+            timestamp: now,
+          })
+          nextContext.taskIds = Array.from(new Set([...(nextContext.taskIds || []), taskId]))
+        }
+      }
+    }
+
+    setContextItems(prev => [...prev, nextContext])
+    setContextDraft(null)
+    setSelectedMessageIds([])
+    setOpenContextId(created.id)
+    setActiveChannelTab("messages")
+  }
+
+  const addMessageToContext = async (contextId, messageId) => {
+    const message = getMessageById(messageId)
+    if (!message) return
+    const now = new Date().toISOString()
+    await patchMessage(messageId, current => ({
+      ...current,
+      contextIds: Array.from(new Set([...(current.contextIds || []), contextId])),
+    }))
+    const decisionId = ensureDecisionForContext(contextId, message)
+    setContextItems(prev =>
+      prev.map(context => {
+        if (String(context.id) !== String(contextId)) return context
+        const next = appendContextActivity(context, {
+          id: `activity-added-${messageId}-${Date.now()}`,
+          type: "message_added",
+          userId: currentUser.id,
+          messageId,
+          timestamp: now,
+        })
+        const attachmentIds = (message.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
+        let withFiles = next
+        attachmentIds.forEach(fileId => {
+          withFiles = appendContextActivity(withFiles, {
+            id: `activity-file-added-${fileId}-${Date.now()}`,
+            type: "file_added",
+            userId: currentUser.id,
+            fileId,
+            timestamp: now,
+          })
+        })
+        let withDerived = withFiles
+        if (decisionId) {
+          withDerived = appendContextActivity(withDerived, {
+            id: `activity-decision-added-${decisionId}-${Date.now()}`,
+            type: "decision_added",
+            userId: currentUser.id,
+            decisionId,
+            timestamp: now,
+          })
+        }
+        let derivedTaskIds = withDerived.taskIds || []
+        if (message.taskId) {
+          const sourceTask = getTaskById(message.taskId)
+          const taskId = ensureTaskForContext(contextId, sourceTask || {
+            id: message.taskId,
+            message: message.text || "Task captured from message",
+            assigned_to: [],
+            status: "pending",
+            created_by: message.userId,
+            timestamp: message.timestamp,
+            sourceMessageId: message.id,
+          })
+          if (taskId) {
+            withDerived = appendContextActivity(withDerived, {
+              id: `activity-task-added-${taskId}-${Date.now()}`,
+              type: "task_added",
+              userId: currentUser.id,
+              taskId,
+              timestamp: now,
+            })
+            derivedTaskIds = Array.from(new Set([...(withDerived.taskIds || []), taskId]))
+          }
+        }
+        return {
+          ...withDerived,
+          linkedMessageIds: Array.from(new Set([...(withDerived.linkedMessageIds || []), messageId])),
+          linkedFileIds: Array.from(new Set([...(withDerived.linkedFileIds || []), ...attachmentIds])),
+          decisionIds: decisionId ? Array.from(new Set([...(withDerived.decisionIds || []), decisionId])) : withDerived.decisionIds || [],
+          taskIds: derivedTaskIds,
+        }
+      })
+    )
+    setMessageContextPicker(null)
+    setSelectedMessageIds(prev => Array.from(new Set([...prev.filter(id => String(id) !== String(messageId)), messageId])))
+  }
+
+  const toggleMessageSelection = messageId => {
+    setSelectedMessageIds(prev =>
+      prev.some(id => String(id) === String(messageId))
+        ? prev.filter(id => String(id) !== String(messageId))
+        : [...prev, messageId]
+    )
+  }
+
+  const openCreateContextModal = messageIds => {
+    if (!currentUser) return
+    setEditingContextId(null)
+    setContextDraft({
+      title: "",
+      summary: "",
+      status: "active",
+      ownerId: String(currentUser.id),
+      messageIds: Array.from(new Set(messageIds)),
+    })
+    setMessageActionMenu(null)
+  }
+
+  const markMessageDecision = async message => {
+    if (!message) return
+    const updatedMessage = await patchMessage(message.id, current => ({
+      ...current,
+      isDecision: !current.isDecision,
+    }))
+    const nextState = Boolean(updatedMessage?.isDecision)
+    const targetContextIds = openContextId
+      ? [openContextId]
+      : (updatedMessage?.contextIds || [])
+    if (nextState) {
+      targetContextIds.forEach(contextId => {
+        const decisionId = ensureDecisionForContext(contextId, updatedMessage)
+        if (!decisionId) return
+        setContextItems(prev =>
+          prev.map(context =>
+            String(context.id) === String(contextId)
+              ? {
+                  ...appendContextActivity(context, {
+                    id: `activity-decision-${decisionId}-${Date.now()}`,
+                    type: "decision_added",
+                    userId: currentUser.id,
+                    decisionId,
+                    timestamp: new Date().toISOString(),
+                  }),
+                  decisionIds: Array.from(new Set([...(context.decisionIds || []), decisionId])),
+                }
+              : context
+          )
+        )
+      })
+    } else {
+      const removedDecisionIds = contextDecisions
+        .filter(item => String(item.messageId) === String(message.id))
+        .map(item => item.id)
+      setContextDecisions(prev => prev.filter(item => String(item.messageId) !== String(message.id)))
+      setContextItems(prev =>
+        prev.map(context => ({
+          ...context,
+          decisionIds: (context.decisionIds || []).filter(decisionId => !removedDecisionIds.includes(decisionId)),
+        }))
+      )
+    }
+    setMessageActionMenu(null)
+  }
+
+  const openTaskFromMessage = message => {
+    setTaskModalDraft({
+      sourceMessageId: message.id,
+      initialTaskText: message.text || "",
+      initialAssignees: [],
+      contextId: openContextId || (message.contextIds || [])[0] || null,
+    })
+    setShowTaskModal(true)
+    setMessageActionMenu(null)
+  }
+
+  const currentChannelFiles = useMemo(
+    () =>
+      getCurrentMessages().flatMap(message =>
+        (message.attachments || []).map(att => ({
+          id: `${message.id}-${att.fileId || att.id}`,
+          name: att.name || "Attachment",
+          messageId: message.id,
+          messageLabel: message.text || "Shared in channel",
+          sourceLabel: att.source || "chat",
+          fileId: att.fileId || att.id,
+          author: getUser(message.userId)?.name || "Unknown",
+          timestamp: message.timestamp,
+          url: att.url || att.public_url || att.webViewLink || null,
+          mimeType: att.type || att.mimeType || att.mimetype || "",
+          size: att.size || 0,
+        }))
+      ),
+    [messages, activeChannel, activeView, users, friends, currentUser]
+  )
+
+  const currentChannelDecisionItems = getCurrentMessages()
+    .filter(message => message.isDecision)
+    .map(message => ({
+      id: `decision-inline-${message.id}`,
+      messageId: message.id,
+      text: message.text || "Decision captured",
+      author: getUser(message.userId)?.name || "Unknown",
+      createdAt: message.timestamp,
+    }))
+
+  const openContext = contextId => {
+    setOpenContextId(contextId)
+    setMessageActionMenu(null)
+    setMessageContextPicker(null)
+  }
+
+  const currentContext = openContextId ? contextItems.find(context => String(context.id) === String(openContextId)) : null
+
+  const currentContextFiles = currentContext
+    ? currentChannelFiles.filter(file =>
+        (currentContext.linkedFileIds || []).some(fileId => String(fileId) === String(file.fileId))
+      )
+    : []
+
+  const currentContextDecisions = currentContext
+    ? contextDecisions.filter(item =>
+        String(item.contextId) === String(currentContext.id) ||
+        (currentContext.decisionIds || []).some(decisionId => String(decisionId) === String(item.id))
+      )
+    : []
+
+  const currentContextTasks = currentContext
+    ? contextTasks.filter(item =>
+        String(item.contextId) === String(currentContext.id) ||
+        (currentContext.taskIds || []).some(taskId => String(taskId) === String(item.id))
+      )
+    : []
+
+  const currentContextMessages = currentContext
+    ? (currentContext.linkedMessageIds || [])
+        .map(messageId => getMessageById(messageId))
+        .filter(Boolean)
+        .map(message => ({
+          id: message.id,
+          text: message.text,
+          timestamp: message.timestamp,
+          author: getUser(message.userId)?.name || "Unknown",
+        }))
+    : []
+
+  const currentContextActivity = currentContext
+    ? (currentContext.activity || []).map(item => {
+        const actor = getUser(item.userId)?.name || "Someone"
+        if (item.type === "created") return { ...item, label: `${actor} created this context` }
+        if (item.type === "message_added") return { ...item, label: `${actor} linked a message` }
+        if (item.type === "decision_added") return { ...item, label: `${actor} added a decision` }
+        if (item.type === "task_added") return { ...item, label: `${actor} added a task` }
+        if (item.type === "file_added") return { ...item, label: `${actor} linked a file` }
+        if (item.type === "status_changed") return { ...item, label: `${actor} changed status to ${item.to}` }
+        return { ...item, label: `${actor} updated context` }
+      })
+    : []
+
+  useEffect(() => {
+    if (activeView !== "channel") return
+    const activeChatId = getActiveChatId()
+    if (!activeChatId) return
+
+    const previousTab = previousChannelTabRef.current
+    if (previousTab === "messages" && activeChannelTab !== "messages") {
+      const container = messagesContainerRef.current
+      if (container) {
+        messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
+      }
+    }
+
+    if (previousTab !== "messages" && activeChannelTab === "messages") {
+      restoreMessageScrollRef.current = true
+    }
+
+    previousChannelTabRef.current = activeChannelTab
+  }, [activeChannelTab, activeView, activeChannel, activeDMUser])
+
+  useLayoutEffect(() => {
+    if (activeChannelTab !== "messages" || !restoreMessageScrollRef.current) return
+    const activeChatId = getActiveChatId()
+    if (!activeChatId) return
+
+    const container = messagesContainerRef.current
+    if (!container) return
+    const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
+    if (typeof savedScrollTop === "number") {
+      container.scrollTop = savedScrollTop
+      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+      setIsAtBottom(atBottom)
+      prevScrollHeightRef.current = container.scrollHeight
+    }
+    restoreMessageScrollRef.current = false
+  }, [activeChannelTab, activeChannel, activeDMUser, messages])
+
   // --- Actions ---
 
   const handleChannelNavigation = (spaceId, channelId) => {
@@ -3307,6 +4070,7 @@ export default function CollaborationApp() {
     setActiveSpace(spaceId)
     setActiveChannel(channelId)
     setActiveView("channel")
+    setCollapsedSpaceMenu(null)
     // When navigating to a channel, collapse the friends sidebar for focused view
     setFriendsSidebarCollapsed(true)
     // Indicate a manual thread switch so scroll logic jumps directly to latest (no long smooth animation)
@@ -3454,6 +4218,9 @@ export default function CollaborationApp() {
       timestamp: new Date().toISOString(),
       reactions: {},
       thread: [],
+      contextIds: [],
+      isDecision: false,
+      taskId: null,
       attachments,
       status: "sending",
       optimistic: true
@@ -3857,6 +4624,17 @@ export default function CollaborationApp() {
 
   const declineCall = async () => {
     if (incomingCall) {
+      // Clear countdown timers
+      if (incomingCountdownRef.current) {
+        clearInterval(incomingCountdownRef.current)
+        incomingCountdownRef.current = null
+      }
+      if (incomingTimeoutRef.current) {
+        clearTimeout(incomingTimeoutRef.current)
+        incomingTimeoutRef.current = null
+      }
+      setIncomingCallCountdown(10)
+      
       // Handle WebRTC calls
       if (incomingCall.isWebRTC) {
         declineWebRTCCall()
@@ -4116,6 +4894,452 @@ export default function CollaborationApp() {
 
   // --- Render ---
 
+  // Landing Page Component
+  const LandingPage = () => (
+    <div className={`min-h-screen font-sans relative overflow-x-hidden ${
+      isDarkMode ? 'bg-[#070b14] text-white' : 'bg-[#f3f7fb] text-slate-950'
+    }`}>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className={`absolute inset-0 ${
+          isDarkMode
+            ? 'bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_28%),radial-gradient(circle_at_80%_12%,_rgba(251,146,60,0.12),_transparent_24%),radial-gradient(circle_at_bottom_right,_rgba(168,85,247,0.16),_transparent_32%),linear-gradient(180deg,#070b14_0%,#09111f_45%,#070b14_100%)]'
+            : 'bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.22),_transparent_24%),radial-gradient(circle_at_78%_10%,_rgba(191,219,254,0.20),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(165,180,252,0.16),_transparent_28%),linear-gradient(180deg,#f3f7fb_0%,#edf4fb_48%,#e7f0f8_100%)]'
+        }`} />
+        <div className={`absolute -top-24 right-[8%] h-72 w-72 rounded-full blur-3xl ${
+          isDarkMode ? 'bg-cyan-400/10' : 'bg-sky-300/30'
+        }`} />
+        <div className={`absolute bottom-0 left-[5%] h-96 w-96 rounded-full blur-3xl ${
+          isDarkMode ? 'bg-fuchsia-500/10' : 'bg-blue-200/25'
+        }`} />
+        <div
+          className={`absolute inset-0 opacity-[0.05] ${
+            isDarkMode
+              ? 'bg-[linear-gradient(rgba(255,255,255,0.4)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.4)_1px,transparent_1px)]'
+              : 'bg-[linear-gradient(rgba(15,23,42,0.16)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.16)_1px,transparent_1px)]'
+          }`}
+          style={{ backgroundSize: '72px 72px' }}
+        />
+      </div>
+
+      <nav className="relative z-20 px-4 py-5 sm:px-6">
+        <div className={`mx-auto flex max-w-7xl items-center justify-between rounded-full border px-4 py-3 sm:px-6 ${
+          isDarkMode
+            ? 'border-white/10 bg-slate-950/60 backdrop-blur-xl'
+            : 'border-slate-900/10 bg-white/75 backdrop-blur-xl shadow-[0_20px_60px_rgba(15,23,42,0.08)]'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
+              isDarkMode ? 'bg-white/5 ring-1 ring-white/10' : 'bg-slate-950 ring-1 ring-slate-900/10'
+            }`}>
+              <img src="/New%20logo.png" alt="Spaces logo" className="h-7 w-7 object-contain" />
+            </div>
+            <div>
+              <p className="text-lg font-black tracking-tight">Spaces</p>
+              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Calm collaboration for focused teams</p>
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-8 md:flex">
+            {[
+              ['Overview', 'showcase'],
+              ['Features', 'features'],
+              ['Teams', 'usecases'],
+            ].map(([label, id]) => (
+              <button
+                key={id}
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
+                className={`text-sm font-semibold transition-colors ${
+                  isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-950'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setIsDarkMode(!isDarkMode)
+                localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
+              }}
+              className={`flex h-11 w-11 items-center justify-center rounded-full border transition-colors ${
+                isDarkMode
+                  ? 'border-white/10 bg-white/5 text-amber-300 hover:bg-white/10'
+                  : 'border-slate-900/10 bg-white text-slate-600 hover:bg-slate-100'
+              }`}
+              aria-label="Toggle theme"
+            >
+              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('login'); }}
+              className={`hidden rounded-full px-4 py-2 text-sm font-semibold sm:block ${
+                isDarkMode ? 'text-slate-300 hover:bg-white/5 hover:text-white' : 'text-slate-700 hover:bg-slate-900/5'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+              className="rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 px-4 py-2 text-sm font-bold text-white shadow-[0_14px_40px_rgba(59,130,246,0.34)] transition-transform hover:scale-[1.03]"
+            >
+              Start Free
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <section className="relative z-10 px-4 pb-14 pt-10 sm:px-6 sm:pb-20 sm:pt-16">
+        <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <div>
+            <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] ${
+              isDarkMode ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200' : 'border-cyan-600/15 bg-white/70 text-cyan-800'
+            }`}>
+              <Sparkles className="h-3.5 w-3.5" />
+              Built for teams that hate clutter
+            </div>
+
+            <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[0.92] tracking-[-0.05em] sm:text-6xl lg:text-7xl xl:text-[5.4rem]">
+              Team chat,
+              <span className={`block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>files, tasks, and calls</span>
+              <span className="block bg-gradient-to-r from-cyan-400 via-blue-500 to-orange-400 bg-clip-text text-transparent">in one sharp workspace.</span>
+            </h1>
+
+            <p className={`mt-6 max-w-2xl text-base leading-8 sm:text-lg ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-700'
+            }`}>
+              Spaces pulls conversation, docs, meetings, and ownership into a single interface so your team stops jumping between tabs and starts shipping.
+            </p>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <button
+                onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+                className="rounded-full bg-slate-950 px-7 py-4 text-sm font-bold text-white shadow-[0_18px_50px_rgba(15,23,42,0.28)] transition-transform hover:scale-[1.02] dark:bg-white dark:text-slate-950"
+              >
+                Create your Space
+              </button>
+              <button
+                onClick={() => document.getElementById('showcase')?.scrollIntoView({ behavior: 'smooth' })}
+                className={`rounded-full border px-7 py-4 text-sm font-bold transition-colors ${
+                  isDarkMode
+                    ? 'border-white/12 bg-white/5 text-white hover:bg-white/10'
+                    : 'border-slate-900/10 bg-white/70 text-slate-900 hover:bg-white'
+                }`}
+              >
+                See the interface
+              </button>
+            </div>
+
+            <div className="mt-10 grid gap-4 sm:grid-cols-3">
+              {[
+                ['Messages', 'Realtime chat with threads, DMs, and shared context'],
+                ['Documents', 'Google apps and files connected directly inside work'],
+                ['Ownership', 'Tasks and action items live where decisions happen'],
+              ].map(([title, desc]) => (
+                <div
+                  key={title}
+                  className={`rounded-[1.6rem] border p-4 ${
+                    isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/70'
+                  }`}
+                >
+                  <p className="text-sm font-bold">{title}</p>
+                  <p className={`mt-2 text-sm leading-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative">
+            <div className={`absolute inset-6 rounded-[2rem] blur-3xl ${
+              isDarkMode ? 'bg-cyan-500/15' : 'bg-blue-400/20'
+            }`} />
+            <div className={`relative rounded-[2rem] border p-3 shadow-[0_30px_90px_rgba(15,23,42,0.16)] ${
+              isDarkMode ? 'border-white/10 bg-slate-950/70' : 'border-white/80 bg-white/80'
+            }`}>
+              <div className={`flex items-center justify-between rounded-[1.35rem] border px-4 py-3 ${
+                isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-slate-50'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                </div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Live workspace</p>
+              </div>
+              <img src="/image 10.png" alt="Spaces workspace preview" className="mt-3 w-full rounded-[1.5rem] object-cover" />
+            </div>
+            <div className={`absolute -bottom-6 -left-2 max-w-[240px] rounded-[1.6rem] border p-4 backdrop-blur-xl sm:-left-8 ${
+              isDarkMode ? 'border-white/10 bg-slate-950/80' : 'border-white/80 bg-white/85'
+            }`}>
+              <p className="text-sm font-bold">One view, less noise</p>
+              <p className={`mt-2 text-sm leading-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                The landing page now leads with the real interface instead of abstract filler.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="showcase" className="relative z-10 px-4 py-10 sm:px-6 sm:py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-8 flex items-end justify-between gap-4">
+            <div>
+              <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>Product walkthrough</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Use the actual product visuals.</h2>
+            </div>
+            <button
+              onClick={() => setShowDemoModal(true)}
+              className={`hidden rounded-full border px-5 py-3 text-sm font-bold md:block ${
+                isDarkMode ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-slate-900/10 bg-white/70 hover:bg-white'
+              }`}
+            >
+              Open preview
+            </button>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
+            <div className={`overflow-hidden rounded-[2rem] border p-3 ${
+              isDarkMode ? 'border-white/10 bg-slate-950/70' : 'border-white/80 bg-white/80'
+            }`}>
+              <img src="/image 10.png" alt="Spaces full workspace interface" className="w-full rounded-[1.5rem] object-cover" />
+            </div>
+            <div className="grid gap-6">
+              <div className={`rounded-[2rem] border p-3 ${
+                isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
+              }`}>
+                <img src="/image 11.png" alt="Spaces messaging interface" className="w-full rounded-[1.4rem] object-cover" />
+              </div>
+              <div className={`rounded-[2rem] border p-6 ${
+                isDarkMode ? 'border-white/10 bg-gradient-to-br from-orange-500/10 to-cyan-500/10' : 'border-slate-900/8 bg-gradient-to-br from-orange-50 to-cyan-50'
+              }`}>
+                <p className="text-lg font-bold">What changed</p>
+                <ul className={`mt-4 space-y-3 text-sm leading-6 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />The hero has clearer hierarchy and stronger contrast.</li>
+                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />Your screenshots are the core visual story.</li>
+                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />The page is full-width now instead of boxed by default Vite root styles.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" className="relative z-10 px-4 py-14 sm:px-6 sm:py-20">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-10 max-w-3xl">
+            <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-orange-300' : 'text-orange-700'}`}>Why it feels better</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">A landing page with direction, not random blocks.</h2>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              { icon: MessageSquare, title: 'Context-first chat', desc: 'Channels, threads, and reactions stay attached to the work instead of floating in another app.' },
+              { icon: Grid3x3, title: 'Connected tools', desc: 'Drive, Docs, Sheets, Slides, and Gmail attachments can live inside the same workspace.' },
+              { icon: ClipboardList, title: 'Actionable work', desc: 'Turn messages into tasks before ownership disappears.' },
+              { icon: Video, title: 'Calls on demand', desc: 'Jump into meetings from the exact place the conversation is happening.' },
+            ].map(({ icon: Icon, title, desc }) => (
+              <div
+                key={title}
+                className={`rounded-[2rem] border p-6 ${
+                  isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
+                }`}
+              >
+                <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${
+                  isDarkMode ? 'bg-white/8 text-cyan-300' : 'bg-slate-950 text-white'
+                }`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-5 text-xl font-bold">{title}</h3>
+                <p className={`mt-3 text-sm leading-7 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="usecases" className="relative z-10 px-4 py-14 sm:px-6 sm:py-20">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr]">
+          <div className={`rounded-[2.25rem] border p-8 ${
+            isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
+          }`}>
+            <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-violet-300' : 'text-violet-700'}`}>Built for</p>
+            <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">Student teams, startups, and compact orgs that need clarity fast.</h2>
+            <p className={`mt-5 text-sm leading-7 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+              The app already does a lot. The landing page should explain that value quickly instead of overwhelming people before they even sign in.
+            </p>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2">
+            {[
+              { title: 'College projects', desc: 'Keep every channel, file, and task attached to one shared workspace.', icon: GraduationCap },
+              { title: 'Small startups', desc: 'Replace chat sprawl with a product space that actually matches your workflow.', icon: Briefcase },
+              { title: 'Cross-functional teams', desc: 'Messages, docs, and decisions stop disappearing across separate tools.', icon: Users },
+              { title: 'Ops-heavy groups', desc: 'Calls, checklists, and shared files sit together so handoffs stay clean.', icon: ShieldAlert },
+            ].map(({ title, desc, icon: Icon }) => (
+              <div
+                key={title}
+                className={`rounded-[2rem] border p-6 ${
+                  isDarkMode ? 'border-white/10 bg-slate-950/60' : 'border-slate-900/8 bg-white/80'
+                }`}
+              >
+                <Icon className={`h-6 w-6 ${isDarkMode ? 'text-orange-300' : 'text-orange-600'}`} />
+                <h3 className="mt-4 text-xl font-bold">{title}</h3>
+                <p className={`mt-3 text-sm leading-7 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative z-10 px-4 py-14 sm:px-6 sm:py-20">
+        <div className={`mx-auto flex max-w-6xl flex-col items-start justify-between gap-8 rounded-[2.5rem] border p-8 sm:p-12 lg:flex-row lg:items-center ${
+          isDarkMode
+            ? 'border-white/10 bg-[linear-gradient(135deg,rgba(8,47,73,0.45),rgba(88,28,135,0.35),rgba(124,45,18,0.35))]'
+            : 'border-white/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.85),rgba(224,242,254,0.9),rgba(255,237,213,0.95))]'
+        }`}>
+          <div className="max-w-2xl">
+            <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-cyan-200' : 'text-cyan-800'}`}>Ready to launch</p>
+            <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">Make the first screen feel as strong as the product idea.</h2>
+            <p className={`mt-4 text-sm leading-7 sm:text-base ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              Start with signup, or preview the interface again before you decide.
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('signup'); }}
+              className="rounded-full bg-slate-950 px-7 py-4 text-sm font-bold text-white transition-transform hover:scale-[1.02] dark:bg-white dark:text-slate-950"
+            >
+              Get Started
+            </button>
+            <button
+              onClick={() => { setShowLandingPage(false); setAuthMode('login'); }}
+              className={`rounded-full border px-7 py-4 text-sm font-bold ${
+                isDarkMode ? 'border-white/12 bg-white/5 text-white hover:bg-white/10' : 'border-slate-900/10 bg-white/80 text-slate-900 hover:bg-white'
+              }`}
+            >
+              Sign In
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <footer className={`relative z-10 px-4 py-8 sm:px-6 sm:py-12 ${
+        isDarkMode ? 'text-slate-500' : 'text-slate-600'
+      }`}>
+        <div className={`mx-auto flex max-w-7xl flex-col gap-4 border-t pt-6 sm:flex-row sm:items-center sm:justify-between ${
+          isDarkMode ? 'border-white/10' : 'border-slate-900/10'
+        }`}>
+          <div className="flex items-center gap-3">
+            <img src="/New%20logo.png" alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
+            <span className="text-sm font-bold text-current">Spaces</span>
+          </div>
+          <p className="text-sm">Designed to show the real product, not hide it.</p>
+          <p className="text-sm">� 2026 Spaces</p>
+        </div>
+      </footer>
+      {/* Demo Modal */}
+      {showDemoModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+          onClick={() => setShowDemoModal(false)}
+        >
+          {/* Backdrop */}
+          <div className={`absolute inset-0 backdrop-blur-md ${
+            isDarkMode ? 'bg-slate-950/80' : 'bg-slate-900/60'
+          }`}></div>
+          
+          {/* Modal Content */}
+          <div 
+            className={`relative w-full max-w-4xl rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl ${
+              isDarkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowDemoModal(false)}
+              className={`absolute top-4 right-4 z-10 p-2 rounded-full transition-colors ${
+                isDarkMode 
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' 
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+              aria-label="Close demo modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            {/* Header */}
+            <div className={`px-6 py-4 border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <h3 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                See Spacess in action
+              </h3>
+              <p className={`text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                A quick look at how teams collaborate on Spacess
+              </p>
+            </div>
+            
+            {/* Demo Content - Placeholder GIF/Image */}
+            <div className={`aspect-video w-full ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+              {/* Placeholder for demo - shows screenshot as fallback */}
+              <div className="w-full h-full flex items-center justify-center relative">
+                <img 
+                  src="/image 10.png" 
+                  alt="Spacess Demo Preview" 
+                  className="w-full h-full object-cover"
+                />
+                {/* Overlay with play icon for video placeholder */}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
+                    isDarkMode ? 'bg-white/10' : 'bg-black/10'
+                  }`}>
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center backdrop-blur-sm ${
+                      isDarkMode ? 'bg-violet-600' : 'bg-violet-500'
+                    }`}>
+                      <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                {/* Coming soon overlay */}
+                <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-medium ${
+                  isDarkMode ? 'bg-slate-900/90 text-slate-300' : 'bg-white/90 text-slate-600'
+                }`}>
+                  🎬 Demo video coming soon
+                </div>
+              </div>
+            </div>
+            
+            {/* Footer CTA */}
+            <div className={`px-6 py-4 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Ready to try it yourself?
+                </p>
+                <button
+                  onClick={() => { 
+                    setShowDemoModal(false); 
+                    setShowLandingPage(false); 
+                    setAuthMode('signup'); 
+                  }}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 hover:from-violet-500 hover:via-purple-500 hover:to-pink-500 transition-all shadow-lg hover:shadow-purple-500/30"
+                >
+                  Start Free
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  // Show landing page for unauthenticated users who haven't clicked sign in/up
+  if (!isAuthenticated && showLandingPage) {
+    return <LandingPage />
+  }
+
   if (!isAuthenticated) {
     return (
       <div className={`min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden ${
@@ -4124,19 +5348,33 @@ export default function CollaborationApp() {
           : 'bg-gradient-to-br from-slate-100 via-indigo-50/50 to-purple-50/30 text-slate-900'
       }`}>
         {/* Theme Toggle for Login */}
-        <button
-          onClick={() => {
-            setIsDarkMode(!isDarkMode)
-            localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
-          }}
-          className={`absolute top-6 right-6 z-20 p-3 rounded-2xl transition-all duration-300 ${
-            isDarkMode 
-              ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
-              : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
-          } backdrop-blur-xl`}
-        >
-          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
+        {/* Back to Landing & Theme Toggle */}
+        <div className="absolute top-6 left-6 right-6 z-20 flex items-center justify-between">
+          <button
+            onClick={() => setShowLandingPage(true)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-medium transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300' 
+                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+            } backdrop-blur-xl`}
+          >
+            <ChevronRight className="w-4 h-4 rotate-180" />
+            Back
+          </button>
+          <button
+            onClick={() => {
+              setIsDarkMode(!isDarkMode)
+              localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
+            }}
+            className={`p-3 rounded-2xl transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
+                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+            } backdrop-blur-xl`}
+          >
+            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+        </div>
 
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -4155,10 +5393,10 @@ export default function CollaborationApp() {
           <div className="text-center mb-10">
             <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-110 hover:rotate-6 transition-all duration-500 animate-float ${
               isDarkMode 
-                ? 'bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 shadow-violet-500/30' 
-                : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50'
+                ? 'shadow-violet-500/30' 
+                : 'shadow-slate-300/50'
             }`}>
-              <Sparkles className="w-12 h-12 text-white drop-shadow-lg" />
+              <div aria-hidden="true" className="w-full h-full rounded-[2rem]" />
             </div>
             <h1 className={`text-5xl font-extrabold mb-3 tracking-tight bg-clip-text text-transparent ${
               isDarkMode 
@@ -4667,40 +5905,90 @@ export default function CollaborationApp() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-all ease-in-out duration-500 ${isDarkMode ? 'dark bg-[var(--bg-primary)] text-[var(--text-primary)]' : 'text-slate-700 bg-[#f4f6fb]'} mesh-gradient`}>
-      {/* Incoming Call Popup - Small banner at top */}
+      {/* Professional Incoming Call Popup */}
       {incomingCall && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-          <div className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-gradient-to-r from-slate-900/95 via-purple-900/95 to-slate-900/95 backdrop-blur-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/30">
-            {/* Caller Avatar */}
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-md"></div>
-              <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 border-white/20">
-                {incomingCall.fromAvatar}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in">
+          {/* Backdrop with blur */}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+          
+          {/* Call Card */}
+          <div className="relative z-10 w-full max-w-sm mx-4">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl border border-white/10">
+              {/* Animated Background */}
+              <div className="absolute inset-0 opacity-30">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 rounded-full blur-3xl animate-pulse" />
               </div>
-            </div>
-            
-            {/* Caller Info */}
-            <div className="flex flex-col mr-4">
-              <span className="text-white font-bold text-lg">{incomingCall.fromName}</span>
-              <span className="text-purple-300 text-sm font-medium animate-pulse">Incoming Video Call...</span>
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={declineCall}
-                className="w-12 h-12 rounded-full bg-red-500/20 border-2 border-red-500/50 text-red-400 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all duration-200 hover:scale-110"
-                title="Decline"
-              >
-                <PhoneOff className="w-5 h-5" />
-              </button>
-              <button
-                onClick={answerCall}
-                className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 transition-all duration-200 hover:scale-110"
-                title="Accept"
-              >
-                <Video className="w-6 h-6" />
-              </button>
+              
+              {/* Content */}
+              <div className="relative p-8 text-center">
+                {/* Timer Circle */}
+                <div className="absolute top-4 right-4 flex items-center gap-2">
+                  <div className="relative w-10 h-10">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                      <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
+                      <circle 
+                        cx="18" cy="18" r="16" 
+                        fill="none" 
+                        stroke="#10b981" 
+                        strokeWidth="3" 
+                        strokeLinecap="round"
+                        strokeDasharray={`${(incomingCallCountdown / 10) * 100}, 100`}
+                        className="transition-all duration-1000"
+                      />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-white text-xs font-bold">
+                      {incomingCallCountdown}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Caller Avatar with Ring Animation */}
+                <div className="relative inline-block mb-6">
+                  <div className="absolute inset-0 bg-emerald-500/30 rounded-full animate-ping" style={{ animationDuration: '1.5s' }} />
+                  <div className="absolute -inset-2 bg-gradient-to-r from-emerald-400 to-teal-400 rounded-full animate-spin" style={{ animationDuration: '3s' }} />
+                  <div className="relative w-28 h-28 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-5xl shadow-xl border-4 border-white/20 overflow-hidden">
+                    {renderAvatar({ avatar: incomingCall.fromAvatar, avatar_url: incomingCall.fromAvatar, name: incomingCall.fromName }, 112) || incomingCall.fromAvatar}
+                  </div>
+                </div>
+                
+                {/* Caller Info */}
+                <h2 className="text-2xl font-bold text-white mb-1">{incomingCall.fromName}</h2>
+                <p className="text-emerald-400 font-medium flex items-center justify-center gap-2 mb-8">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Incoming Video Call
+                </p>
+                
+                {/* Action Buttons */}
+                <div className="flex items-center justify-center gap-6">
+                  {/* Decline Button */}
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={declineCall}
+                      className="w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-lg shadow-red-500/40 transition-all duration-200 hover:scale-110 active:scale-95"
+                      title="Decline"
+                    >
+                      <PhoneOff className="w-7 h-7" />
+                    </button>
+                    <span className="text-xs text-slate-400 font-medium">Decline</span>
+                  </div>
+                  
+                  {/* Accept Button */}
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={answerCall}
+                      className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-300 hover:to-emerald-500 text-white flex items-center justify-center shadow-xl shadow-emerald-500/50 transition-all duration-200 hover:scale-110 active:scale-95 animate-pulse"
+                      style={{ animationDuration: '2s' }}
+                      title="Accept"
+                    >
+                      <Video className="w-9 h-9" />
+                    </button>
+                    <span className="text-xs text-slate-400 font-medium">Accept</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -4775,85 +6063,271 @@ export default function CollaborationApp() {
         </div>
       )}
 
-      {/* WebRTC Video Call Modal */}
+      {/* Professional WebRTC Video Call UI - Grid Layout Like Teams/Meet */}
       {showWebRTCCall && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center animate-fade-in bg-gradient-to-br from-slate-900/95 via-purple-900/90 to-slate-900/95 backdrop-blur-2xl">
-          {/* In Call Indicator with Timer */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
-            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></span>
-            <span className="text-white font-bold text-sm uppercase tracking-wider">
-              {webrtcCallStatus === 'calling' ? 'Calling...' : 
-               webrtcCallStatus === 'connecting' ? 'Connecting...' : 
-               webrtcCallStatus === 'connected' ? 'In Call' : 'Call'}
-            </span>
-            <span className="text-white/60 text-sm">with {webrtcCallPartner?.name || 'Unknown'}</span>
-            {webrtcCallStatus === 'connected' && (
-              <span className="text-emerald-400 font-mono text-sm ml-2 bg-emerald-500/20 px-3 py-1 rounded-full">
-                {formatCallDuration(callDuration)}
-              </span>
-            )}
-          </div>
-          
-          {/* Pending Participants Being Called */}
-          {pendingCallParticipants.length > 0 && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/20 backdrop-blur-xl border border-yellow-500/30">
-              <Phone className="w-4 h-4 text-yellow-400 animate-pulse" />
-              <span className="text-yellow-300 text-sm">
-                Calling {pendingCallParticipants.map(p => p.name).join(', ')}...
-              </span>
+        <div className="fixed inset-0 z-[80] animate-fade-in bg-[#1a1d21]">
+          {/* Top Bar */}
+          <div className="absolute top-0 left-0 right-0 z-20 h-14 px-4 flex items-center justify-between bg-[#1a1d21] border-b border-white/5">
+            {/* Left: Meeting Info */}
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                <Video className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h3 className="text-white font-medium text-sm">Video Call with {webrtcCallPartner?.name || 'Unknown'}</h3>
+              </div>
             </div>
-          )}
 
-          {/* Video Containers */}
-          <div className="relative w-full h-full">
-            {/* Remote Video (Full Screen) */}
-            <div className="absolute inset-0 bg-black">
-              <video 
-                ref={remoteVideoRef}
-                autoPlay 
-                playsInline
-                className="w-full h-full object-cover"
-              />
-              {!remoteStream && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900/50 to-slate-900">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full animate-ping opacity-40 blur-2xl scale-150"></div>
-                    <div className="relative w-48 h-48 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center text-8xl shadow-2xl border-4 border-white/30">
-                      {webrtcCallPartner?.avatar || '👤'}
+            {/* Center: Live Indicator & Timer */}
+            <div className="flex items-center gap-4">
+              {webrtcCallStatus === 'connected' && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/40">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-red-400 text-xs font-semibold uppercase tracking-wide">Live</span>
+                  <span className="text-white/80 text-xs font-mono">{formatCallDuration(callDuration)}</span>
+                </div>
+              )}
+              {webrtcCallStatus === 'calling' && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span className="text-amber-400 text-xs font-semibold">Calling... {callerCountdown}s</span>
+                </div>
+              )}
+              {webrtcCallStatus === 'connecting' && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/20 border border-blue-500/40">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-blue-400 text-xs font-semibold">Connecting...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Right: User Avatar */}
+            <div className="flex items-center gap-3">
+              {pendingCallParticipants.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30">
+                  <Phone className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+                  <span className="text-yellow-300 text-xs">Calling {pendingCallParticipants.length}</span>
+                </div>
+              )}
+              <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-emerald-500/50">
+                {renderAvatar(currentUser, 32) || (
+                  <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+                    {(currentUser?.name || '?')[0]?.toUpperCase()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content Area - Professional Layout with PiP */}
+          <div className="absolute top-14 bottom-20 left-0 right-0 p-4">
+            {/* Main Video Area */}
+            <div className="w-full h-full relative">
+              {/* Main/Pinned Video - Takes up most of the screen */}
+              <div className="w-full h-full rounded-2xl overflow-hidden bg-[#2d3136] relative group">
+                <video 
+                  ref={remoteVideoRef}
+                  autoPlay 
+                  playsInline
+                  className={`w-full h-full object-cover ${!remoteStream ? 'hidden' : ''}`}
+                />
+                
+                {/* No Video - Show Avatar */}
+                {!remoteStream && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-[#2d3136] to-[#1f2226]">
+                    {webrtcCallStatus === 'calling' ? (
+                      <>
+                        {/* Calling Animation */}
+                        <div className="relative">
+                          <div className="absolute -inset-6 rounded-full bg-emerald-500/20 animate-ping" style={{ animationDuration: '1.5s' }} />
+                          <div className="absolute -inset-3 rounded-full bg-emerald-500/10 animate-pulse" />
+                          <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/20">
+                            {renderAvatar(webrtcCallPartner, 128) || (
+                              <div className="w-full h-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center text-white text-4xl font-bold">
+                                {(webrtcCallPartner?.name || '?').slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <p className="mt-6 text-white/80 text-lg font-medium">{webrtcCallPartner?.name || 'Unknown'}</p>
+                        <p className="mt-2 text-white/50 text-sm">Ringing...</p>
+                        {/* Countdown */}
+                        <div className="mt-4 w-12 h-12 rounded-full border-2 border-emerald-500/50 flex items-center justify-center">
+                          <span className="text-emerald-400 text-lg font-bold">{callerCountdown}</span>
+                        </div>
+                      </>
+                    ) : webrtcCallStatus === 'connecting' ? (
+                      <>
+                        <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/20">
+                          {renderAvatar(webrtcCallPartner, 128) || (
+                            <div className="w-full h-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-4xl font-bold">
+                              {(webrtcCallPartner?.name || '?').slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <p className="mt-6 text-white/80 text-lg font-medium">{webrtcCallPartner?.name || 'Unknown'}</p>
+                        <div className="mt-4 flex gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/20">
+                          {renderAvatar(webrtcCallPartner, 128) || (
+                            <div className="w-full h-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white text-4xl font-bold">
+                              {(webrtcCallPartner?.name || '?').slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <p className="mt-6 text-white/80 text-lg font-medium">{webrtcCallPartner?.name || 'Unknown'}</p>
+                        <p className="mt-2 text-white/40 text-sm">Camera off</p>
+                      </>
+                    )}
+                  </div>
+                )}
+                
+                {/* Name Badge for main video */}
+                <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-sm text-white text-sm font-medium">
+                    {webrtcCallPartner?.name || 'Unknown'}
+                  </span>
+                  {pinnedParticipant?.id === webrtcCallPartner?.id && (
+                    <span className="px-2 py-1 rounded-lg bg-violet-500/80 backdrop-blur-sm text-white text-xs font-medium flex items-center gap-1">
+                      📌 Pinned
+                    </span>
+                  )}
+                </div>
+                
+                {/* Pin button for remote participant */}
+                {webrtcCallStatus === 'connected' && (
+                  <button
+                    onClick={() => setPinnedParticipant(pinnedParticipant?.id === webrtcCallPartner?.id ? null : webrtcCallPartner)}
+                    className={`absolute top-4 right-4 p-2 rounded-lg backdrop-blur-sm transition-all opacity-0 group-hover:opacity-100 ${
+                      pinnedParticipant?.id === webrtcCallPartner?.id
+                        ? 'bg-violet-500/80 text-white'
+                        : 'bg-black/50 text-white/70 hover:bg-black/70 hover:text-white'
+                    }`}
+                    title={pinnedParticipant?.id === webrtcCallPartner?.id ? 'Unpin' : 'Pin'}
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                  </button>
+                )}
+                
+                {/* Mic indicator for remote participant */}
+                <div className="absolute top-4 left-4 p-2 rounded-lg bg-black/50 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Mic className="w-4 h-4 text-white/70" />
+                </div>
+              </div>
+
+              {/* Local Video - Small PiP in bottom right corner */}
+              <div className="absolute bottom-4 right-4 w-48 h-36 rounded-xl overflow-hidden bg-[#2d3136] shadow-2xl border-2 border-white/10 group cursor-move hover:border-white/30 transition-all">
+                <video 
+                  ref={localVideoRef}
+                  autoPlay 
+                  playsInline 
+                  muted
+                  className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
+                />
+                
+                {/* No Video - Show Avatar */}
+                {!isWebRTCVideoOn && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-[#2d3136] to-[#1f2226]">
+                    <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-white/20">
+                      {renderAvatar(currentUser, 64) || (
+                        <div className="w-full h-full bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center text-white text-xl font-bold">
+                          {(currentUser?.name || '?').slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <h3 className="mt-8 text-4xl font-bold text-white drop-shadow-lg">{webrtcCallPartner?.name || 'Unknown'}</h3>
-                  <p className="mt-3 text-xl text-transparent bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text font-medium animate-pulse">
-                    {webrtcCallStatus === 'calling' ? 'Ringing...' : 
-                     webrtcCallStatus === 'connecting' ? 'Connecting...' : 
-                     'Waiting for video...'}
-                  </p>
+                )}
+                
+                {/* Name Badge - You */}
+                <div className="absolute bottom-2 left-2">
+                  <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-xs font-medium">
+                    You
+                  </span>
                 </div>
-              )}
-            </div>
-
-            {/* Local Video (Small, Picture-in-Picture) */}
-            <div className="absolute bottom-28 right-8 w-56 aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-white/30 shadow-2xl hover:scale-105 transition-transform cursor-move group z-10">
-              <video 
-                ref={localVideoRef}
-                autoPlay 
-                playsInline 
-                muted
-                className={`w-full h-full object-cover ${!isWebRTCVideoOn ? 'hidden' : ''}`}
-              />
-              {!isWebRTCVideoOn && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-800">
-                  <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl">
-                    {currentUser?.avatar || '👤'}
+                
+                {/* Mic indicator for self */}
+                {!isWebRTCMicOn && (
+                  <div className="absolute top-2 right-2 p-1 rounded-md bg-red-500/90">
+                    <MicOff className="w-3 h-3 text-white" />
                   </div>
+                )}
+              </div>
+
+              {/* Pending Call Participants - Show as small tiles on left side */}
+              {pendingCallParticipants.length > 0 && (
+                <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+                  {pendingCallParticipants.map((participant) => (
+                    <div key={participant.id} className="w-32 h-24 rounded-xl overflow-hidden bg-[#2d3136] shadow-xl border border-yellow-500/30">
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#2d3136] to-[#1f2226]">
+                        <div className="relative">
+                          <div className="absolute -inset-2 rounded-full bg-yellow-500/20 animate-ping" style={{ animationDuration: '1.5s' }} />
+                          <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-yellow-500/30">
+                            {renderAvatar(participant, 40) || (
+                              <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold">
+                                {(participant.name || '?').slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <p className="mt-1 text-yellow-400/80 text-[10px]">Calling...</p>
+                        <p className="text-white/60 text-xs truncate max-w-[90%]">{participant.name}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-              <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/50 backdrop-blur-sm">
-                <span className="text-white text-xs font-medium">You</span>
-              </div>
-              {!isWebRTCMicOn && (
-                <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/90">
-                  <MicOff className="w-3 h-3 text-white" />
+
+              {/* Connected Additional Participants - Show as small tiles */}
+              {callParticipants.filter(p => p.id !== webrtcCallPartner?.id && p.id !== currentUser?.id).length > 0 && (
+                <div className="absolute top-4 right-4 flex flex-col gap-2">
+                  {callParticipants.filter(p => p.id !== webrtcCallPartner?.id && p.id !== currentUser?.id).map((participant) => (
+                    <div 
+                      key={participant.id} 
+                      className={`w-32 h-24 rounded-xl overflow-hidden bg-[#2d3136] shadow-xl border cursor-pointer transition-all hover:scale-105 ${
+                        pinnedParticipant?.id === participant.id ? 'border-violet-500' : 'border-white/10'
+                      }`}
+                      onClick={() => setPinnedParticipant(pinnedParticipant?.id === participant.id ? null : participant)}
+                    >
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#2d3136] to-[#1f2226] relative group">
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/20">
+                          {renderAvatar(participant, 48) || (
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-base font-bold">
+                              {(participant.name || '?').slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <p className="mt-1 text-white/60 text-xs truncate max-w-[90%]">{participant.name}</p>
+                        {/* Pin indicator */}
+                        {pinnedParticipant?.id === participant.id && (
+                          <div className="absolute top-1 right-1 p-1 rounded bg-violet-500/80">
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                            </svg>
+                          </div>
+                        )}
+                        {/* Pin button on hover */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setPinnedParticipant(pinnedParticipant?.id === participant.id ? null : participant)
+                          }}
+                          className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <span className="text-white text-xs font-medium">
+                            {pinnedParticipant?.id === participant.id ? 'Unpin' : 'Pin'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -4861,99 +6335,170 @@ export default function CollaborationApp() {
 
           {/* Error Message */}
           {webrtcError && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl bg-red-500/20 border border-red-500/50 backdrop-blur-xl">
-              <p className="text-red-300 font-medium">{webrtcError}</p>
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/50">
+              <p className="text-red-400 text-sm font-medium flex items-center gap-2">
+                <XCircle className="w-4 h-4" />
+                {webrtcError}
+              </p>
             </div>
           )}
 
-          {/* Call Controls */}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6">
-            {/* Toggle Mic */}
-            <button
-              onClick={toggleWebRTCMic}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
-                isWebRTCMicOn 
-                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
-                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
-              }`}
-              title={isWebRTCMicOn ? 'Mute microphone' : 'Unmute microphone'}
-            >
-              {isWebRTCMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
-            </button>
+          {/* Bottom Control Bar */}
+          <div className="absolute bottom-0 left-0 right-0 z-20 h-20 px-6 flex items-center justify-between bg-[#1a1d21] border-t border-white/5">
+            {/* Left Controls */}
+            <div className="flex items-center gap-1">
+              {/* Mic Toggle */}
+              <button
+                onClick={toggleWebRTCMic}
+                className={`relative p-3 rounded-xl flex items-center gap-2 transition-all ${
+                  isWebRTCMicOn 
+                    ? 'bg-[#2d3136] hover:bg-[#3d4146] text-white' 
+                    : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                }`}
+              >
+                {isWebRTCMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                <ChevronDown className="w-3 h-3 opacity-50" />
+              </button>
 
-            {/* Toggle Video */}
-            <button
-              onClick={toggleWebRTCVideo}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl ${
-                isWebRTCVideoOn 
-                  ? 'bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20' 
-                  : 'bg-red-500/80 border-2 border-red-400/50 text-white hover:bg-red-500'
-              }`}
-              title={isWebRTCVideoOn ? 'Turn off camera' : 'Turn on camera'}
-            >
-              {isWebRTCVideoOn ? <Video className="w-7 h-7" /> : <VideoOff className="w-7 h-7" />}
-            </button>
+              {/* Video Toggle */}
+              <button
+                onClick={toggleWebRTCVideo}
+                className={`relative p-3 rounded-xl flex items-center gap-2 transition-all ${
+                  isWebRTCVideoOn 
+                    ? 'bg-[#2d3136] hover:bg-[#3d4146] text-white' 
+                    : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                }`}
+              >
+                {isWebRTCVideoOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                <ChevronDown className="w-3 h-3 opacity-50" />
+              </button>
+            </div>
 
-            {/* End Call */}
-            <button
-              onClick={endWebRTCCall}
-              className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white flex items-center justify-center shadow-2xl shadow-red-500/50 transition-all duration-300 hover:scale-110"
-              title="End call"
-            >
-              <PhoneOff className="w-9 h-9" />
-            </button>
+            {/* Center Controls */}
+            <div className="flex items-center gap-2">
+              {/* Screen Share */}
+              <button
+                className="p-3 rounded-xl bg-[#2d3136] text-white/40 cursor-not-allowed"
+                disabled
+                title="Screen share coming soon"
+              >
+                <Monitor className="w-5 h-5" />
+              </button>
 
-            {/* Screen Share (placeholder for future) */}
-            <button
-              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl opacity-50 cursor-not-allowed"
-              title="Screen share (coming soon)"
-              disabled
-            >
-              <Monitor className="w-7 h-7" />
-            </button>
+              {/* Reactions */}
+              <button
+                className="p-3 rounded-xl bg-[#2d3136] hover:bg-[#3d4146] text-white transition-all"
+                title="Reactions"
+              >
+                <Smile className="w-5 h-5" />
+              </button>
 
-            {/* Add Friends Button */}
-            <button
-              onClick={() => setShowAddFriendsToCall(true)}
-              className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border-2 border-white/20 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 hover:scale-110 shadow-xl"
-              title="Add friends to call"
-            >
-              <UserPlus className="w-7 h-7" />
-            </button>
+              {/* Leave Call - Red Button */}
+              <button
+                onClick={endWebRTCCall}
+                className="px-5 py-3 rounded-xl bg-red-500 hover:bg-red-400 text-white font-medium flex items-center gap-2 transition-all hover:scale-105"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+
+              {/* More Options */}
+              <button
+                className="p-3 rounded-xl bg-[#2d3136] hover:bg-[#3d4146] text-white transition-all"
+                title="More options"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-2">
+              {/* Chat Toggle */}
+              <button
+                className="p-3 rounded-xl bg-[#2d3136] hover:bg-[#3d4146] text-white transition-all"
+                title="Chat"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </button>
+
+              {/* Add People */}
+              <button
+                onClick={() => setShowAddFriendsToCall(true)}
+                className="p-3 rounded-xl bg-[#2d3136] hover:bg-[#3d4146] text-white transition-all flex items-center gap-2"
+                title="Add friends to call"
+              >
+                <Users className="w-5 h-5" />
+                <span className="text-sm text-white/60">{2 + pendingCallParticipants.length + callParticipants.filter(p => p.id !== webrtcCallPartner?.id && p.id !== currentUser?.id).length}</span>
+              </button>
+
+              {/* Settings */}
+              <button
+                className="p-3 rounded-xl bg-[#2d3136] hover:bg-[#3d4146] text-white transition-all"
+                title="Settings"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
-          {/* Add Friends Modal */}
+          {/* Add Friends Modal - Only shows user's friends */}
           {showAddFriendsToCall && (
-            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-              <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-3xl p-6 shadow-2xl animate-fade-in">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-white">Add Friends to Call</h3>
+            <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+              <div className="w-full max-w-md bg-[#2d3136] border border-white/10 rounded-2xl shadow-2xl animate-fade-in overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Add Friends to Call</h3>
+                    <p className="text-xs text-white/50 mt-0.5">Invite your friends to join this call</p>
+                  </div>
                   <button
                     onClick={() => setShowAddFriendsToCall(false)}
-                    className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).map(friend => (
+                <div className="max-h-80 overflow-y-auto p-3 space-y-1">
+                  {/* Filter to only show friends */}
+                  {friends.filter(friend => 
+                    friend.id !== currentUser?.id && 
+                    friend.id !== webrtcCallPartner?.id && 
+                    !callParticipants.find(p => p.id === friend.id) && 
+                    !pendingCallParticipants.find(p => p.id === friend.id)
+                  ).map(friend => (
                     <button
                       key={friend.id}
                       onClick={() => addFriendToCall(friend)}
-                      className="w-full flex items-center gap-4 p-3 rounded-2xl hover:bg-white/10 transition-all text-left"
+                      className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all text-left group"
                     >
-                      <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl">
-                        {friend.avatar || friend.avatar_url || '👤'}
+                      <div className="relative">
+                        <div className="w-11 h-11 rounded-full overflow-hidden">
+                          {renderAvatar(friend, 44) || (
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-base font-bold">
+                              {(friend.name || '?').slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#2d3136] ${friend.is_online ? 'bg-emerald-500' : 'bg-slate-500'}`} />
                       </div>
-                      <div className="flex-1">
-                        <div className="font-bold text-white">{friend.name}</div>
-                        <div className="text-sm text-white/60">{friend.email || ''}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-white truncate">{friend.name}</div>
+                        <div className="text-xs text-slate-400 truncate">{friend.is_online ? 'Online' : 'Offline'}</div>
                       </div>
-                      <Phone className="w-5 h-5 text-emerald-400" />
+                      <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                        <Phone className="w-4 h-4" />
+                      </div>
                     </button>
                   ))}
-                  {users.filter(u => u.id !== currentUser?.id && u.id !== webrtcCallPartner?.id && !callParticipants.find(p => p.id === u.id) && !pendingCallParticipants.find(p => p.id === u.id)).length === 0 && (
-                    <p className="text-center text-white/50 py-4">No other friends available</p>
+                  {friends.filter(friend => 
+                    friend.id !== currentUser?.id && 
+                    friend.id !== webrtcCallPartner?.id && 
+                    !callParticipants.find(p => p.id === friend.id) && 
+                    !pendingCallParticipants.find(p => p.id === friend.id)
+                  ).length === 0 && (
+                    <div className="text-center py-10 text-slate-400">
+                      <Users className="w-14 h-14 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No friends available</p>
+                      <p className="text-sm text-slate-500 mt-1">Add friends to invite them to calls</p>
+                    </div>
                   )}
                 </div>
               </div>
@@ -5143,25 +6688,49 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {contextDraft && (
+        <CreateContextModal
+          isDarkMode={isDarkMode}
+          owners={activeMembers}
+          value={contextDraft}
+          isEditing={Boolean(editingContextId)}
+          onChange={setContextDraft}
+          onClose={() => {
+            setContextDraft(null)
+            setEditingContextId(null)
+          }}
+          onSubmit={createOrUpdateContextFromDraft}
+        />
+      )}
+
       {showTaskModal && (
         <TaskModal
           visible={showTaskModal}
-          onClose={() => setShowTaskModal(false)}
+          onClose={() => {
+            setShowTaskModal(false)
+            setTaskModalDraft(null)
+          }}
           members={getActiveMembers()}
           currentUser={currentUser}
           spaceId={activeSpace}
+          initialTaskText={taskModalDraft?.initialTaskText || ""}
+          initialAssignees={taskModalDraft?.initialAssignees || []}
+          sourceMessageId={taskModalDraft?.sourceMessageId || null}
           onTaskCreated={(payload) => {
             // optimistic UI: add a task message to current chat and add to tasks list
             try {
               const chatId = getActiveChatId()
-              const tempId = `tmp-task-${Date.now()}-${Math.floor(Math.random()*1000)}`
               const newMsg = {
-                id: tempId,
+                id: `tmp-task-${Date.now()}-${Math.floor(Math.random()*1000)}`,
                 userId: currentUser?.id,
                 text: payload.message,
                 timestamp: payload.timestamp || new Date().toISOString(),
                 type: 'task',
                 assigned_to: payload.assigned_to,
+                contextIds: taskModalDraft?.contextId ? [taskModalDraft.contextId] : [],
+                isDecision: false,
+                taskId: payload.id,
+                attachments: [],
                 status: 'sent',
                 optimistic: false
               }
@@ -5172,6 +6741,31 @@ export default function CollaborationApp() {
                 }))
               }
               setTasksList(prev => [payload, ...(prev || [])])
+              if (payload.sourceMessageId) {
+                patchMessage(payload.sourceMessageId, message => ({
+                  ...message,
+                  taskId: payload.id,
+                }))
+              }
+              if (taskModalDraft?.contextId) {
+                const taskId = ensureTaskForContext(taskModalDraft.contextId, payload)
+                setContextItems(prev =>
+                  prev.map(context =>
+                    String(context.id) === String(taskModalDraft.contextId)
+                      ? {
+                          ...appendContextActivity(context, {
+                            id: `activity-task-${payload.id}-${Date.now()}`,
+                            type: "task_added",
+                            userId: currentUser.id,
+                            taskId: taskId || payload.id,
+                            timestamp: payload.timestamp || new Date().toISOString(),
+                          }),
+                          taskIds: Array.from(new Set([...(context.taskIds || []), taskId || payload.id])),
+                        }
+                      : context
+                  )
+                )
+              }
             } catch (e) {
               console.warn('optimistic task create failed', e)
             }
@@ -5501,19 +7095,25 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <div className="p-2.5 rounded-2xl shadow-lg transition-all bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-indigo-300/50 group-hover:shadow-indigo-400/60 group-hover:scale-105 animate-gradient">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
               <h1 className={`font-extrabold text-xl tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                Spaces
+                Spacess
               </h1>
             </div>
           )}
           <div className="flex gap-2 ml-auto">
             {isMobile && (
               <button
+                onClick={() => { setActiveView('tasks'); setActiveSpace(null); setMobileView('chat') }}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
+                title="Tasks"
+              >
+                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+              </button>
+            )}
+            {isMobile && (
+              <button
                 onClick={() => setShowCreateSpaceModal(true)}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                 title="Create Space"
               >
                 <Plus className="w-5 h-5" />
@@ -5522,7 +7122,7 @@ export default function CollaborationApp() {
             {isMobile && (
               <button
                 onClick={() => setMobileView("chat")}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -5530,7 +7130,7 @@ export default function CollaborationApp() {
             {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
               >
                 <Plus className="w-5 h-5" />
               </button>
@@ -5538,10 +7138,10 @@ export default function CollaborationApp() {
             {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => { setActiveView('tasks'); setActiveSpace(null) }}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-indigo-600"
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                 title="Tasks"
               >
-                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
+                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {/* Admin dashboard access - visible to org admins of verified org */}
@@ -5565,7 +7165,7 @@ export default function CollaborationApp() {
             {!isMobile && (
               <button
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400"
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-violet-400' : 'hover:bg-slate-100 text-slate-400'}`}
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -5709,15 +7309,23 @@ export default function CollaborationApp() {
                     }}
                     className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
                       activeView === "calendar"
-                        ? "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100 text-indigo-600"
-                        : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md text-slate-600"
+                        ? (isDarkMode
+                            ? "bg-transparent border border-transparent text-slate-200"
+                            : "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100 text-indigo-600")
+                        : (isDarkMode
+                            ? "hover:bg-[#2C2C2C] border border-transparent text-slate-300"
+                            : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md text-slate-600")
                     }`}
                   >
                     <div
                       className={`p-2.5 rounded-xl transition-all duration-300 ${
                         activeView === "calendar"
-                          ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50"
-                          : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600"
+                          ? (isDarkMode
+                              ? "bg-[#2C2C2C] text-slate-200"
+                              : "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50")
+                          : (isDarkMode
+                              ? "bg-transparent text-slate-400 group-hover:bg-[#2C2C2C] group-hover:text-slate-200"
+                              : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600")
                       }`}
                     >
                       <Calendar className="w-5 h-5" />
@@ -5731,7 +7339,7 @@ export default function CollaborationApp() {
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       Your Spaces
                     </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
                       {spaces.length}
                     </span>
                   </div>
@@ -5739,14 +7347,14 @@ export default function CollaborationApp() {
                   {spaces.map(space => (
                     <div key={space.id} className="mb-2">
                       <div
-                        className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 group hover-lift ${
+                        className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 group hover-lift ${
                             activeView === "channel" && activeSpace === space.id
                               ? (isDarkMode
-                                  ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
+                                  ? "bg-transparent border-transparent text-white"
                                   : "bg-gradient-to-r from-white to-indigo-50/50 shadow-lg shadow-indigo-100/50 border border-indigo-100/80 ring-1 ring-indigo-100")
                               : (isDarkMode
-                                  ? "bg-slate-800/50 border-transparent hover:bg-gradient-to-r hover:from-purple-900/10 hover:to-violet-900/10 hover:border-purple-600/10"
-                                  : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md")
+                                  ? "bg-transparent border-transparent hover:bg-[#2C2C2C] hover:border-slate-500/20"
+                                  : "hover:bg-[#f1f0ef] border border-transparent hover:border-slate-200/50 hover:shadow-md")
                           }`}
                         onClick={() => {
                           setActiveSpace(space.id)
@@ -5755,19 +7363,17 @@ export default function CollaborationApp() {
                           setActiveView("channel")
                         }}
                       >
-                        <div
-                          className={`p-2.5 rounded-xl transition-all duration-300 ${
-                              activeSpace === space.id
-                                ? (isDarkMode
-                                    ? "bg-gradient-to-br from-purple-800/60 to-violet-800/40 text-purple-200 shadow-md shadow-purple-500/10"
-                                    : "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-300/50")
-                                : (isDarkMode
-                                    ? "bg-slate-700/60 text-slate-300 group-hover:bg-gradient-to-br group-hover:from-purple-900/10 group-hover:to-violet-900/10 group-hover:text-purple-300"
-                                    : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-indigo-100 group-hover:to-purple-100 group-hover:text-indigo-600")
-                            }`}
-                        >
-                          <img src="/hexagon-gradient%20For%20spaces..png" alt={space.name || 'space'} className="w-5 h-5 object-contain" />
-                        </div>
+                        <img
+                          src="/hexagon-gradient%20For%20spaces..png"
+                          alt={space.name || 'space'}
+                          className={`w-5 h-5 object-contain transition-all duration-300 ${
+                            activeSpace === space.id
+                              ? "opacity-100"
+                              : isDarkMode
+                                ? "opacity-85 group-hover:opacity-100"
+                                : "opacity-90 group-hover:opacity-100"
+                          }`}
+                        />
                         <span
                           className={`font-semibold text-sm truncate flex-1 transition-colors ${
                             activeSpace === space.id
@@ -5849,22 +7455,22 @@ export default function CollaborationApp() {
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 ${
+                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
                                     ? (isDarkMode
-                                        ? "bg-gradient-to-r from-purple-900/30 to-violet-900/20 text-purple-300 shadow-sm"
-                                        : "bg-gradient-to-r from-indigo-50 to-purple-50/50 text-indigo-600 shadow-sm")
+                                        ? "bg-[#2C2C2C] text-slate-200"
+                                        : "bg-[#eeedec] text-slate-700 shadow-sm")
                                     : (isDarkMode
-                                        ? "text-slate-400 hover:text-purple-300 hover:bg-gradient-to-r hover:from-purple-900/8 hover:to-violet-900/8 hover:shadow-sm"
-                                        : "text-slate-500 hover:text-slate-800 hover:bg-white/80 hover:shadow-sm")
+                                        ? "text-slate-400 hover:text-slate-200 hover:bg-[#2C2C2C] hover:shadow-sm"
+                                        : "text-slate-500 hover:text-slate-800 hover:bg-[#f1f0ef] hover:shadow-sm")
                                 }`} 
                               >
                                 <Hash
                                   className={`w-4 h-4 transition-colors ${
                                     activeChannel === channel.id
-                                      ? (isDarkMode ? "text-purple-300" : "text-indigo-500")
-                                      : (isDarkMode ? "text-slate-400 group-hover/channel:text-purple-300" : "text-slate-300 group-hover/channel:text-indigo-400")
+                                      ? (isDarkMode ? "text-slate-200" : "text-slate-600")
+                                      : (isDarkMode ? "text-slate-400 group-hover/channel:text-slate-200" : "text-slate-300 group-hover/channel:text-indigo-400")
                                   }`} 
                                 />
                                 <span className="truncate flex-1 text-left">
@@ -5874,11 +7480,13 @@ export default function CollaborationApp() {
                                 {/* Unread Indicator */}
                                 {unreadChannels.includes(channel.id) &&
                                   activeChannel !== channel.id && (
-                                    <div className="w-2 h-2 rounded-full bg-blue-500 mr-2"></div>
+                                    <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
                                   )}
 
                                 {/* Real-time member count */}
-                                <span className="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded-full text-slate-500 group-hover/channel:hidden">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full group-hover/channel:hidden ${
+                                  isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-200 text-slate-500'
+                                }`}>
                                   {channel.members.length}
                                 </span>
 
@@ -5947,38 +7555,43 @@ export default function CollaborationApp() {
                 className={`p-3 rounded-2xl transition-all duration-300 ${
                   activeView === "calendar"
                     ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/30"
-                    : "bg-slate-100 text-slate-500 hover:bg-white hover:shadow-md"
+                    : (isDarkMode ? "bg-transparent text-slate-400 hover:bg-[#2C2C2C]" : "bg-slate-100 text-slate-500 hover:bg-white hover:shadow-md")
                 }`}
                 title="Calendar"
               >
                 <Calendar className="w-5 h-5" />
               </button>
               <div className="w-8 h-px my-2 bg-slate-200"></div>
-              {spaces.map(s => (
-                <button
-                  key={s.id}
-                  className={`w-12 h-12 flex items-center justify-center transition-all duration-300 relative ${activeSpace === s.id ? 'ring-2 ring-indigo-500 squircle-mask' : ''}`}
-                  /* Add this style at the top-level or in your CSS file if not present already */
-                  // .squircle-mask { border-radius: 40%/50% !important; }
-                  title={s.name}
-                  onClick={() => {
-                    setActiveSpace(s.id)
-                    setActiveView("channel")
-                    const accChannel = s.channels.find(
-                      c =>
-                        c.members.includes(currentUser?.id || 0) ||
-                        s.ownerId === currentUser?.id
-                    )
-                    if (accChannel) setActiveChannel(accChannel.id)
-                    if (isMobile) setMobileView("chat")
-                  }}
-                >
-                  <img src="/hexagon-gradient%20For%20spaces..png" alt={s.name} className="w-10 h-10 object-contain" />
-                  <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold ${activeSpace === s.id ? 'text-white' : 'text-white'}`}>
-                    {s.name.charAt(0).toUpperCase()}
-                  </span>
-                </button>
-              ))}
+              {spaces.map(s => {
+                const accessibleChannels = getAccessibleChannelsForSpace(s)
+                const isMenuOpen = collapsedSpaceMenu?.spaceId === s.id
+                return (
+                  <button
+                    key={s.id}
+                    className={`w-11 h-11 flex items-center justify-center rounded-[10px] transition-all duration-300 relative ${
+                      activeSpace === s.id || isMenuOpen
+                        ? (isDarkMode ? 'bg-transparent' : 'bg-indigo-50')
+                        : (isDarkMode ? 'hover:bg-[#2C2C2C]' : 'hover:bg-[#f1f0ef]')
+                    }`}
+                    title={s.name}
+                    onClick={event => {
+                      if (isMobile) {
+                        setActiveSpace(s.id)
+                        setActiveView("channel")
+                        if (accessibleChannels[0]) setActiveChannel(accessibleChannels[0].id)
+                        setMobileView("chat")
+                        return
+                      }
+                      openCollapsedSpaceMenu(s, event)
+                    }}
+                  >
+                    <img src="/hexagon-gradient%20For%20spaces..png" alt={s.name} className="w-8 h-8 object-contain" />
+                    <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold ${activeSpace === s.id ? 'text-white' : 'text-white'}`}>
+                      {s.name.charAt(0).toUpperCase()}
+                    </span>
+                  </button>
+                )
+              })}
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
                 className="p-3 rounded-2xl border-2 border-dashed transition-all border-slate-200 text-slate-400 hover:border-indigo-400 hover:text-indigo-500"
@@ -5993,7 +7606,7 @@ export default function CollaborationApp() {
       {/* ... (Main Content, Headers, etc.) ... */}
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 relative z-0 ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
+      <div className={`flex-1 flex flex-col min-w-0 relative ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
         {/* VIEW: VIDEO MEETING / CALENDAR (No changes needed) ... */}
         {activeView === "meeting" ? (
           <div className="flex-1 flex flex-col relative bg-slate-900">
@@ -6235,50 +7848,194 @@ export default function CollaborationApp() {
             </div>
           </div>
         ) : activeView === "tasks" ? (
-          <div className={`flex-1 flex flex-col overflow-auto p-6 ${isDarkMode ? 'bg-[var(--bg-tertiary)]' : 'bg-white'}`}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Tasks</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 border rounded bg-white/50">
-                <h3 className="font-bold mb-2">Assigned to me</h3>
-                {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
-                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
-                    <div>
-                      <div className="font-bold">{t.message}</div>
-                      <div className="text-xs text-slate-500">{t.timestamp}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
-                      {t.status !== 'completed' && (
-                        <button className="text-sm text-indigo-600" onClick={async () => {
-                          const id = t.id || t.timestamp
-                          setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
-                          try {
-                            await TasksService.updateTask(id, { status: 'completed' })
-                          } catch (e) {
-                            console.warn('task update failed', e)
-                          }
-                        }}>Mark complete</button>
-                      )}
-                    </div>
+          <div className={`flex-1 flex flex-col overflow-auto ${isDarkMode ? 'bg-[#191b1f]' : 'bg-gradient-to-br from-slate-50 via-white to-indigo-50/30'}`}>
+            {/* Tasks Header */}
+            <div className={`sticky top-0 z-10 px-6 py-5 border-b backdrop-blur-xl ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200/60'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${isDarkMode ? 'bg-gradient-to-br from-violet-600 to-purple-700' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
+                    <ClipboardList className="w-6 h-6 text-white" />
                   </div>
-                ))}
+                  <div>
+                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>My Tasks</h2>
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id)).length} total tasks
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    {(tasksList || []).filter(t => t.status === 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} completed
+                  </div>
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    {(tasksList || []).filter(t => t.status !== 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} pending
+                  </div>
+                </div>
               </div>
+            </div>
 
-              <div className="p-4 border rounded bg-white/50">
-                <h3 className="font-bold mb-2">Created by me</h3>
-                {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
-                  <div key={t.id || t.timestamp} className="p-3 rounded mb-2 border flex items-start justify-between">
-                    <div>
-                      <div className="font-bold">{t.message}</div>
-                      <div className="text-xs text-slate-500">{t.timestamp}</div>
+            {/* Tasks Content */}
+            <div className="flex-1 p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
+                {/* Assigned to me */}
+                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-violet-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-indigo-50/50 to-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-violet-900/50 text-violet-400' : 'bg-indigo-100 text-indigo-600'}`}>
+                      <UserPlus className="w-5 h-5" />
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className={`px-2 py-1 rounded-full text-xs ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-800'}`}>{t.status}</div>
+                    <div>
+                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Assigned to me</h3>
+                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length} tasks
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length === 0 ? (
+                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                          <CheckCircle className="w-8 h-8" />
+                        </div>
+                        <p className="font-medium">No tasks assigned</p>
+                        <p className="text-xs mt-1">You're all caught up!</p>
+                      </div>
+                    ) : (
+                      (tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
+                        <div 
+                          key={t.id || t.timestamp} 
+                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
+                            t.status === 'completed' 
+                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
+                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-violet-500/30' : 'bg-white border-slate-200 hover:border-indigo-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <button 
+                              onClick={async () => {
+                                if (t.status === 'completed') return
+                                const id = t.id || t.timestamp
+                                setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
+                                try {
+                                  await TasksService.updateTask(id, { status: 'completed' })
+                                } catch (e) {
+                                  console.warn('task update failed', e)
+                                }
+                              }}
+                              className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                t.status === 'completed'
+                                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                                  : isDarkMode ? 'border-slate-500 hover:border-violet-500 hover:bg-violet-500/20' : 'border-slate-300 hover:border-indigo-500 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {t.status === 'completed' && <Check className="w-4 h-4" />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                {t.message}
+                              </div>
+                              <div className="flex items-center gap-3 mt-2">
+                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  <Clock className="w-3 h-3" />
+                                  {t.timestamp}
+                                </span>
+                                {t.channel_id && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              t.status === 'completed' 
+                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
+                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {t.status === 'completed' ? 'Done' : 'Pending'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Created by me */}
+                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-purple-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-purple-50/50 to-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-purple-100 text-purple-600'}`}>
+                      <PenTool className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Created by me</h3>
+                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length} tasks
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length === 0 ? (
+                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                          <Plus className="w-8 h-8" />
+                        </div>
+                        <p className="font-medium">No tasks created</p>
+                        <p className="text-xs mt-1">Create tasks by typing /task in chat</p>
+                      </div>
+                    ) : (
+                      (tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
+                        <div 
+                          key={t.id || t.timestamp} 
+                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
+                            t.status === 'completed' 
+                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
+                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-purple-500/30' : 'bg-white border-slate-200 hover:border-purple-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              t.status === 'completed'
+                                ? 'bg-emerald-500 text-white'
+                                : isDarkMode ? 'bg-slate-600 text-slate-400' : 'bg-slate-200 text-slate-500'
+                            }`}>
+                              {t.status === 'completed' ? <Check className="w-4 h-4" /> : <Clock className="w-3 h-3" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                {t.message}
+                              </div>
+                              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  <Clock className="w-3 h-3" />
+                                  {t.timestamp}
+                                </span>
+                                {t.channel_id && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
+                                  </span>
+                                )}
+                                {(t.assigned_to || []).length > 0 && (
+                                  <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                    <Users className="w-3 h-3" />
+                                    {(t.assigned_to || []).length} assignee{(t.assigned_to || []).length > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              t.status === 'completed' 
+                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
+                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {t.status === 'completed' ? 'Done' : 'Pending'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -6286,7 +8043,7 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header - Desktop with Liquid Glass */}
-            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3 rounded-2xl`}>
+            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3`}>
               {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
@@ -6318,7 +8075,7 @@ export default function CollaborationApp() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-5 relative z-10">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isDarkMode ? 'bg-gradient-to-br from-slate-800/80 to-slate-700/80 text-slate-300 border-2 border-slate-600/50 group-hover:from-purple-900/50 group-hover:to-indigo-900/50 group-hover:border-purple-600/50 group-hover:text-purple-400' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-indigo-50 group-hover:to-purple-50 group-hover:border-indigo-200 group-hover:text-indigo-600'}`}>
+                    <div className={`w-12 h-12 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-indigo-50 group-hover:to-purple-50 group-hover:border-indigo-200 group-hover:text-indigo-600'}`}>
                       <Hash className="w-6 h-6" />
                     </div>
                     <div>
@@ -6355,7 +8112,7 @@ export default function CollaborationApp() {
                     className={`liquid-glass-nav-item p-3.5 transition-all relative group`}
                     title="Documents"
                   >
-                    <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                    <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
                     {googleAccessToken && (
                       <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
                     )}
@@ -6378,7 +8135,7 @@ export default function CollaborationApp() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowGoogleAppsMenu(false)}
                       ></div>
-                      <div className={`absolute right-0 top-full mt-3 w-96 rounded-3xl shadow-2xl p-8 animate-fade-in origin-top-right z-50 ${isDarkMode ? 'bg-slate-800/95 ring-1 ring-purple-500/30 border border-slate-700' : 'bg-white/95 ring-1 ring-slate-200 border border-slate-100'} backdrop-blur-xl`}>
+                      <div className={`absolute right-0 top-full mt-3 w-96 rounded-3xl shadow-2xl p-8 animate-fade-in origin-top-right z-50 ${isDarkMode ? 'bg-[#2C2C2C] ring-1 ring-purple-500/30 border border-slate-700' : 'bg-white/95 ring-1 ring-slate-200 border border-slate-100'} backdrop-blur-xl`}>
                         <h3 className={`text-xl font-bold mb-6 flex items-center gap-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                           <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-violet-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'}`}>
                             <Grid3x3 className="w-5 h-5 text-white" />
@@ -6452,8 +8209,8 @@ export default function CollaborationApp() {
                   const canInvite = role === 'owner' || role === 'admin'
                   return (
                     <button
-                      title="Invite Members"
-                      aria-label="Invite Members"
+                      title="Add people"
+                      aria-label="Add people to this channel"
                       onClick={() => {
                         if (!canInvite) return
                         setInviteSearchQuery("")
@@ -6461,10 +8218,13 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(true)
                       }}
                       disabled={!canInvite}
-                      className={`hidden md:flex items-center gap-2.5 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wide rounded-2xl transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 ${canInvite ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-purple-300/40 hover:shadow-purple-400/50 hover:scale-[1.02]' : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
+                      className={`hidden md:flex liquid-glass-nav-item p-3.5 transition-all group ${
+                        canInvite ? '' : 'opacity-60 cursor-not-allowed'
+                      }`}
                     >
-                      <UserPlus className="w-4 h-4" />
-                      
+                      <UserPlus className={`w-5 h-5 transition-transform ${
+                        canInvite ? 'group-hover:scale-110' : ''
+                      } ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                     </button>
                   )
                 })()}
@@ -6484,8 +8244,8 @@ export default function CollaborationApp() {
                       <Moon className="w-5 h-5" />
                     )}
                   </div>
-                  <div className={`absolute inset-0 transition-opacity duration-500 ${isDarkMode ? 'opacity-100' : 'opacity-0'}`}>
-                    <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 to-pink-600/20 animate-gradient"></div>
+                  <div className={`absolute inset-0 transition-opacity duration-500 opacity-0 group-hover:opacity-100`}>
+                    <div className="absolute inset-0 bg-[#2C2C2C]"></div>
                   </div>
                 </button>
 
@@ -6531,8 +8291,8 @@ export default function CollaborationApp() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowUserMenu(false)}
                       ></div>
-                      <div className={`absolute right-0 top-full mt-3 w-72 rounded-3xl shadow-2xl py-2 animate-fade-in origin-top-right ring-1 ${isDarkMode ? 'bg-slate-800/95 border-purple-600/30 ring-purple-500/10 shadow-purple-500/20' : 'bg-white/95 border-slate-100 ring-black/5'} backdrop-blur-xl border z-50`}>
-                        <div className={`px-5 py-4 border-b ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                      <div className={`absolute right-0 top-full mt-3 w-72 rounded-3xl shadow-2xl py-2 animate-fade-in origin-top-right ring-1 ${isDarkMode ? 'bg-[#2C2C2C] border-slate-700/60 ring-slate-600/20 shadow-black/40' : 'bg-white/95 border-slate-100 ring-black/5'} backdrop-blur-xl border z-50`}>
+                        <div className={`px-5 py-4 border-b ${isDarkMode ? 'border-slate-700/60 bg-[#2C2C2C]' : 'border-slate-100 bg-slate-50/50'}`}>
                           <div className="flex items-center gap-3">
                             <span className={`text-3xl p-2 rounded-full shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
                               {renderAvatar(currentUser, 36)}
@@ -6556,7 +8316,7 @@ export default function CollaborationApp() {
                               setShowProfileModal(true)
                               setShowUserMenu(false)
                             }}
-                            className="w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'}`}
                           >
                             <div className="flex items-center gap-3">
                               <UserPlus className="w-4 h-4" /> Edit Profile
@@ -6567,7 +8327,7 @@ export default function CollaborationApp() {
                               setShowNotificationsModal(true)
                               setShowUserMenu(false)
                             }}
-                            className="w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'}`}
                           >
                             <div className="flex items-center gap-3">
                               <Bell className="w-4 h-4" /> Notifications
@@ -6578,7 +8338,7 @@ export default function CollaborationApp() {
                               </span>
                             ) : null}
                           </button>
-                          <div className="h-px my-1 mx-2 bg-slate-100"></div>
+                          <div className={`h-px my-1 mx-2 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}></div>
                           <button
                             onClick={() => {
                               handleLogout()
@@ -6598,7 +8358,7 @@ export default function CollaborationApp() {
 
             {/* Header - Mobile */}
             {isMobile && (
-              <div className={`h-[70px] sticky top-0 z-30 flex items-center justify-between px-4 border-b backdrop-blur-xl shadow-sm safe-area-top ${
+              <div className={`h-[70px] fixed top-0 left-0 right-0 z-[60] flex items-center justify-between gap-2 px-3 border-b backdrop-blur-xl shadow-sm safe-area-top ${
                 isDarkMode 
                   ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/30' 
                   : 'bg-white/95 border-slate-200/60 shadow-slate-100/50'
@@ -6606,11 +8366,11 @@ export default function CollaborationApp() {
                 {/* Left: Profile & Context */}
                 <div 
                   onClick={() => setShowMemberDetails(prev => !prev)}
-                  className="flex items-center gap-3 cursor-pointer touch-active"
+                  className="flex-1 min-w-0 flex items-center gap-3 cursor-pointer touch-active"
                 >
                   {activeView === "dm" ? (
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative flex-shrink-0">
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-base shadow-md border-2 overflow-hidden ${
                           isDarkMode 
                             ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600' 
@@ -6626,7 +8386,7 @@ export default function CollaborationApp() {
                           } ${isDarkMode ? 'border-slate-900' : 'border-white'}`}
                         ></span>
                       </div>
-                      <div className="max-w-[130px]">
+                      <div className="min-w-0 flex-1">
                         <h2 className={`font-bold text-[15px] leading-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                           {getActiveViewName()}
                         </h2>
@@ -6638,18 +8398,18 @@ export default function CollaborationApp() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-3">
-                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-sm ${
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 ${
                         isDarkMode 
                           ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-300 border border-slate-600' 
                           : 'bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border border-slate-200/50'
                       }`}>
                         <Hash className="w-5 h-5" />
                       </div>
-                      <div className="max-w-[140px]">
-                        <h2 className={`font-bold text-[15px] leading-tight truncate flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                          <span className={`font-medium text-xs truncate max-w-[60px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{getCurrentSpace()?.name}</span>
+                      <div className="min-w-0 flex-1">
+                        <h2 className={`font-bold text-[15px] leading-tight flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          <span className={`font-medium text-xs truncate max-w-[70px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{getCurrentSpace()?.name}</span>
                           <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
-                          <span className="truncate">{getActiveViewName().replace("#", "")}</span>
+                          <span className="truncate max-w-[100px]">{getActiveViewName().replace("#", "")}</span>
                         </h2>
                         <p className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                           <Users className="w-3 h-3" /> {activeMembers.length} members
@@ -6660,14 +8420,14 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Right: Action Icons & Menu */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 flex-shrink-0 relative z-10">
                   {/* Docs Icon */}
                   <button
-                    onClick={handleDocsClick}
+                    onClick={(e) => { e.stopPropagation(); handleDocsClick(); }}
                     className={`p-2.5 rounded-xl transition-all relative touch-active ${
                       isDarkMode 
-                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
-                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                        ? 'bg-slate-800 text-[#c9d3df] active:bg-slate-700' 
+                        : 'bg-slate-50 text-[#475569] active:bg-indigo-50'
                     }`}
                     title="Documents"
                   >
@@ -6681,7 +8441,8 @@ export default function CollaborationApp() {
                   {VIDEO_ENABLED && (
                     <div className="relative">
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (activeView === 'dm' && activeDMUser) {
                             // Start WebRTC call for DMs
                             const partner = getUser(activeDMUser)
@@ -6713,13 +8474,14 @@ export default function CollaborationApp() {
                     </div>
                   )}
 
-                  {/* Invite Members (Channel only) */}
+                  {/* Add people (Channel only) */}
                   {activeView === "channel" && (() => {
                     const role = getChannelRole(currentUser?.id)
                     const canInvite = role === 'owner' || role === 'admin'
                     return (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (!canInvite) return
                           setInviteSearchQuery("")
                           setSelectedInviteUsers([])
@@ -6727,226 +8489,200 @@ export default function CollaborationApp() {
                         }}
                         disabled={!canInvite}
                         className={`p-2.5 rounded-xl transition-all shadow-md touch-active ${canInvite ? (isDarkMode ? 'text-white bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/30 active:from-violet-500 active:to-purple-500' : 'text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-indigo-200/50 active:from-indigo-600 active:to-purple-600') : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
-                        title="Invite Members"
+                        title="Add people"
+                        aria-label="Add people to this channel"
                       >
                         <UserPlus className="w-5 h-5" />
                       </button>
                     )
                   })()}
 
-                  {/* Mobile Menu Button */}
-                  <button
-                    onClick={() => setShowMobileDrawer(true)}
-                    className={`p-2.5 rounded-xl transition-all touch-active ${
-                      isDarkMode 
-                        ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
-                        : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
-                    }`}
-                    title="Menu"
-                  >
-                    <Menu className="w-5 h-5" />
-                  </button>
+                  {/* Mobile Menu Button with Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMobileDrawer(prev => !prev); }}
+                      className={`p-2.5 rounded-xl transition-all touch-active ${
+                        isDarkMode 
+                          ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
+                          : 'bg-slate-50 text-slate-500 active:bg-indigo-50'
+                      }`}
+                      style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                      title="Menu"
+                    >
+                      <Menu className="w-5 h-5" />
+                    </button>
+                    
+                    {/* Quick Menu Dropdown */}
+                    {showMobileDrawer && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-[99]"
+                          onClick={() => setShowMobileDrawer(false)}
+                        />
+                        <div className={`absolute right-0 top-full mt-2 w-48 rounded-2xl shadow-xl border z-[100] animate-fade-in overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-slate-800 border-slate-700' 
+                            : 'bg-white border-slate-200'
+                        }`}>
+                          {/* Profile */}
+                          <button
+                            onClick={() => {
+                              setSelectedPreset(currentUser?.avatar_preset || null)
+                              setAvatarPreview(currentUser?.avatar_url || null)
+                              setShowProfileModal(true)
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all ${
+                              isDarkMode 
+                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600' 
+                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                              {renderAvatar(currentUser, 32)}
+                            </div>
+                            Profile
+                          </button>
+                          
+                          {/* Google Apps */}
+                          <button
+                            onClick={() => {
+                              setShowGoogleAppsMenu(true)
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
+                              isDarkMode 
+                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600 border-slate-700' 
+                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100 border-slate-100'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
+                              <Grid3x3 className="w-4 h-4" />
+                            </div>
+                            Google Apps
+                          </button>
+                          
+                          {/* Theme Toggle */}
+                          <button
+                            onClick={() => {
+                              setIsDarkMode(!isDarkMode)
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
+                              isDarkMode 
+                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600 border-slate-700' 
+                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100 border-slate-100'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-yellow-400' : 'bg-slate-100 text-slate-500'}`}>
+                              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                            </div>
+                            {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+                          </button>
+                          
+                          {/* Notifications */}
+                          <button
+                            onClick={() => {
+                              setShowNotificationsModal(true)
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
+                              isDarkMode 
+                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600 border-slate-700' 
+                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100 border-slate-100'
+                            }`}
+                          >
+                            <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-amber-400' : 'bg-slate-100 text-slate-500'}`}>
+                              <Bell className="w-4 h-4" />
+                              {currentUser?.notifications?.length > 0 && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                                  {currentUser?.notifications?.length}
+                                </span>
+                              )}
+                            </div>
+                            Notifications
+                          </button>
+                          
+                          {/* Sign Out */}
+                          <button
+                            onClick={() => {
+                              handleLogout()
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
+                              isDarkMode 
+                                ? 'text-red-400 hover:bg-red-900/30 active:bg-red-900/50 border-slate-700' 
+                                : 'text-red-600 hover:bg-red-50 active:bg-red-100 border-slate-100'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-red-900/30 text-red-400' : 'bg-red-50 text-red-500'}`}>
+                              <LogOut className="w-4 h-4" />
+                            </div>
+                            Sign Out
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Mobile Drawer Menu */}
-            {isMobile && showMobileDrawer && (
-              <>
-                {/* Backdrop */}
-                <div 
-                  className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm animate-fade-in"
-                  onClick={() => setShowMobileDrawer(false)}
-                ></div>
-                
-                {/* Drawer */}
-                <div className={`fixed top-0 right-0 bottom-0 w-[280px] z-50 backdrop-blur-xl shadow-2xl border-l mobile-slide-in-right ${
-                  isDarkMode 
-                    ? 'bg-slate-900/98 border-slate-700/60 shadow-slate-950/50' 
-                    : 'bg-white/98 border-slate-200/60 shadow-slate-500/20'
-                }`}>
-                  {/* Drawer Header */}
-                  <div className={`p-5 border-b ${isDarkMode ? 'border-slate-800 bg-gradient-to-r from-slate-900 to-violet-900/20' : 'border-slate-100 bg-gradient-to-r from-white to-indigo-50/30'}`}>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Menu</h3>
-                      <button
-                        onClick={() => setShowMobileDrawer(false)}
-                        className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-slate-300' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                    
-                    {/* User Profile Card */}
-                    <div className={`flex items-center gap-3 p-3 rounded-2xl shadow-sm border ${
-                      isDarkMode 
-                        ? 'bg-slate-800/80 border-slate-700' 
-                        : 'bg-white border-slate-100'
-                    }`}>
-                      <div className="relative">
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-md border-2 ring-2 overflow-hidden ${
-                          isDarkMode 
-                            ? 'bg-slate-700 border-slate-700 ring-slate-700/50' 
-                            : 'bg-white border-white ring-slate-100'
-                        }`}>
-                          {renderAvatar(currentUser, 48)}
-                        </div>
-                        <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <div className={`font-bold text-sm truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{currentUser?.name}</div>
-                        <div className="text-[10px] font-semibold text-emerald-500 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          Available
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Drawer Content */}
-                  <div className="p-4 space-y-2 overflow-y-auto max-h-[calc(100vh-200px)]">
-                    {/* Edit Profile */}
-                    <button
-                      onClick={() => {
-                        setSelectedPreset(currentUser?.avatar_preset || null)
-                        setAvatarPreview(currentUser?.avatar_url || null)
-                        setShowProfileModal(true)
-                        setShowMobileDrawer(false)
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
-                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
-                        <UserPlus className="w-5 h-5" />
-                      </div>
-                      Edit Profile
-                    </button>
-
-                    {/* Notifications */}
-                    <button
-                      onClick={() => {
-                        setShowNotificationsModal(true)
-                        setShowMobileDrawer(false)
-                      }}
-                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
-                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
-                          <Bell className="w-5 h-5" />
-                        </div>
-                        Notifications
-                      </div>
-                      {currentUser?.notifications?.length ? (
-                        <span className="bg-red-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-sm shadow-red-500/30">
-                          {currentUser?.notifications?.length}
-                        </span>
-                      ) : null}
-                    </button>
-
-                    {/* Google Apps */}
-                    <button
-                      onClick={() => {
-                        setShowGoogleAppsMenu(true)
-                        setShowMobileDrawer(false)
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
-                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
-                        <Grid3x3 className="w-5 h-5" />
-                      </div>
-                      Google Apps
-                    </button>
-
-                    {/* Calendar */}
-                    <button
-                      onClick={() => {
-                        if (!googleCalendarToken) {
-                          setShowCalendarConnectModal(true)
-                        } else {
-                          setActiveView("calendar")
-                          setActiveSpace(null)
-                        }
-                        setShowMobileDrawer(false)
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
-                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-violet-400' : 'bg-slate-100 text-slate-500'}`}>
-                        <Calendar className="w-5 h-5" />
-                      </div>
-                      Calendar
-                    </button>
-
-                    {/* Theme Toggle */}
-                    <button
-                      onClick={() => setIsDarkMode(!isDarkMode)}
-                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-slate-300 hover:bg-slate-800 active:bg-slate-700' 
-                          : 'text-slate-700 hover:bg-indigo-50 active:bg-indigo-100'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-500'}`}>
-                          {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                        </div>
-                        {isDarkMode ? 'Light Mode' : 'Dark Mode'}
-                      </div>
-                      <div className={`relative w-11 h-6 rounded-full transition-colors ${isDarkMode ? 'bg-indigo-600' : 'bg-slate-200'}`}>
-                        <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-md transition-all ${isDarkMode ? 'left-6' : 'left-1'}`}></div>
-                      </div>
-                    </button>
-
-                    <div className={`h-px my-3 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}></div>
-
-                    {/* Sign Out */}
-                    <button
-                      onClick={() => {
-                        handleLogout()
-                        setShowMobileDrawer(false)
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all touch-active ${
-                        isDarkMode 
-                          ? 'text-red-400 hover:bg-red-900/30 active:bg-red-900/50' 
-                          : 'text-red-600 hover:bg-red-50 active:bg-red-100'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-50 text-red-500'}`}>
-                        <LogIn className="w-5 h-5" />
-                      </div>
-                      Sign Out
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
-            <div className={`flex-1 flex overflow-hidden liquid-glass-chat-area relative`}>
+            <div className={`flex-1 flex overflow-hidden liquid-glass-chat-area relative ${isMobile ? 'mt-[70px]' : ''}`}>
               <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
+                {activeView === "channel" && (
+                  <ChannelTabs
+                    activeTab={activeChannelTab}
+                    isDarkMode={isDarkMode}
+                    onChange={setActiveChannelTab}
+                    selectedCount={selectedMessageIds.length}
+                    onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
+                  />
+                )}
                 {/* Updated Container with Custom Pattern Background */}
                 {/* day label computed above via `messageDateLabel` */}
 
+                {activeView === "channel" && activeChannelTab !== "messages" ? (
+                  <div className="flex-1 overflow-y-auto py-2 pb-6">
+                    {activeChannelTab === "contexts" && (
+                      <ContextsTabView
+                        contexts={currentChannelContexts}
+                        isDarkMode={isDarkMode}
+                        onOpen={openContext}
+                        renderOwner={getContextOwnerName}
+                        formatUpdatedTime={formatContextTime}
+                      />
+                    )}
+                    {activeChannelTab === "files" && (
+                      <FilesList files={currentChannelFiles} isDarkMode={isDarkMode} />
+                    )}
+                    {activeChannelTab === "decisions" && (
+                      <DecisionList
+                        decisions={currentChannelDecisionItems}
+                        isDarkMode={isDarkMode}
+                        onOpenMessage={messageId => {
+                          setActiveChannelTab("messages")
+                          setTargetMessageId(messageId)
+                          setPinnedMessageId(messageId)
+                        }}
+                        formatTime={formatContextTime}
+                      />
+                    )}
+                  </div>
+                ) : (
+                <>
                 <div
                   ref={messagesContainerRef}
                   onScroll={() => {
                     const el = messagesContainerRef.current
                     if (!el) return
+                    const activeChatId = getActiveChatId()
+                    if (activeChatId) {
+                      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
+                    }
                     const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
                     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
                     setIsAtBottom(atBottom)
@@ -6974,7 +8710,7 @@ export default function CollaborationApp() {
                   {/* ... (Existing Message Rendering) ... */}
                       {getCurrentMessages().length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center">
-                      <div className={`p-10 rounded-[2.5rem] text-center max-w-sm backdrop-blur-sm border ${isDarkMode ? 'bg-slate-800/80 border-purple-600/20 shadow-lg shadow-purple-500/5' : 'bg-white/70 border-slate-200/50 shadow-xl shadow-indigo-100/30'}`}>
+                      <div className={`p-10 rounded-[2.5rem] text-center max-w-sm backdrop-blur-sm ${isDarkMode ? 'bg-[#191919] border border-[#4d4d4d] shadow-lg shadow-purple-500/5' : 'border bg-white/70 border-slate-200/50 shadow-xl shadow-indigo-100/30'}`}>
                         <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 relative shadow-lg transform rotate-3 hover:rotate-6 transition-transform ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-600'}`}>
                           <MessageCircle className="w-12 h-12" />
                           <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full border-4 animate-bounce bg-yellow-400 ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></div>
@@ -7045,6 +8781,8 @@ export default function CollaborationApp() {
                         const isSequence =
                           prevMsg && prevMsg.userId === msg.userId
                         const messageStatus = msg.status || "sent"
+                        const messageContexts = getMessageContexts(msg)
+                        const isMessageSelected = selectedMessageIds.some(id => String(id) === String(msg.id))
                         const statusLabel = (() => {
                           if (!isMe) return null
                           if (messageStatus === "failed") {
@@ -7096,6 +8834,13 @@ export default function CollaborationApp() {
                                 isSequence ? "mt-1" : "mt-6"
                               } group animate-fade-in`}
                             >
+                            <div className="pt-2">
+                              <MessageSelectionToggle
+                                isDarkMode={isDarkMode}
+                                checked={isMessageSelected}
+                                onChange={() => toggleMessageSelection(msg.id)}
+                              />
+                            </div>
                             {/* Avatar only for first in sequence */}
                             <div className="flex-shrink-0 w-10 flex flex-col items-center">
                               {!isSequence ? (
@@ -7153,6 +8898,53 @@ export default function CollaborationApp() {
                                       : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-violet-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-indigo-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
+                                <div
+                                  className={`absolute ${isMe ? '-left-12' : '-right-12'} -top-3 z-20`}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <MessageActionButton
+                                    isDarkMode={isDarkMode}
+                                    onClick={() =>
+                                      setMessageActionMenu(prev =>
+                                        prev?.messageId === msg.id ? null : { messageId: msg.id }
+                                      )
+                                    }
+                                  />
+                                  {messageActionMenu?.messageId === msg.id && (
+                                    <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
+                                      <MessageActionsMenu
+                                        isDarkMode={isDarkMode}
+                                        isSelected={isMessageSelected}
+                                        emojis={EMOJIS}
+                                        onReact={emoji => {
+                                          toggleReaction(getActiveChatId(), msg.id, emoji)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onToggleSelection={() => {
+                                          toggleMessageSelection(msg.id)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onCreateContext={() => openCreateContextModal([msg.id])}
+                                        onAddToContext={() => {
+                                          setMessageContextPicker({ messageId: msg.id })
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onMarkDecision={() => markMessageDecision(msg)}
+                                        onCreateTask={() => openTaskFromMessage(msg)}
+                                      />
+                                    </div>
+                                  )}
+                                  {messageContextPicker?.messageId === msg.id && (
+                                    <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
+                                      <AddToContextPopover
+                                        isDarkMode={isDarkMode}
+                                        contexts={currentChannelContexts}
+                                        onClose={() => setMessageContextPicker(null)}
+                                        onSelect={contextId => addMessageToContext(contextId, msg.id)}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
                                 {/* Meet Invite Message */}
                                 {msg.type === 'meet-invite' && msg.meetLink && (
                                   <div className="space-y-3">
@@ -7204,6 +8996,22 @@ export default function CollaborationApp() {
                                   </div>
                                 )}
 
+                                <div className={`flex flex-wrap gap-2 ${msg.text ? 'mt-2' : ''}`}>
+                                  {msg.isDecision && (
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
+                                      isDarkMode ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-700'
+                                    }`}>
+                                      <CheckCircle className="w-3 h-3" />
+                                      Decision
+                                    </span>
+                                  )}
+                                  <ContextBadge
+                                    contexts={messageContexts}
+                                    isDarkMode={isDarkMode}
+                                    onOpen={() => openContext(messageContexts[0]?.id)}
+                                  />
+                                </div>
+
                                 {/* Reactions row */}
                                 {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                                   <div className="mt-2 flex items-center gap-2">
@@ -7218,28 +9026,6 @@ export default function CollaborationApp() {
                                       >
                                         <span className="text-lg">{emoji}</span>
                                         <span className={`ml-1 text-xs font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{uids.length}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {/* Emoji picker - hover or explicit open */}
-                                {(hoveredMessageId === msg.id || showEmojiPickerFor === msg.id) && (
-                                  <div
-                                    className={`absolute flex gap-1 p-2 rounded-xl shadow-lg z-20 animate-fade-in ${
-                                      isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'
-                                    }`}
-                                    style={{ left: '50%', top: '-48px', transform: 'translateX(-50%)' }}
-                                  >
-                                    {EMOJIS.map(e => (
-                                      <button
-                                        key={e}
-                                        onClick={() => { toggleReaction(getActiveChatId(), msg.id, e); setShowEmojiPickerFor(null) }}
-                                        className={`p-1 text-lg rounded transition-colors ${
-                                          isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        {e}
                                       </button>
                                     ))}
                                   </div>
@@ -7439,7 +9225,13 @@ export default function CollaborationApp() {
                 {/* Message Input */}
                 <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
-                  <div className={`liquid-glass-card rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 ${isDarkMode ? 'focus-within:ring-purple-500/30' : 'focus-within:ring-indigo-500/20'}`}>
+                  <div
+                    className={`rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 ${
+                      isDarkMode
+                        ? 'bg-[#191b1f] border border-slate-700/50 focus-within:ring-purple-500/30'
+                        : 'bg-[#e9eef6] focus-within:ring-indigo-500/20'
+                    }`}
+                  >
                     {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
                       <div className={`flex gap-3 p-3 mb-2 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
@@ -7484,12 +9276,6 @@ export default function CollaborationApp() {
                           className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                         >
                           <Paperclip className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => setShowEmojiPickerFor('input')}
-                          className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
-                        >
-                          <span className="text-lg">😀</span>
                         </button>
 
                         <button
@@ -7540,24 +9326,80 @@ export default function CollaborationApp() {
                         style={{ minHeight: "48px" }}
                       />
 
-                      <button
-                        onClick={sendMessage}
-                        disabled={
-                          (!messageInput.trim() &&
-                            selectedFiles.length === 0) ||
-                          isUploading
-                        }
-                        className={`p-3.5 mb-1 rounded-2xl shadow-lg transition-all duration-300 active:scale-90 transform ${isDarkMode ? 'bg-gradient-to-br from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-purple-500/30 hover:shadow-purple-400/50' : 'bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-indigo-300/50 hover:shadow-indigo-400/60'} disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 text-white hover:scale-105`}
-                      >
-                        <Send className="w-5 h-5 ml-0.5" />
-                      </button>
+                      <button  
+  onClick={sendMessage}
+  disabled={
+    (!messageInput.trim() && selectedFiles.length === 0) ||
+    isUploading
+  }
+  className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
+    isDarkMode
+      ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
+      : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
+  } disabled:opacity-70 hover:scale-105`}
+>
+  <Send className="w-5 h-5 ml-0.5" />
+</button>
                     </div>
                   </div>
                   <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                     Press <strong>Enter</strong> to send
                   </div>
                 </div>
+                </>
+                )}
               </div>
+
+              {activeView === "channel" && currentContext && (
+                <LivingContextPanel
+                  isDarkMode={isDarkMode}
+                  context={currentContext}
+                  ownerName={getContextOwnerName(currentContext.ownerId)}
+                  contributorNames={(currentContext.contributorIds || []).map(getContextOwnerName)}
+                  linkedMessages={currentContextMessages}
+                  files={currentContextFiles}
+                  decisions={currentContextDecisions}
+                  tasks={currentContextTasks.map(task => ({
+                    ...task,
+                    assigneeLabel: (task.assigneeIds || []).map(getContextOwnerName).join(", ") || "Unassigned",
+                  }))}
+                  activity={currentContextActivity}
+                  canEdit={isContextManager(currentContext)}
+                  canAddSelectedMessage={selectedMessageIds.length > 0}
+                  onAddSelectedMessage={async () => {
+                    for (const messageId of selectedMessageIds) {
+                      await addMessageToContext(currentContext.id, messageId)
+                    }
+                  }}
+                  onMarkDecision={() => {
+                    const selected = getMessageById(selectedMessageIds[0])
+                    if (selected) markMessageDecision(selected)
+                  }}
+                  onCreateTask={() => {
+                    const selected = getMessageById(selectedMessageIds[0])
+                    if (selected) openTaskFromMessage(selected)
+                  }}
+                  onEdit={() => {
+                    setEditingContextId(currentContext.id)
+                    setContextDraft({
+                      title: currentContext.title,
+                      summary: currentContext.summary,
+                      status: currentContext.status,
+                      ownerId: String(currentContext.ownerId),
+                      messageIds: currentContext.linkedMessageIds || [],
+                    })
+                  }}
+                  onClose={() => setOpenContextId(null)}
+                  formatTime={formatContextTime}
+                  panelStyle={{
+                    top: activeView === "channel" ? 72 : 16,
+                    right: 16,
+                    bottom: activeChannelTab === "messages"
+                      ? (messageInputRef.current?.offsetHeight || 120) + 16
+                      : 16,
+                  }}
+                />
+              )}
 
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
@@ -7740,6 +9582,54 @@ export default function CollaborationApp() {
         )}
       </div>
 
+      {collapsedSpaceMenu && !isMobile && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={collapsedSpaceMenuRef}
+            className={`collapsed-space-popover ${isDarkMode ? "collapsed-space-popover-dark" : ""}`}
+            style={{
+              position: "fixed",
+              top: collapsedSpaceMenu.top,
+              left: collapsedSpaceMenu.left
+            }}
+          >
+            <div className="collapsed-space-popover-header">
+              <span className="collapsed-space-popover-title">
+                {collapsedSpaceMenu.spaceName}
+              </span>
+              <span className="collapsed-space-popover-count">
+                {collapsedSpaceMenu.channels.length}
+              </span>
+            </div>
+            <div className="collapsed-space-popover-list">
+              {collapsedSpaceMenu.channels.length > 0 ? (
+                collapsedSpaceMenu.channels.map(channel => (
+                  <button
+                    key={channel.id}
+                    className={`collapsed-space-channel-item ${
+                      activeView === "channel" && activeChannel === channel.id
+                        ? "collapsed-space-channel-item-active"
+                        : ""
+                    }`}
+                    onClick={() => handleChannelNavigation(collapsedSpaceMenu.spaceId, channel.id)}
+                  >
+                    <Hash className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate flex-1 text-left">{channel.name}</span>
+                    {unreadChannels.includes(channel.id) && activeChannel !== channel.id && (
+                      <span className="collapsed-space-channel-dot" />
+                    )}
+                  </button>
+                ))
+              ) : (
+                <div className="collapsed-space-popover-empty">
+                  No channels available
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+
       {/* Right Sidebar - FRIENDS & DMs */}
       <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-y-0 right-0 w-[85%] max-w-[320px] mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
@@ -7794,7 +9684,7 @@ export default function CollaborationApp() {
           </div>
         </div>
 
-        {!friendsSidebarCollapsed && (
+        {(!friendsSidebarCollapsed || isMobile) && (
           <div className="px-5 pt-6 pb-2 animate-fade-in">
             <div className="relative group">
               <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-purple-400' : 'text-slate-400 group-focus-within:text-indigo-500'}`} />
@@ -7810,7 +9700,7 @@ export default function CollaborationApp() {
         )}
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
-          {!friendsSidebarCollapsed ? (
+          {(!friendsSidebarCollapsed || isMobile) ? (
             <>
               {dmSearchResults.length > 0 ? (
                 dmSearchResults.map(result => (
@@ -7834,23 +9724,21 @@ export default function CollaborationApp() {
                         }
                       }
                     }}
-                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border ${
+                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all border ${
                       activeView === "dm" && activeDMUser === result.userId
-                        ? isDarkMode ? "bg-purple-900/30 border-purple-600/30" : "bg-indigo-50/80 border-indigo-100/60 shadow-sm"
-                        : isDarkMode ? "bg-slate-800/50 border-transparent hover:bg-slate-800" : "bg-white/60 border-transparent hover:bg-white/90 hover:shadow-sm"
+                        ? isDarkMode ? "bg-transparent border-transparent text-slate-200" : "bg-[#eeedec] border-transparent text-slate-700 shadow-sm"
+                        : isDarkMode ? "bg-transparent border-transparent hover:bg-[#2C2C2C]" : "bg-white/60 border-transparent hover:bg-[#f1f0ef] hover:shadow-sm"
                     }`}
                   >
-                    <div className="relative">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
-                        {result.icon}
-                      </div>
+                    <div className="relative w-10 h-10 flex items-center justify-center text-lg">
+                      {result.icon}
                     </div>
                     <div className="flex-1 overflow-hidden">
                       <div className="flex justify-between items-center">
                         <span
                           className={`text-sm font-bold truncate ${
                             activeView === "dm" && activeDMUser === result.userId
-                              ? isDarkMode ? "text-purple-300" : "text-indigo-900"
+                              ? isDarkMode ? "text-slate-200" : "text-slate-800"
                               : isDarkMode ? "text-slate-200" : "text-slate-700"
                           }`}
                         >
@@ -7898,18 +9786,18 @@ export default function CollaborationApp() {
                       justSwitchedThreadRef.current = true
                       if (isMobile) setMobileView("chat")
                     }}
-                    className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-300 border hover-lift ${
+                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
                       activeView === "dm" && activeDMUser === friend.id
                         ? isDarkMode 
-                          ? "bg-gradient-to-r from-purple-900/40 to-violet-900/30 border-purple-600/30 shadow-md shadow-purple-500/10 ring-1 ring-purple-600/20"
-                          : "bg-gradient-to-r from-indigo-50/80 to-purple-50/50 border-indigo-100/60 shadow-md shadow-indigo-100/40 ring-1 ring-indigo-100/50"
+                          ? "bg-transparent border-transparent"
+                          : "bg-[#eeedec] border-transparent shadow-sm"
                         : isDarkMode 
-                          ? "bg-slate-800/50 border-transparent hover:bg-slate-800 hover:border-slate-700"
-                          : "bg-white/60 border-transparent hover:bg-white/90 hover:border-slate-200/40 hover:shadow-md"
+                          ? "bg-transparent border-transparent hover:bg-[#2C2C2C]"
+                          : "bg-white/60 border-transparent hover:bg-[#f1f0ef] hover:border-slate-200/40 hover:shadow-md"
                     }`}
                   >
                     <div className="relative">
-                      <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg shadow-md border-2 overflow-hidden ring-2 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-700/50' : 'bg-gradient-to-br from-white to-slate-50 border-white ring-slate-100/50'}`}>
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg overflow-hidden">
                         {renderAvatar(friend, 40)}
                       </div>
                       <span
@@ -7951,14 +9839,14 @@ export default function CollaborationApp() {
                   {friends.map(friend => (
                     <button
                       key={friend.id}
-                      className={`relative w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300 overflow-hidden ${
+                      className={`collapsed-friend-icon group relative w-11 h-11 flex items-center justify-center rounded-[10px] transition-all duration-300 overflow-visible ${
                         activeView === "dm" && activeDMUser === friend.id
-                          ? isDarkMode 
-                            ? "ring-2 ring-purple-500 shadow-lg shadow-purple-500/30" 
-                            : "ring-2 ring-indigo-500 shadow-lg shadow-indigo-500/30"
+                          ? isDarkMode
+                            ? "bg-transparent collapsed-friend-icon-active-dark"
+                            : "bg-[#eeedec] collapsed-friend-icon-active"
                           : isDarkMode
-                            ? "hover:ring-2 hover:ring-slate-600 hover:shadow-md"
-                            : "hover:ring-2 hover:ring-slate-200 hover:shadow-md"
+                            ? "collapsed-friend-icon-dark"
+                            : "collapsed-friend-icon-light"
                       }`}
                       title={friend.name}
                       onClick={() => {
@@ -7970,14 +9858,19 @@ export default function CollaborationApp() {
                         if (isMobile) setMobileView("chat")
                       }}
                     >
-                      {renderAvatar(friend, 48)}
+                      <span className="collapsed-friend-avatar">
+                        {renderAvatar(friend, 48)}
+                      </span>
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
+                        className={`collapsed-friend-status absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 shadow-sm ${
                           friend.status === "online"
-                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50"
+                            ? "bg-gradient-to-br from-emerald-400 to-emerald-500 shadow-emerald-300/50 collapsed-friend-status-online"
                             : "bg-gradient-to-br from-slate-300 to-slate-400"
                         } ${isDarkMode ? 'border-slate-800' : 'border-white'}`}
                       ></span>
+                      <span className={`collapsed-friend-tooltip ${isDarkMode ? "collapsed-friend-tooltip-dark" : ""}`}>
+                        {friend.name}
+                      </span>
                     </button>
                   ))}
                   <button
@@ -8358,7 +10251,7 @@ export default function CollaborationApp() {
                   : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <Sparkles className={`w-5 h-5 transition-transform duration-200`} />
+              <div aria-hidden="true" className="w-5 h-5 rounded-md transition-transform duration-200" />
               <span className="text-[10px] font-semibold">Spaces</span>
             </button>
             <button
@@ -8393,22 +10286,30 @@ export default function CollaborationApp() {
           isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
         }`}>
           <div className={`liquid-glass-modal p-8 w-full max-w-sm`}>
-            <h3 className={`text-2xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
-              Create Space
+            <h3 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
+              Create a Space
             </h3>
+            <p className={`text-sm mb-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              Create your first Space — it takes 30 seconds.
+            </p>
             <div className="space-y-4">
-              <input
-                type="text"
-                value={newSpaceName}
-                onChange={e => setNewSpaceName(e.target.value)}
-                className={`w-full px-5 py-4 rounded-2xl border focus:outline-none focus:ring-2 ${
-                  isDarkMode 
-                    ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500' 
-                    : 'bg-slate-50 border-slate-200 focus:ring-indigo-500'
-                }`}
-                placeholder="Space Name"
-                autoFocus
-              />
+              <div>
+                <input
+                  type="text"
+                  value={newSpaceName}
+                  onChange={e => setNewSpaceName(e.target.value)}
+                  className={`w-full px-5 py-4 rounded-2xl border focus:outline-none focus:ring-2 ${
+                    isDarkMode 
+                      ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500' 
+                      : 'bg-slate-50 border-slate-200 focus:ring-indigo-500'
+                  }`}
+                  placeholder="Space Name"
+                  autoFocus
+                />
+                <p className={`text-xs mt-2 ${isDarkMode ? 'text-violet-400/70' : 'text-violet-600/70'}`}>
+                  💡 Tip: Create one Space per project to keep messages, files & tasks together.
+                </p>
+              </div>
               <div className="flex gap-4">
                 <button
                   onClick={() => setShowCreateSpaceModal(false)}
@@ -8597,7 +10498,7 @@ export default function CollaborationApp() {
           <div className={`liquid-glass-modal p-8 w-full max-w-md max-h-[90vh] flex flex-col`}>
             <div className="flex items-center justify-between mb-8 flex-shrink-0">
               <h3 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                Invite Members
+                Add people
               </h3>
               <button
                 onClick={() => setShowAddToSpaceModal(false)}
@@ -9712,3 +11613,6 @@ export default function CollaborationApp() {
     </div>
   )
 }
+
+
+
