@@ -220,6 +220,8 @@ export default function CollaborationApp() {
   const [selectedMessageIds, setSelectedMessageIds] = useState([])
   const [messageActionMenu, setMessageActionMenu] = useState(null)
   const [messageContextPicker, setMessageContextPicker] = useState(null)
+  const [composerContextPickerOpen, setComposerContextPickerOpen] = useState(false)
+  const [selectedComposerContextId, setSelectedComposerContextId] = useState(null)
   const [contextItems, setContextItems] = useState([])
   const [contextDecisions, setContextDecisions] = useState([])
   const [contextTasks, setContextTasks] = useState([])
@@ -410,6 +412,10 @@ export default function CollaborationApp() {
   }, [orgStage])
   const [showAccessDeniedModal, setShowAccessDeniedModal] = useState(false)
   const [showAddFriendConfirm, setShowAddFriendConfirm] = useState(null) // ID of user to add
+  const pendingFriendRequestIdsRef = useRef(new Set())
+  const [pendingFriendRequestIds, setPendingFriendRequestIds] = useState([])
+  const pendingNotificationActionIdsRef = useRef(new Set())
+  const [pendingNotificationActionIds, setPendingNotificationActionIds] = useState([])
 
   // Management Modals
   const [showRenameModal, setShowRenameModal] = useState(null)
@@ -534,12 +540,15 @@ export default function CollaborationApp() {
   const messagesContainerRef = useRef(null)
   const prevScrollHeightRef = useRef(0)
   const messageScrollPositionsRef = useRef({})
+  const pendingTabScrollRestoreRef = useRef(null)
   const chatSocketRef = useRef(null)
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
   const justSwitchedThreadRef = useRef(false)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
+  const contextSaveTimeoutRef = useRef(null)
+  const activeContextStateRef = useRef({ chatId: null, loaded: false })
   const collapsedSpaceMenuRef = useRef(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
@@ -1777,7 +1786,7 @@ export default function CollaborationApp() {
     }
 
     // 3.5) When restoring from Contexts/Files/Decisions back to Messages, don't auto-jump.
-    if (restoreMessageScrollRef.current) {
+    if (restoreMessageScrollRef.current || pendingTabScrollRestoreRef.current) {
       return
     }
 
@@ -2275,6 +2284,30 @@ export default function CollaborationApp() {
     setShowSuccessToast(true)
     setTimeout(() => setShowSuccessToast(false), 3000)
   }
+
+  const sortedGoogleDocs = useMemo(() => {
+    return [...googleDocs].sort((a, b) => {
+      const timeA = a.modifiedTime ? new Date(a.modifiedTime).getTime() : 0
+      const timeB = b.modifiedTime ? new Date(b.modifiedTime).getTime() : 0
+      return timeB - timeA
+    })
+  }, [googleDocs])
+
+  const docsOverview = useMemo(() => {
+    const docsCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs').length
+    const sheetsCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets').length
+    const slidesCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides').length
+
+    return {
+      total: googleDocs.length + gmailAttachments.length + sharedChatDocs.length,
+      drive: googleDocs.length,
+      docs: docsCount,
+      sheets: sheetsCount,
+      slides: slidesCount,
+      gmail: gmailAttachments.length,
+      shared: sharedChatDocs.length,
+    }
+  }, [googleDocs, gmailAttachments, sharedChatDocs])
 
   // Connect Google Calendar
   const handleConnectGoogleCalendar = () => {
@@ -3115,19 +3148,6 @@ export default function CollaborationApp() {
     return d.toLocaleDateString()
   }
 
-  // Compute the current chat's date label (latest message) and update when relevant state changes
-  const messageDateLabel = useMemo(() => {
-    try {
-      const _msgs = getCurrentMessages() || []
-      const _latest = _msgs.length ? _msgs[_msgs.length - 1] : null
-      return formatDateLabel(_latest?.timestamp, timeTicker)
-    } catch (e) {
-      return "Today"
-    }
-  }, [messages, activeView, activeChannel, activeDMUser, timeTicker])
-
-  // Visible date label (changes while scrolling to indicate the date of messages in view)
-
   // --- Dismissed notifications persistence helpers ---
   const dismissedKeyFor = userId => `spaces_dismissed_notifications_${userId}`
 
@@ -3184,8 +3204,18 @@ export default function CollaborationApp() {
     )
   }
 
-  const getCurrentSpace = () => spaces.find(s => s.id === activeSpace)
-  const getCurrentChannels = () => getCurrentSpace()?.channels || []
+  const currentSpace = useMemo(
+    () => spaces.find(s => s.id === activeSpace) || null,
+    [spaces, activeSpace]
+  )
+
+  const currentChannels = useMemo(
+    () => currentSpace?.channels || [],
+    [currentSpace]
+  )
+
+  const getCurrentSpace = () => currentSpace
+  const getCurrentChannels = () => currentChannels
 
   // Reactions / Emoji helpers
   const EMOJIS = ['👍','❤️','😂','😮','😢','🎉','🔥']
@@ -3291,36 +3321,75 @@ export default function CollaborationApp() {
     return null
   }
 
+  const activeChatId = useMemo(() => {
+    if (activeView === "channel") return Number(activeChannel)
+    if (activeView === "dm" && activeDMUser && currentUser) {
+      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
+      return `dm_${ids[0]}_${ids[1]}`
+    }
+    return null
+  }, [activeView, activeChannel, activeDMUser, currentUser])
+
+  const currentMessages = useMemo(
+    () => (activeChatId ? messages[activeChatId] || [] : []),
+    [messages, activeChatId]
+  )
+
   const getCurrentMessages = () => {
-    const chatId = getActiveChatId()
-    return chatId ? messages[chatId] || [] : []
+    return currentMessages
   }
+
+  const usersById = useMemo(() => {
+    const lookup = {}
+    if (currentUser?.id !== undefined && currentUser?.id !== null) {
+      lookup[String(currentUser.id)] = currentUser
+    }
+    ;[...users, ...friends].forEach(user => {
+      if (!user?.id && user?.id !== 0) return
+      lookup[String(user.id)] = user
+    })
+    return lookup
+  }, [currentUser, users, friends])
 
   const getUser = userId => {
-    if (currentUser?.id === userId || String(currentUser?.id) === String(userId)) return currentUser
-    // Use string comparison to handle type mismatches (number vs string ids)
-    const strUserId = String(userId)
-    const found = users.find(u => String(u.id) === strUserId) || friends.find(u => String(u.id) === strUserId)
-    return found
+    if (userId === undefined || userId === null) return undefined
+    return usersById[String(userId)]
   }
 
-  const getActiveMembers = () => {
+  const activeChannelData = useMemo(
+    () => currentChannels.find(c => c.id === activeChannel) || null,
+    [currentChannels, activeChannel]
+  )
+
+  const activeMembers = useMemo(() => {
     if (activeView === "channel") {
-      const channel = getCurrentChannels().find(c => c.id === activeChannel)
-      if (!channel) return []
-      // Bug Fix: Filter out undefined users to prevent white screen if user data isn't synced
-      return channel.members.map(id => getUser(id)).filter(u => u !== undefined)
-    } else if (activeView === "dm" && activeDMUser && currentUser) {
+      if (!activeChannelData) return []
+      return (activeChannelData.members || []).map(id => getUser(id)).filter(Boolean)
+    }
+    if (activeView === "dm" && activeDMUser && currentUser) {
       const partner = getUser(activeDMUser)
       return partner ? [currentUser, partner] : [currentUser]
     }
     return []
-  }
+  }, [activeView, activeChannelData, activeDMUser, currentUser, usersById])
+
+  const getActiveMembers = () => activeMembers
+
+  // Compute the current chat's date label (latest message) and update when relevant state changes
+  const messageDateLabel = useMemo(() => {
+    try {
+      const latest = currentMessages.length ? currentMessages[currentMessages.length - 1] : null
+      return formatDateLabel(latest?.timestamp, timeTicker)
+    } catch (e) {
+      return "Today"
+    }
+  }, [currentMessages, timeTicker])
+
+  // Visible date label (changes while scrolling to indicate the date of messages in view)
 
   const getChannelRole = (memberId) => {
-    const channel = getCurrentChannels().find(c => c.id === activeChannel)
-    if (!channel) return 'member'
-    const roles = channel.roles || {}
+    if (!activeChannelData) return 'member'
+    const roles = activeChannelData.roles || {}
     return roles[String(memberId)] || 'member'
   }
 
@@ -3495,31 +3564,95 @@ export default function CollaborationApp() {
   }
 
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("spacexyz-living-contexts-v1") || "{}")
-      setContextItems(Array.isArray(stored.contextItems) ? stored.contextItems : [])
-      setContextDecisions(Array.isArray(stored.contextDecisions) ? stored.contextDecisions : [])
-      setContextTasks(Array.isArray(stored.contextTasks) ? stored.contextTasks : [])
-    } catch (e) {
-      setContextItems([])
-      setContextDecisions([])
-      setContextTasks([])
+    if (activeView !== "channel" || !activeChannel) return undefined
+
+    const chatId = String(activeChannel)
+    activeContextStateRef.current = { chatId, loaded: false }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const state = await Storage.getContextState(chatId)
+        if (cancelled) return
+
+        setContextItems(prev => [
+          ...prev.filter(context => String(context.channelId) !== chatId),
+          ...(state.contexts || []).map(context => ({
+            ...context,
+            channelId: context.channelId || chatId,
+          })),
+        ])
+        setContextDecisions(prev => [
+          ...prev.filter(item => String(item.channelId) !== chatId),
+          ...(state.decisions || []).map(item => ({
+            ...item,
+            channelId: item.channelId || chatId,
+          })),
+        ])
+        setContextTasks(prev => [
+          ...prev.filter(item => String(item.channelId) !== chatId),
+          ...(state.tasks || []).map(item => ({
+            ...item,
+            channelId: item.channelId || chatId,
+          })),
+        ])
+      } catch (e) {
+        console.error("Failed to load context state", e)
+        if (cancelled) return
+        setContextItems(prev => prev.filter(context => String(context.channelId) !== chatId))
+        setContextDecisions(prev => prev.filter(item => String(item.channelId) !== chatId))
+        setContextTasks(prev => prev.filter(item => String(item.channelId) !== chatId))
+      } finally {
+        if (!cancelled) {
+          activeContextStateRef.current = { chatId, loaded: true }
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
-  }, [])
+  }, [activeView, activeChannel])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        "spacexyz-living-contexts-v1",
-        JSON.stringify({ contextItems, contextDecisions, contextTasks })
-      )
-    } catch (e) {}
-  }, [contextItems, contextDecisions, contextTasks])
+    if (activeView !== "channel" || !activeChannel) return undefined
+
+    const chatId = String(activeChannel)
+    if (
+      activeContextStateRef.current.chatId !== chatId ||
+      !activeContextStateRef.current.loaded
+    ) {
+      return undefined
+    }
+
+    const contexts = contextItems.filter(context => String(context.channelId) === chatId)
+    const decisions = contextDecisions.filter(item => String(item.channelId) === chatId)
+    const tasks = contextTasks.filter(item => String(item.channelId) === chatId)
+
+    if (contextSaveTimeoutRef.current) {
+      clearTimeout(contextSaveTimeoutRef.current)
+    }
+
+    contextSaveTimeoutRef.current = setTimeout(() => {
+      Storage.saveContextState(chatId, { contexts, decisions, tasks }).catch(error => {
+        console.error("Failed to save context state", error)
+      })
+    }, 400)
+
+    return () => {
+      if (contextSaveTimeoutRef.current) {
+        clearTimeout(contextSaveTimeoutRef.current)
+        contextSaveTimeoutRef.current = null
+      }
+    }
+  }, [activeView, activeChannel, contextItems, contextDecisions, contextTasks])
 
   useEffect(() => {
     setSelectedMessageIds([])
     setMessageActionMenu(null)
     setMessageContextPicker(null)
+    setComposerContextPickerOpen(false)
+    setSelectedComposerContextId(null)
     setOpenContextId(null)
     setActiveChannelTab("messages")
   }, [activeChannel, activeView])
@@ -3538,18 +3671,24 @@ export default function CollaborationApp() {
   }, [openContextId])
 
   useEffect(() => {
-    if (!messageActionMenu && !messageContextPicker) return undefined
+    if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen) return undefined
     const closeMenus = () => {
       setMessageActionMenu(null)
       setMessageContextPicker(null)
+      setComposerContextPickerOpen(false)
     }
     document.addEventListener("click", closeMenus)
     return () => document.removeEventListener("click", closeMenus)
-  }, [messageActionMenu, messageContextPicker])
+  }, [messageActionMenu, messageContextPicker, composerContextPickerOpen])
 
-  const currentChannelContexts = activeView === "channel"
-    ? contextItems.filter(context => String(context.channelId) === String(activeChannel))
-    : []
+  const currentChannelContexts = useMemo(
+    () => (
+      activeView === "channel"
+        ? contextItems.filter(context => String(context.channelId) === String(activeChannel))
+        : []
+    ),
+    [activeView, contextItems, activeChannel]
+  )
 
   const contextsById = useMemo(
     () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),
@@ -3571,13 +3710,17 @@ export default function CollaborationApp() {
     return `${diffDays}d ago`
   }
 
-  const getMessageById = messageId => getCurrentMessages().find(message => String(message.id) === String(messageId))
+  const getMessageById = messageId => currentMessages.find(message => String(message.id) === String(messageId))
   const getTaskById = taskId => (tasksList || []).find(task => String(task.id) === String(taskId))
 
   const getMessageContexts = message =>
     (message?.contextIds || [])
       .map(contextId => contextsById[String(contextId)])
       .filter(Boolean)
+
+  const selectedComposerContext = selectedComposerContextId
+    ? contextsById[String(selectedComposerContextId)] || null
+    : null
 
   const isContextManager = context => {
     if (!context || !currentUser) return false
@@ -3624,6 +3767,7 @@ export default function CollaborationApp() {
     if (existing) return existing.id
     const decision = {
       id: `decision-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      channelId: activeChannel,
       contextId,
       messageId: message.id,
       text: message.text || "Decision captured",
@@ -3642,6 +3786,7 @@ export default function CollaborationApp() {
     if (exists) return exists.id
     const item = {
       id: taskPayload.id,
+      channelId: activeChannel,
       contextId,
       taskId: taskPayload.id,
       messageId: taskPayload.sourceMessageId || null,
@@ -3927,7 +4072,7 @@ export default function CollaborationApp() {
 
   const currentChannelFiles = useMemo(
     () =>
-      getCurrentMessages().flatMap(message =>
+      currentMessages.flatMap(message =>
         (message.attachments || []).map(att => ({
           id: `${message.id}-${att.fileId || att.id}`,
           name: att.name || "Attachment",
@@ -3942,18 +4087,22 @@ export default function CollaborationApp() {
           size: att.size || 0,
         }))
       ),
-    [messages, activeChannel, activeView, users, friends, currentUser]
+    [currentMessages, usersById]
   )
 
-  const currentChannelDecisionItems = getCurrentMessages()
-    .filter(message => message.isDecision)
-    .map(message => ({
-      id: `decision-inline-${message.id}`,
-      messageId: message.id,
-      text: message.text || "Decision captured",
-      author: getUser(message.userId)?.name || "Unknown",
-      createdAt: message.timestamp,
-    }))
+  const currentChannelDecisionItems = useMemo(
+    () =>
+      currentMessages
+        .filter(message => message.isDecision)
+        .map(message => ({
+          id: `decision-inline-${message.id}`,
+          messageId: message.id,
+          text: message.text || "Decision captured",
+          author: getUser(message.userId)?.name || "Unknown",
+          createdAt: message.timestamp,
+        })),
+    [currentMessages, usersById]
+  )
 
   const openContext = contextId => {
     setOpenContextId(contextId)
@@ -3961,39 +4110,54 @@ export default function CollaborationApp() {
     setMessageContextPicker(null)
   }
 
-  const currentContext = openContextId ? contextItems.find(context => String(context.id) === String(openContextId)) : null
+  const currentContext = useMemo(
+    () => (openContextId ? contextItems.find(context => String(context.id) === String(openContextId)) || null : null),
+    [openContextId, contextItems]
+  )
 
-  const currentContextFiles = currentContext
-    ? currentChannelFiles.filter(file =>
-        (currentContext.linkedFileIds || []).some(fileId => String(fileId) === String(file.fileId))
-      )
-    : []
+  const currentContextFiles = useMemo(
+    () => currentContext
+      ? currentChannelFiles.filter(file =>
+          (currentContext.linkedFileIds || []).some(fileId => String(fileId) === String(file.fileId))
+        )
+      : [],
+    [currentContext, currentChannelFiles]
+  )
 
-  const currentContextDecisions = currentContext
-    ? contextDecisions.filter(item =>
-        String(item.contextId) === String(currentContext.id) ||
-        (currentContext.decisionIds || []).some(decisionId => String(decisionId) === String(item.id))
-      )
-    : []
+  const currentContextDecisions = useMemo(
+    () => currentContext
+      ? contextDecisions.filter(item =>
+          String(item.contextId) === String(currentContext.id) ||
+          (currentContext.decisionIds || []).some(decisionId => String(decisionId) === String(item.id))
+        )
+      : [],
+    [currentContext, contextDecisions]
+  )
 
-  const currentContextTasks = currentContext
-    ? contextTasks.filter(item =>
-        String(item.contextId) === String(currentContext.id) ||
-        (currentContext.taskIds || []).some(taskId => String(taskId) === String(item.id))
-      )
-    : []
+  const currentContextTasks = useMemo(
+    () => currentContext
+      ? contextTasks.filter(item =>
+          String(item.contextId) === String(currentContext.id) ||
+          (currentContext.taskIds || []).some(taskId => String(taskId) === String(item.id))
+        )
+      : [],
+    [currentContext, contextTasks]
+  )
 
-  const currentContextMessages = currentContext
-    ? (currentContext.linkedMessageIds || [])
-        .map(messageId => getMessageById(messageId))
-        .filter(Boolean)
-        .map(message => ({
-          id: message.id,
-          text: message.text,
-          timestamp: message.timestamp,
-          author: getUser(message.userId)?.name || "Unknown",
-        }))
-    : []
+  const currentContextMessages = useMemo(
+    () => currentContext
+      ? (currentContext.linkedMessageIds || [])
+          .map(messageId => getMessageById(messageId))
+          .filter(Boolean)
+          .map(message => ({
+            id: message.id,
+            text: message.text,
+            timestamp: message.timestamp,
+            author: getUser(message.userId)?.name || "Unknown",
+          }))
+      : [],
+    [currentContext, currentMessages, usersById]
+  )
 
   const currentContextActivity = currentContext
     ? (currentContext.activity || []).map(item => {
@@ -4007,6 +4171,26 @@ export default function CollaborationApp() {
         return { ...item, label: `${actor} updated context` }
       })
     : []
+
+  const handleChannelTabChange = nextTab => {
+    const activeChatId = getActiveChatId()
+    if (activeView === "channel" && activeChatId) {
+      if (activeChannelTab === "messages" && nextTab !== "messages") {
+        const container = messagesContainerRef.current
+        if (container) {
+          messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
+        }
+      }
+
+      if (activeChannelTab !== "messages" && nextTab === "messages") {
+        pendingTabScrollRestoreRef.current = String(activeChatId)
+      } else if (nextTab !== "messages") {
+        pendingTabScrollRestoreRef.current = null
+      }
+    }
+
+    setActiveChannelTab(nextTab)
+  }
 
   useEffect(() => {
     if (activeView !== "channel") return
@@ -4029,12 +4213,17 @@ export default function CollaborationApp() {
   }, [activeChannelTab, activeView, activeChannel, activeDMUser])
 
   useLayoutEffect(() => {
-    if (activeChannelTab !== "messages" || !restoreMessageScrollRef.current) return
+    if (activeChannelTab !== "messages") return
     const activeChatId = getActiveChatId()
     if (!activeChatId) return
 
     const container = messagesContainerRef.current
     if (!container) return
+    const shouldRestore =
+      restoreMessageScrollRef.current ||
+      pendingTabScrollRestoreRef.current === String(activeChatId)
+    if (!shouldRestore) return
+
     const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
     if (typeof savedScrollTop === "number") {
       container.scrollTop = savedScrollTop
@@ -4044,6 +4233,7 @@ export default function CollaborationApp() {
       prevScrollHeightRef.current = container.scrollHeight
     }
     restoreMessageScrollRef.current = false
+    pendingTabScrollRestoreRef.current = null
   }, [activeChannelTab, activeChannel, activeDMUser, messages])
 
   // --- Actions ---
@@ -4211,6 +4401,7 @@ export default function CollaborationApp() {
 
     const attachments = selectedFiles.map(file => ({ ...file }))
     const tempId = `tmp-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    const selectedContextIds = selectedComposerContext ? [selectedComposerContext.id] : []
     const newMsg = {
       id: tempId,
       userId: currentUser.id,
@@ -4218,7 +4409,7 @@ export default function CollaborationApp() {
       timestamp: new Date().toISOString(),
       reactions: {},
       thread: [],
-      contextIds: [],
+      contextIds: selectedContextIds,
       isDecision: false,
       taskId: null,
       attachments,
@@ -4232,6 +4423,28 @@ export default function CollaborationApp() {
     }))
     setMessageInput("")
     setSelectedFiles([])
+    setSelectedComposerContextId(null)
+    setComposerContextPickerOpen(false)
+
+    if (selectedContextIds.length > 0) {
+      const activityTimestamp = newMsg.timestamp
+      setContextItems(prev =>
+        prev.map(context =>
+          selectedContextIds.some(contextId => String(contextId) === String(context.id))
+            ? {
+                ...appendContextActivity(context, {
+                  id: `activity-message-${tempId}-${Date.now()}`,
+                  type: "message_added",
+                  userId: currentUser.id,
+                  messageId: tempId,
+                  timestamp: activityTimestamp,
+                }),
+                linkedMessageIds: Array.from(new Set([...(context.linkedMessageIds || []), tempId])),
+              }
+            : context
+        )
+      )
+    }
 
     const payload = sanitizeMessagePayload(newMsg)
 
@@ -4684,8 +4897,17 @@ export default function CollaborationApp() {
     if (!currentUser) return
     const target = users.find(u => u.id === targetId)
     if (!target) return
+    if (pendingFriendRequestIdsRef.current.has(target.id)) return
 
-    await Storage.sendFriendRequest(currentUser.id, currentUser.name, target.id)
+    pendingFriendRequestIdsRef.current.add(target.id)
+    setPendingFriendRequestIds(prev => (prev.includes(target.id) ? prev : [...prev, target.id]))
+
+    try {
+      await Storage.sendFriendRequest(currentUser.id, currentUser.name, target.id)
+    } finally {
+      pendingFriendRequestIdsRef.current.delete(target.id)
+      setPendingFriendRequestIds(prev => prev.filter(id => id !== target.id))
+    }
   }
 
   const handleBulkFriendInvite = async () => {
@@ -4765,71 +4987,89 @@ export default function CollaborationApp() {
 
   const handleNotificationAction = async (notificationId, type) => {
     if (!currentUser) return
+    if (pendingNotificationActionIdsRef.current.has(notificationId)) return
 
-    // Find the notification object from currentUser's notifications
-    const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
+    pendingNotificationActionIdsRef.current.add(notificationId)
+    setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
 
-    if (type === "info") {
-      await Storage.deleteNotification(currentUser.id, notificationId)
-      // Refresh users and currentUser from server
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-      if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
-    } else if (type === "friend_request") {
-      const friendId = notif?.fromId
-      if (!friendId) return
-      await Storage.acceptFriendRequest(friendId, notificationId)
-      // Refresh users and currentUser from server so friend lists and notifications stay in sync
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-      if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
-    } else {
-      const joinedSpace = await Storage.acceptInvite(currentUser.id, notificationId)
-      // Force refresh user regardless of joinedSpace result to ensure notification is gone
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-      if (updatedUser) {
-        setCurrentUser(filterDismissedUser(updatedUser))
-        if (joinedSpace) {
-          setActiveSpace(joinedSpace.id)
-          setActiveView("channel")
-          if (joinedSpace.channels.length > 0) {
-            const firstChannel = joinedSpace.channels[0]
-            // User has access if they own the space OR have it in their spaces list
-            const userOwnsSpace = joinedSpace.ownerId === currentUser.id
-            const userHasSpace = (updatedUser.spaces || []).includes(joinedSpace.id)
-            const hasAccess = userOwnsSpace || userHasSpace
-            if (hasAccess) {
-              setActiveChannel(firstChannel.id)
+    try {
+      // Find the notification object from currentUser's notifications
+      const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
+
+      if (type === "info") {
+        await Storage.deleteNotification(currentUser.id, notificationId)
+        // Refresh users and currentUser from server
+        const allUsers = await Storage.getUsers()
+        setUsers(Array.isArray(allUsers) ? allUsers : [])
+        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+        if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+      } else if (type === "friend_request") {
+        const friendId = notif?.fromId
+        if (!friendId) return
+        await Storage.acceptFriendRequest(friendId, notificationId)
+        // Refresh users and currentUser from server so friend lists and notifications stay in sync
+        const allUsers = await Storage.getUsers()
+        setUsers(Array.isArray(allUsers) ? allUsers : [])
+        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+        if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+      } else {
+        const joinedSpace = await Storage.acceptInvite(currentUser.id, notificationId)
+        // Force refresh user regardless of joinedSpace result to ensure notification is gone
+        const allUsers = await Storage.getUsers()
+        setUsers(Array.isArray(allUsers) ? allUsers : [])
+        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+        if (updatedUser) {
+          setCurrentUser(filterDismissedUser(updatedUser))
+          if (joinedSpace) {
+            setActiveSpace(joinedSpace.id)
+            setActiveView("channel")
+            if (joinedSpace.channels.length > 0) {
+              const firstChannel = joinedSpace.channels[0]
+              // User has access if they own the space OR have it in their spaces list
+              const userOwnsSpace = joinedSpace.ownerId === currentUser.id
+              const userHasSpace = (updatedUser.spaces || []).includes(joinedSpace.id)
+              const hasAccess = userOwnsSpace || userHasSpace
+              if (hasAccess) {
+                setActiveChannel(firstChannel.id)
+              }
             }
           }
         }
       }
+    } finally {
+      pendingNotificationActionIdsRef.current.delete(notificationId)
+      setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
     }
   }
 
   const handleRejectNotification = async (notificationId, type) => {
     if (!currentUser) return
+    if (pendingNotificationActionIdsRef.current.has(notificationId)) return
 
-    // Find the notification to extract sender id
-    const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
+    pendingNotificationActionIdsRef.current.add(notificationId)
+    setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
 
-    if (type === "friend_request") {
-      const friendId = notif?.fromId
-      if (!friendId) return
-      await Storage.rejectFriendRequest(friendId, notificationId)
-    } else {
-      await Storage.rejectInvite(currentUser.id, notificationId)
+    try {
+      // Find the notification to extract sender id
+      const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
+
+      if (type === "friend_request") {
+        const friendId = notif?.fromId
+        if (!friendId) return
+        await Storage.rejectFriendRequest(friendId, notificationId)
+      } else {
+        await Storage.rejectInvite(currentUser.id, notificationId)
+      }
+
+      // Refresh users and currentUser
+      const allUsers = await Storage.getUsers()
+      setUsers(Array.isArray(allUsers) ? allUsers : [])
+      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+      if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+    } finally {
+      pendingNotificationActionIdsRef.current.delete(notificationId)
+      setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
     }
-
-    // Refresh users and currentUser
-    const allUsers = await Storage.getUsers()
-    setUsers(Array.isArray(allUsers) ? allUsers : [])
-    const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-    if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
   }
 
   // Optimistic dismiss for simple info notifications
@@ -5900,7 +6140,6 @@ export default function CollaborationApp() {
   }
 
   // --- Authenticated App UI ---
-  const activeMembers = getActiveMembers()
   const { daysInMonth, firstDay } = getDaysInMonth(currentDate)
 
   return (
@@ -6025,7 +6264,7 @@ export default function CollaborationApp() {
             </div>
 
             <div className="max-h-56 overflow-y-auto rounded-2xl border p-3 bg-slate-50 mt-4">
-              {getActiveMembers().map(m => (
+              {activeMembers.map(m => (
                 <label
                   key={m.id}
                   className="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer"
@@ -6710,7 +6949,7 @@ export default function CollaborationApp() {
             setShowTaskModal(false)
             setTaskModalDraft(null)
           }}
-          members={getActiveMembers()}
+          members={activeMembers}
           currentUser={currentUser}
           spaceId={activeSpace}
           initialTaskText={taskModalDraft?.initialTaskText || ""}
@@ -7483,13 +7722,6 @@ export default function CollaborationApp() {
                                     <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
                                   )}
 
-                                {/* Real-time member count */}
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full group-hover/channel:hidden ${
-                                  isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-200 text-slate-500'
-                                }`}>
-                                  {channel.members.length}
-                                </span>
-
                                 {space.ownerId === currentUser?.id && (
                                   <div className="hidden group-hover/channel:flex items-center gap-1">
                                     <span
@@ -8081,8 +8313,8 @@ export default function CollaborationApp() {
                     <div>
                       <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2.5`}>
                         {/* Header Breadcrumb Context */}
-                        <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={getCurrentSpace()?.name}>
-                          {getCurrentSpace()?.name}
+                        <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
+                          {currentSpace?.name}
                         </span>
                         <ChevronRight className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                         <span className="truncate max-w-[18vw] md:max-w-[24vw] lg:max-w-[28vw] xl:max-w-[32vw] 2xl:max-w-[36vw] block" title={getActiveViewName().replace('#','')}>
@@ -8407,7 +8639,7 @@ export default function CollaborationApp() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <h2 className={`font-bold text-[15px] leading-tight flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                          <span className={`font-medium text-xs truncate max-w-[70px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{getCurrentSpace()?.name}</span>
+                          <span className={`font-medium text-xs truncate max-w-[70px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{currentSpace?.name}</span>
                           <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
                           <span className="truncate max-w-[100px]">{getActiveViewName().replace("#", "")}</span>
                         </h2>
@@ -8637,7 +8869,7 @@ export default function CollaborationApp() {
                   <ChannelTabs
                     activeTab={activeChannelTab}
                     isDarkMode={isDarkMode}
-                    onChange={setActiveChannelTab}
+                    onChange={handleChannelTabChange}
                     selectedCount={selectedMessageIds.length}
                     onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
                   />
@@ -8645,7 +8877,7 @@ export default function CollaborationApp() {
                 {/* Updated Container with Custom Pattern Background */}
                 {/* day label computed above via `messageDateLabel` */}
 
-                {activeView === "channel" && activeChannelTab !== "messages" ? (
+                {activeView === "channel" && activeChannelTab !== "messages" && (
                   <div className="flex-1 overflow-y-auto py-2 pb-6">
                     {activeChannelTab === "contexts" && (
                       <ContextsTabView
@@ -8672,14 +8904,13 @@ export default function CollaborationApp() {
                       />
                     )}
                   </div>
-                ) : (
-                <>
+                )}
+                <div className={`${activeView === "channel" && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
                 <div
                   ref={messagesContainerRef}
                   onScroll={() => {
                     const el = messagesContainerRef.current
                     if (!el) return
-                    const activeChatId = getActiveChatId()
                     if (activeChatId) {
                       messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
                     }
@@ -8708,7 +8939,7 @@ export default function CollaborationApp() {
                   className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
-                      {getCurrentMessages().length === 0 ? (
+                      {currentMessages.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center">
                       <div className={`p-10 rounded-[2.5rem] text-center max-w-sm backdrop-blur-sm ${isDarkMode ? 'bg-[#191919] border border-[#4d4d4d] shadow-lg shadow-purple-500/5' : 'border bg-white/70 border-slate-200/50 shadow-xl shadow-indigo-100/30'}`}>
                         <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 relative shadow-lg transform rotate-3 hover:rotate-6 transition-transform ${isDarkMode ? 'bg-purple-900/50 text-purple-400' : 'bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-600'}`}>
@@ -8769,11 +9000,11 @@ export default function CollaborationApp() {
                         </span>
                       </div>
 
-                      {getCurrentMessages().map((msg, idx) => {
+                      {currentMessages.map((msg, idx) => {
                         const user = getUser(msg.userId)
                         const isMe = user?.id === currentUser?.id
                         const prevMsg =
-                          idx > 0 ? getCurrentMessages()[idx - 1] : null
+                          idx > 0 ? currentMessages[idx - 1] : null
                         // Date separator logic
                         const msgDayLabel = formatDateLabel(msg.timestamp, timeTicker)
                         const prevDayLabel = prevMsg ? formatDateLabel(prevMsg.timestamp, timeTicker) : null
@@ -8812,6 +9043,9 @@ export default function CollaborationApp() {
                           )
                         })()
 
+                        const isActionMenuOpen = messageActionMenu?.messageId === msg.id
+                        const isContextPickerOpen = messageContextPicker?.messageId === msg.id
+
                         return (
                           <React.Fragment key={msg.id}>
                             {showDateSeparator && (
@@ -8828,10 +9062,12 @@ export default function CollaborationApp() {
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`flex gap-4 ${
+                              className={`relative flex gap-4 ${
                                 isMe ? "flex-row-reverse" : ""
                               } ${
                                 isSequence ? "mt-1" : "mt-6"
+                              } ${
+                                isActionMenuOpen || isContextPickerOpen ? "z-40" : "z-0"
                               } group animate-fade-in`}
                             >
                             <div className="pt-2">
@@ -8890,7 +9126,7 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 hover:scale-[1.01] ${
+                              className={`relative overflow-visible px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 ${
                                   isMe
                                     ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
                                     : isDarkMode 
@@ -8910,7 +9146,7 @@ export default function CollaborationApp() {
                                       )
                                     }
                                   />
-                                  {messageActionMenu?.messageId === msg.id && (
+                                  {isActionMenuOpen && (
                                     <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
                                       <MessageActionsMenu
                                         isDarkMode={isDarkMode}
@@ -8924,23 +9160,35 @@ export default function CollaborationApp() {
                                           toggleMessageSelection(msg.id)
                                           setMessageActionMenu(null)
                                         }}
-                                        onCreateContext={() => openCreateContextModal([msg.id])}
-                                        onAddToContext={() => {
-                                          setMessageContextPicker({ messageId: msg.id })
+                                        onCreateContext={() => {
+                                          openCreateContextModal([msg.id])
                                           setMessageActionMenu(null)
                                         }}
-                                        onMarkDecision={() => markMessageDecision(msg)}
-                                        onCreateTask={() => openTaskFromMessage(msg)}
+                                        onAddToContext={() => {
+                                          setMessageContextPicker({ messageId: msg.id })
+                                        }}
+                                        onMarkDecision={() => {
+                                          markMessageDecision(msg)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onCreateTask={() => {
+                                          openTaskFromMessage(msg)
+                                          setMessageActionMenu(null)
+                                        }}
                                       />
                                     </div>
                                   )}
-                                  {messageContextPicker?.messageId === msg.id && (
-                                    <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
+                                  {isContextPickerOpen && (
+                                    <div className={`absolute top-11 z-40 ${isMe ? 'left-[calc(100%+0.5rem)] max-sm:left-0' : 'right-[calc(100%+0.5rem)] max-sm:right-0'} max-sm:top-[calc(100%+0.5rem)]`}>
                                       <AddToContextPopover
                                         isDarkMode={isDarkMode}
                                         contexts={currentChannelContexts}
                                         onClose={() => setMessageContextPicker(null)}
-                                        onSelect={contextId => addMessageToContext(contextId, msg.id)}
+                                        onSelect={contextId => {
+                                          addMessageToContext(contextId, msg.id)
+                                          setMessageContextPicker(null)
+                                          setMessageActionMenu(null)
+                                        }}
                                       />
                                     </div>
                                   )}
@@ -9205,7 +9453,7 @@ export default function CollaborationApp() {
                   )}
                   <div ref={messagesEndRef} />
 
-                  {!isAtBottom && getCurrentMessages().length > 0 && (
+                  {!isAtBottom && currentMessages.length > 0 && (
                     <button
                       onClick={() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -9269,6 +9517,24 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
+                    {selectedComposerContext && (
+                      <div className={`flex items-center gap-2 px-3 pt-3 pb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                        <span className={`text-[10px] font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                          Context
+                        </span>
+                        <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-sky-500/15 text-sky-200 border border-sky-500/20' : 'bg-sky-50 text-sky-700 border border-sky-100'}`}>
+                          <span>{selectedComposerContext.title}</span>
+                          <button
+                            onClick={() => setSelectedComposerContextId(null)}
+                            className={`${isDarkMode ? 'text-sky-200/70 hover:text-sky-100' : 'text-sky-500 hover:text-sky-700'}`}
+                            title="Remove context"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-end gap-2 px-2 pb-1 relative">
                       <div className="relative">
                         <button
@@ -9285,6 +9551,40 @@ export default function CollaborationApp() {
                         >
                           <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
                         </button>
+
+                        {activeView === "channel" && (
+                          <div className="relative inline-flex">
+                            <button
+                              onClick={e => {
+                                e.stopPropagation()
+                                setComposerContextPickerOpen(prev => !prev)
+                                setMessageActionMenu(null)
+                                setMessageContextPicker(null)
+                              }}
+                              title="Add message to context"
+                              className={`p-3 mb-1 ml-1 rounded-full transition-colors font-black text-sm leading-none ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-sky-300' : 'hover:bg-slate-100 text-slate-500 hover:text-sky-600'}`}
+                            >
+                              C
+                            </button>
+
+                            {composerContextPickerOpen && (
+                              <div
+                                className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <AddToContextPopover
+                                  isDarkMode={isDarkMode}
+                                  contexts={currentChannelContexts}
+                                  onClose={() => setComposerContextPickerOpen(false)}
+                                  onSelect={contextId => {
+                                    setSelectedComposerContextId(contextId)
+                                    setComposerContextPickerOpen(false)
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {showEmojiPickerFor === 'input' && (
                           <div className={`absolute left-0 top-12 flex gap-1 p-2 rounded-xl shadow-lg z-30 ${isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`}>
@@ -9346,8 +9646,7 @@ export default function CollaborationApp() {
                     Press <strong>Enter</strong> to send
                   </div>
                 </div>
-                </>
-                )}
+                </div>
               </div>
 
               {activeView === "channel" && currentContext && (
@@ -9478,7 +9777,7 @@ export default function CollaborationApp() {
                           const hasOutgoing = memberObj?.notifications?.some(n => n.type === "friend_request" && n.fromId === currentUser?.id && n.status === "pending")
                           // Check if current user has an incoming friend request from member
                           const hasIncoming = currentUser?.notifications?.some(n => n.type === "friend_request" && n.fromId === member.id && n.status === "pending")
-                          return !!hasOutgoing || !!hasIncoming
+                          return !!hasOutgoing || !!hasIncoming || pendingFriendRequestIds.includes(member.id)
                         })()
 
                         return (
@@ -9915,10 +10214,10 @@ export default function CollaborationApp() {
               </button>
               <button
                 onClick={() => {
-                  if (showAddFriendConfirm)
-                    sendFriendRequest(showAddFriendConfirm)
+                  if (showAddFriendConfirm) sendFriendRequest(showAddFriendConfirm)
                   setShowAddFriendConfirm(null)
                 }}
+                disabled={pendingFriendRequestIds.includes(showAddFriendConfirm)}
                 className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' : 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'}`}
               >
                 Yes
@@ -10788,6 +11087,7 @@ export default function CollaborationApp() {
                               onClick={() =>
                                 handleNotificationAction(notif.id, notif.type)
                               }
+                              disabled={pendingNotificationActionIds.includes(notif.id)}
                               className={`flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all transform active:scale-95 text-white ${
                                 isDarkMode 
                                   ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-500/20' 
@@ -10800,6 +11100,7 @@ export default function CollaborationApp() {
                               onClick={() =>
                                 handleRejectNotification(notif.id, notif.type)
                               }
+                              disabled={pendingNotificationActionIds.includes(notif.id)}
                               className={`flex-1 text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2 border transition-all ${
                                 isDarkMode 
                                   ? 'border-slate-600 hover:bg-slate-600 text-slate-300' 
@@ -10871,76 +11172,97 @@ export default function CollaborationApp() {
 
       {/* Docs Modal */}
       {showDocsModal && (
-        <div className={`fixed inset-0 backdrop-blur-xl flex items-center justify-center z-50 p-2 sm:p-4 md:p-6 animate-fade-in ${
+        <div className={`fixed inset-0 z-50 animate-fade-in ${
           isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'
         }`}>
-          <div className={`rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 md:p-8 w-full max-w-6xl max-h-[95vh] sm:max-h-[90vh] shadow-2xl backdrop-blur-2xl ring-1 flex flex-col ${
+          <div className={`h-full w-full p-4 sm:p-6 md:p-8 flex flex-col ${
             isDarkMode 
-              ? 'bg-slate-800/95 ring-slate-700/50 shadow-violet-500/10' 
-              : 'bg-white/95 ring-white/50 shadow-purple-200/30'
+              ? 'bg-slate-900/95' 
+              : 'bg-slate-50/95'
           }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-8 gap-4">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
-                  isDarkMode 
-                    ? 'bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 shadow-purple-500/30' 
-                    : 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-purple-300/50'
-                }`}>
-                  <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
-                </div>
+            <div className={`mb-4 sm:mb-6 border-b pb-4 sm:pb-6 ${
+              isDarkMode
+                ? 'border-slate-800'
+                : 'border-slate-200'
+            }`}>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div className="min-w-0">
-                  <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
-                    isDarkMode 
-                      ? 'bg-gradient-to-r from-white to-violet-400' 
-                      : 'bg-gradient-to-r from-slate-800 to-indigo-700'
-                  }`}>
-                    My Documents
-                  </h3>
-                  <p className={`text-xs sm:text-sm mt-0.5 hidden sm:block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Access your Google Drive files and Gmail attachments</p>
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
+                      isDarkMode 
+                        ? 'bg-gradient-to-r from-cyan-500 to-violet-600 shadow-cyan-500/20' 
+                        : 'bg-gradient-to-r from-sky-500 to-violet-600 shadow-indigo-300/40'
+                    }`}>
+                      <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-r from-white to-violet-400' 
+                          : 'bg-gradient-to-r from-slate-800 to-indigo-700'
+                      }`}>
+                        Documents Hub
+                      </h3>
+                      <p className={`text-xs sm:text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Browse Drive files, shared workspace docs, and Gmail attachments in one place.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                {googleAccessToken && (
-                  <>
-                    <button
-                      onClick={() => {
-                        // Show Drive files quickly when clicked (connect if needed)
-                        if (!googleAccessToken) {
-                          handleConnectGoogleDocs()
-                        } else {
+                <div className="flex items-center gap-2 sm:gap-3">
+                  {googleAccessToken && (
+                    <>
+                      <button
+                        onClick={() => {
                           setSelectedAppFilter('drive')
                           loadGoogleDocs(googleAccessToken, 'drive')
-                        }
-                      }}
-                      className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200' : 'bg-slate-50 text-slate-700'}`}
-                      title="Show Drive Files"
-                    >
-                      <img src="/google-drive.png" alt="Drive" className="w-5 h-5" />
-                      <span className="hidden sm:inline">Drive</span>
-                    </button>
-                    <button
-                      onClick={() => setShowConnectAppsModal(true)}
-                      className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
-                        isDarkMode 
-                          ? 'bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 border-violet-500/30 hover:shadow-lg hover:shadow-violet-500/20' 
-                          : 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 border-indigo-100 hover:shadow-lg hover:shadow-indigo-100/50'
-                      }`}
-                    >
-                      <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Connect More Apps</span>
-                      <span className="sm:hidden">Connect</span>
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setShowDocsModal(false)}
-                  className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
-                    isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
-                </button>
+                        }}
+                        className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200 border-slate-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
+                        title="Show Drive Files"
+                      >
+                        <img src="/google-drive.png" alt="Drive" className="w-5 h-5" />
+                        <span className="hidden sm:inline">Open Drive</span>
+                      </button>
+                      <button
+                        onClick={() => setShowConnectAppsModal(true)}
+                        className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
+                          isDarkMode 
+                            ? 'bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 border-violet-500/30 hover:shadow-lg hover:shadow-violet-500/20' 
+                            : 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 hover:from-indigo-100 hover:to-purple-100 border-indigo-100 hover:shadow-lg hover:shadow-indigo-100/50'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">Connect More Apps</span>
+                        <span className="sm:hidden">Connect</span>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setShowDocsModal(false)}
+                    className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
+                      isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <X className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </button>
+                </div>
               </div>
+
+              {googleAccessToken && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+                  {[
+                    { label: 'Total assets', value: docsOverview.total, tone: isDarkMode ? 'bg-slate-900/70 border-slate-700 text-white' : 'bg-white/80 border-slate-200 text-slate-900' },
+                    { label: 'Drive files', value: docsOverview.drive, tone: isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : 'bg-blue-50 border-blue-100 text-blue-700' },
+                    { label: 'Shared docs', value: docsOverview.shared, tone: isDarkMode ? 'bg-violet-500/10 border-violet-500/20 text-violet-200' : 'bg-violet-50 border-violet-100 text-violet-700' },
+                    { label: 'Gmail files', value: docsOverview.gmail, tone: isDarkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 'bg-rose-50 border-rose-100 text-rose-700' },
+                  ].map(stat => (
+                    <div key={stat.label} className={`rounded-2xl border px-4 py-3 ${stat.tone}`}>
+                      <p className="text-[11px] uppercase tracking-[0.2em] opacity-70">{stat.label}</p>
+                      <p className="mt-2 text-2xl font-bold">{stat.value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {!googleAccessToken ? (
@@ -11018,10 +11340,21 @@ export default function CollaborationApp() {
                   </div>
                 ) : (
                   <>
-                    {/* Filter Tabs - Compact */}
-                    <div className={`flex flex-wrap gap-2 mb-4 pb-2 border-b ${
-                      isDarkMode ? 'border-slate-700' : 'border-slate-100'
+                    <div className={`mb-4 rounded-2xl border p-3 sm:p-4 ${
+                      isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'
                     }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                        <div>
+                          <p className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Collections</p>
+                          <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            Switch between connected sources without leaving the workspace.
+                          </p>
+                        </div>
+                        <div className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                          {docsOverview.total} items available
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => {
                           setSelectedAppFilter('all')
@@ -11034,6 +11367,19 @@ export default function CollaborationApp() {
                         }`}
                       >
                         All
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('drive')
+                          loadGoogleDocs(googleAccessToken, 'drive')
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          selectedAppFilter === 'drive'
+                            ? isDarkMode ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <img src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
                       </button>
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
                         <button
@@ -11107,16 +11453,24 @@ export default function CollaborationApp() {
                           <img src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
                         </button>
                       )}
+                      </div>
                     </div>
 
                     {/* Documents Grid */}
                     <div className="flex-1 overflow-y-auto pr-2">
                       {/* Shared Files View */}
                       {selectedAppFilter === 'shared' && (
-                        <div className="mb-6">
-                          <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                            <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared Files
-                          </h4>
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared Files
+                            </h4>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {sharedChatDocs.length} items
+                            </span>
+                          </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {sharedChatDocs.map((attachment, idx) => {
                                     const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
@@ -11200,12 +11554,22 @@ export default function CollaborationApp() {
                       )}
 
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'drive' || selectedAppFilter === 'docs' || selectedAppFilter === 'sheets' || selectedAppFilter === 'slides') && googleDocs.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
-                          {[...googleDocs].sort((a, b) => {
-                            const timeA = a.modifiedTime ? new Date(a.modifiedTime).getTime() : 0
-                            const timeB = b.modifiedTime ? new Date(b.modifiedTime).getTime() : 0
-                            return timeB - timeA
-                          }).map((doc) => {
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Google Workspace Files</h4>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                                Recently updated files from Drive, Docs, Sheets, and Slides.
+                              </p>
+                            </div>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {googleDocs.length} items
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          {sortedGoogleDocs.map((doc) => {
                             const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
                             const appIcon = GoogleService.getAppIcon(appType)
                             
@@ -11246,6 +11610,7 @@ export default function CollaborationApp() {
                               </div>
                             )
                           })}
+                          </div>
                         </div>
                       )}
 
@@ -11253,10 +11618,17 @@ export default function CollaborationApp() {
 
                       {/* Shared Chat Documents */}
                       {selectedAppFilter === 'all' && sharedChatDocs.length > 0 && (
-                        <div className="mb-6">
-                          <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                            <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared in Chats
-                          </h4>
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} /> Shared in Chats
+                            </h4>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {sharedChatDocs.length} items
+                            </span>
+                          </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {sharedChatDocs.map((attachment, idx) => {
                               const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
@@ -11313,12 +11685,22 @@ export default function CollaborationApp() {
 
                       {/* Gmail Attachments Grid */}
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
-                        <div className="mb-6">
-                          {selectedAppFilter === 'all' && googleDocs.length > 0 && (
-                            <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                              <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
-                            </h4>
-                          )}
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                                <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
+                              </h4>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                                Recent email files ready to add into chats and channels.
+                              </p>
+                            </div>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {gmailAttachments.length} items
+                            </span>
+                          </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {gmailAttachments.map((attachment, idx) => {
                               const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
@@ -11326,7 +11708,11 @@ export default function CollaborationApp() {
                               return (
                               <div
                                 key={`gmail-${attachment.messageId}-${attachment.id}-${idx}`}
-                                className="group flex items-center gap-3 p-3 rounded-xl border border-red-100 bg-white hover:border-red-300 hover:shadow-md transition-all"
+                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                                  isDarkMode
+                                    ? 'border-rose-500/20 bg-slate-800/60 hover:border-rose-400/40 hover:shadow-md hover:shadow-rose-500/10'
+                                    : 'border-red-100 bg-white hover:border-red-300 hover:shadow-md'
+                                }`}
                               >
                                 {/* File Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${gmailAppIcon.color}`}>
@@ -11336,10 +11722,10 @@ export default function CollaborationApp() {
                                 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
-                                  <h5 className="font-medium text-sm text-slate-800 truncate group-hover:text-red-600">
+                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-rose-300' : 'text-slate-800 group-hover:text-red-600'}`}>
                                     {attachment.filename}
                                   </h5>
-                                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                  <div className={`flex items-center gap-2 text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     <span className="truncate max-w-[100px]">{attachment.senderName || 'Unknown'}</span>
                                     <span>•</span>
                                     <span>{attachment.size > 1048576 ? `${(attachment.size / 1048576).toFixed(1)}MB` : `${(attachment.size / 1024).toFixed(0)}KB`}</span>
@@ -11442,14 +11828,14 @@ export default function CollaborationApp() {
                         </div>
                       )}
 
-                      {googleDocs.length === 0 && gmailAttachments.length === 0 && (
+                      {docsOverview.total === 0 && (
                         <div className="flex-1 flex items-center justify-center py-16">
                           <div className="text-center">
-                            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 bg-slate-50">
-                              <FileText className="w-8 h-8 text-slate-400" />
+                            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                              <FileText className={`w-8 h-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                             </div>
-                            <p className="text-slate-500 font-medium">No documents found</p>
-                            <p className="text-xs text-slate-400 mt-2">Try connecting more apps or changing filters</p>
+                            <p className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>No documents found</p>
+                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Try connecting more apps or changing filters</p>
                           </div>
                         </div>
                       )}
