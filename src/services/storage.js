@@ -3,6 +3,12 @@ import { getToken, saveAuth } from "./auth"
 // Use environment variable when deployed (Vite): VITE_API_URL
 const API_BASE = import.meta.env.VITE_API_URL || "https://spaces-wc1z.onrender.com"
 const DEBUG_STORAGE = false
+const USERS_CACHE_KEY = "users_cache"
+const USERS_CACHE_TIME_KEY = "users_cache_time"
+const SPACES_CACHE_KEY = "spaces_cache"
+const SPACES_CACHE_TIME_KEY = "spaces_cache_time"
+const EVENTS_CACHE_KEY = "events_cache"
+const EVENTS_CACHE_TIME_KEY = "events_cache_time"
 
 // --------------------
 // Helpers
@@ -28,11 +34,42 @@ import { getStoredUser, logout as clearAuth } from "./auth"
 
 const messageRequestCache = new Map()
 const messageCountRequestCache = new Map()
+const spacesRequestCache = new Map()
+const spacesForUserRequestCache = new Map()
+const contextRequestCache = new Map()
+const eventsRequestCache = new Map()
 
 const getMessagesCacheKeys = chatId => ({
   cacheKey: `messages_cache_${chatId}`,
   cacheTimeKey: `messages_cache_time_${chatId}`
 })
+
+const readSimpleCache = (cacheKey, cacheTimeKey) => {
+  try {
+    const data = JSON.parse(localStorage.getItem(cacheKey) || "null")
+    const timestamp = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+    return {
+      data,
+      timestamp: Number.isFinite(timestamp) ? timestamp : 0
+    }
+  } catch {
+    return { data: null, timestamp: 0 }
+  }
+}
+
+const writeSimpleCache = (cacheKey, cacheTimeKey, data) => {
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(data))
+    localStorage.setItem(cacheTimeKey, String(Date.now()))
+  } catch (e) {}
+}
+
+const removeSimpleCache = (cacheKey, cacheTimeKey) => {
+  try {
+    localStorage.removeItem(cacheKey)
+    localStorage.removeItem(cacheTimeKey)
+  } catch (e) {}
+}
 
 const readMessagesCache = chatId => {
   try {
@@ -127,39 +164,70 @@ const authFetch = async (url, options = {}) => {
 // User Management
 // --------------------
 
-export const getUsers = async () => {
-  const cacheKey = "users_cache"
-  const cacheTimeKey = "users_cache_time"
+export const invalidateUsersCache = () => {
+  removeSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+}
+
+export const invalidateSpacesCache = () => {
+  removeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+}
+
+const getContextCacheKeys = chatId => ({
+  cacheKey: `context_state_${chatId}`,
+  cacheTimeKey: `context_state_time_${chatId}`
+})
+
+const readContextCache = chatId => {
+  const { cacheKey, cacheTimeKey } = getContextCacheKeys(chatId)
+  return readSimpleCache(cacheKey, cacheTimeKey)
+}
+
+const writeContextCache = (chatId, data) => {
+  const { cacheKey, cacheTimeKey } = getContextCacheKeys(chatId)
+  writeSimpleCache(cacheKey, cacheTimeKey, data)
+}
+
+const clearContextCache = chatId => {
+  const { cacheKey, cacheTimeKey } = getContextCacheKeys(chatId)
+  removeSimpleCache(cacheKey, cacheTimeKey)
+}
+
+export const getUsers = async (options = {}) => {
+  const { forceRefresh = false } = options
+  const cacheKey = USERS_CACHE_KEY
+  const cacheTimeKey = USERS_CACHE_TIME_KEY
   const CACHE_TTL = 5000 // 5 seconds TTL for faster updates
   
-  try {
-    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
-    const cacheTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
-    
-    if (Array.isArray(cached) && cached.length > 0) {
-      // Return cached data immediately, refresh in background if stale
-      if (Date.now() - cacheTime > CACHE_TTL) {
-        ;(async () => {
-          try {
-            const res = await authFetch(`${API_BASE}/users/`)
-            const data = await safeJson(res)
-            const arr = ensureArray(data)
-            localStorage.setItem(cacheKey, JSON.stringify(arr))
-            localStorage.setItem(cacheTimeKey, String(Date.now()))
-          } catch (e) {}
-        })()
+  if (!forceRefresh) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
+      const cacheTime = parseInt(localStorage.getItem(cacheTimeKey) || "0", 10)
+      
+      if (Array.isArray(cached) && cached.length > 0) {
+        // Return cached data immediately, refresh in background if stale
+        if (Date.now() - cacheTime > CACHE_TTL) {
+          ;(async () => {
+            try {
+              const res = await authFetch(`${API_BASE}/users/`)
+              const data = await safeJson(res)
+              const arr = ensureArray(data)
+              writeSimpleCache(cacheKey, cacheTimeKey, arr)
+            } catch (e) {}
+          })()
+        }
+        return cached
       }
-      return cached
-    }
-  } catch (e) {}
+    } catch (e) {}
+  } else {
+    invalidateUsersCache()
+  }
 
   // No cache - fetch fresh
   const res = await authFetch(`${API_BASE}/users/`)
   const data = await safeJson(res)
   const arr = ensureArray(data)
   try {
-    localStorage.setItem(cacheKey, JSON.stringify(arr))
-    localStorage.setItem(cacheTimeKey, String(Date.now()))
+    writeSimpleCache(cacheKey, cacheTimeKey, arr)
   } catch(e){}
   return arr
 }
@@ -239,32 +307,36 @@ export const searchUsersByName = async query => {
 // Space Management
 // --------------------
 
-export const getSpaces = async () => {
-  // Return cached spaces immediately if available, then refresh in background
-  try {
-    const cached = JSON.parse(localStorage.getItem("spaces_cache") || "null")
-    if (Array.isArray(cached) && cached.length > 0) {
-      ;(async () => {
-        try {
-          const res = await authFetch(`${API_BASE}/spaces/`)
-          const data = await safeJson(res)
-          const arr = ensureArray(data)
-          localStorage.setItem("spaces_cache", JSON.stringify(arr))
-        } catch (e) {
-          // ignore background refresh failures
-        }
-      })()
-      return cached
-    }
-  } catch (e) {
-    // fall through to network fetch
+export const getSpaces = async (options = {}) => {
+  const { forceRefresh = false, cacheTtl = 15000 } = options
+  const requestKey = "all"
+  const { data: cached, timestamp } = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+
+  if (!forceRefresh && Array.isArray(cached) && Date.now() - timestamp < cacheTtl) {
+    return cached
   }
 
-  const res = await authFetch(`${API_BASE}/spaces/`)
-  const data = await safeJson(res)
-  const arr = ensureArray(data)
-  try { localStorage.setItem("spaces_cache", JSON.stringify(arr)) } catch(e){}
-  return arr
+  if (spacesRequestCache.has(requestKey)) {
+    return spacesRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/spaces/`)
+    const data = await safeJson(res)
+    const arr = ensureArray(data)
+    writeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY, arr)
+    return arr
+  })()
+    .catch(err => {
+      if (Array.isArray(cached)) return cached
+      throw err
+    })
+    .finally(() => {
+      spacesRequestCache.delete(requestKey)
+    })
+
+  spacesRequestCache.set(requestKey, request)
+  return request
 }
 
 export const saveSpace = async space => {
@@ -272,56 +344,59 @@ export const saveSpace = async space => {
     method: "POST",
     body: JSON.stringify(space)
   })
+  invalidateSpacesCache()
 }
 
-export const getSpacesForUser = async userSpaceIds => {
+export const getSpacesForUser = async (userSpaceIds, options = {}) => {
   if (!Array.isArray(userSpaceIds) || userSpaceIds.length === 0) return []
-  
-  // Use a general spaces cache (all spaces the user has seen)
-  const cacheKey = "spaces_cache"
-  
-  // Try cached spaces first - return immediately if available
-  try {
-    const cached = JSON.parse(localStorage.getItem(cacheKey) || "null")
-    if (Array.isArray(cached) && cached.length > 0) {
-      const filtered = cached.filter(s => userSpaceIds.includes(s.id))
-      // If we have matching spaces in cache, return them and refresh in background
-      if (filtered.length > 0) {
-        ;(async () => {
-          try {
-            const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
-              method: "POST",
-              body: JSON.stringify(userSpaceIds)
-            })
-            const data = await safeJson(res)
-            const arr = ensureArray(data)
-            // Merge with existing cache to preserve other spaces
-            const existingIds = new Set(arr.map(s => s.id))
-            const merged = [...arr, ...cached.filter(s => !existingIds.has(s.id))]
-            localStorage.setItem(cacheKey, JSON.stringify(merged))
-          } catch (e) {}
-        })()
-        return filtered
-      }
+  const { forceRefresh = false, cacheTtl = 15000 } = options
+  const normalizedIds = userSpaceIds.map(id => String(id)).sort()
+  const requestKey = normalizedIds.join(",")
+  const { data: cached, timestamp } = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+
+  if (!forceRefresh && Array.isArray(cached) && Date.now() - timestamp < cacheTtl) {
+    const filtered = cached.filter(s => normalizedIds.includes(String(s.id)))
+    if (filtered.length === normalizedIds.length || filtered.length > 0) {
+      return filtered
     }
-  } catch (e) {}
+  }
 
-  // No cache hit - fetch from API
-  const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
-    method: "POST",
-    body: JSON.stringify(userSpaceIds)
-  })
+  if (spacesForUserRequestCache.has(requestKey)) {
+    return spacesForUserRequestCache.get(requestKey)
+  }
 
-  const data = await safeJson(res)
-  const arr = ensureArray(data)
-  try {
-    // Merge with existing cache
-    const existing = JSON.parse(localStorage.getItem(cacheKey) || "[]")
-    const existingIds = new Set(arr.map(s => s.id))
-    const merged = [...arr, ...(Array.isArray(existing) ? existing.filter(s => !existingIds.has(s.id)) : [])]
-    localStorage.setItem(cacheKey, JSON.stringify(merged))
-  } catch(e){}
-  return arr
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/spaces/by-ids`, {
+      method: "POST",
+      body: JSON.stringify(userSpaceIds)
+    })
+
+    const data = await safeJson(res)
+    const arr = ensureArray(data)
+    try {
+      const existing = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY).data
+      const existingIds = new Set(arr.map(s => String(s.id)))
+      const merged = [
+        ...arr,
+        ...(Array.isArray(existing) ? existing.filter(s => !existingIds.has(String(s.id))) : [])
+      ]
+      writeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY, merged)
+    } catch (e) {}
+    return arr
+  })()
+    .catch(err => {
+      const fallback = Array.isArray(cached)
+        ? cached.filter(s => normalizedIds.includes(String(s.id)))
+        : null
+      if (Array.isArray(fallback) && fallback.length > 0) return fallback
+      throw err
+    })
+    .finally(() => {
+      spacesForUserRequestCache.delete(requestKey)
+    })
+
+  spacesForUserRequestCache.set(requestKey, request)
+  return request
 }
 
 // --------------------
@@ -437,19 +512,53 @@ export const updateMessage = async (chatId, message) => {
 
 export const getContextState = async chatId => {
   if (!chatId) return { chatId: null, contexts: [], decisions: [], tasks: [] }
-  const res = await authFetch(`${API_BASE}/contexts/${chatId}`)
-  const data = await safeJson(res)
-  return {
-    chatId,
-    contexts: Array.isArray(data?.contexts) ? data.contexts : [],
-    decisions: Array.isArray(data?.decisions) ? data.decisions : [],
-    tasks: Array.isArray(data?.tasks) ? data.tasks : [],
-    updatedAt: data?.updatedAt || null,
+  const requestKey = String(chatId)
+  const { data: cached, timestamp } = readContextCache(chatId)
+  const cacheTtl = 10000
+
+  if (cached && Date.now() - timestamp < cacheTtl) {
+    return cached
   }
+
+  if (contextRequestCache.has(requestKey)) {
+    return contextRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/contexts/${chatId}`)
+    const data = await safeJson(res)
+    const normalized = {
+      chatId,
+      contexts: Array.isArray(data?.contexts) ? data.contexts : [],
+      decisions: Array.isArray(data?.decisions) ? data.decisions : [],
+      tasks: Array.isArray(data?.tasks) ? data.tasks : [],
+      updatedAt: data?.updatedAt || null,
+    }
+    writeContextCache(chatId, normalized)
+    return normalized
+  })()
+    .catch(err => {
+      if (cached) return cached
+      throw err
+    })
+    .finally(() => {
+      contextRequestCache.delete(requestKey)
+    })
+
+  contextRequestCache.set(requestKey, request)
+  return request
 }
 
 export const saveContextState = async (chatId, payload) => {
   if (!chatId) return null
+  const optimistic = {
+    chatId,
+    contexts: Array.isArray(payload?.contexts) ? payload.contexts : [],
+    decisions: Array.isArray(payload?.decisions) ? payload.decisions : [],
+    tasks: Array.isArray(payload?.tasks) ? payload.tasks : [],
+    updatedAt: new Date().toISOString(),
+  }
+  writeContextCache(chatId, optimistic)
   const res = await authFetch(`${API_BASE}/contexts/${chatId}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -458,16 +567,18 @@ export const saveContextState = async (chatId, payload) => {
       tasks: Array.isArray(payload?.tasks) ? payload.tasks : [],
     })
   })
-  return safeJson(res)
+  const data = await safeJson(res)
+  if (data) writeContextCache(chatId, data)
+  return data
 }
 
 // --------------------
 // Friend & DM Logic
 // --------------------
 
-export const getFriends = async friendIds => {
+export const getFriends = async (friendIds, options = {}) => {
   if (!Array.isArray(friendIds) || friendIds.length === 0) return []
-  const users = await getUsers()
+  const users = await getUsers(options)
   // Normalize IDs to strings for comparison to handle type mismatches
   const normalizedIds = friendIds.map(id => String(id))
   return users.filter(u => {
@@ -486,13 +597,16 @@ export const sendFriendRequest = async (fromId, fromName, toUserId) => {
     timestamp: Date.now()
   }
 
-  await authFetch(`${API_BASE}/actions/send-friend-request`, {
+  const res = await authFetch(`${API_BASE}/actions/send-friend-request`, {
     method: "POST",
     body: JSON.stringify({
       toUserId,
       notification
     })
   })
+
+  invalidateUsersCache()
+  return safeJson(res)
 }
 
 /* ✅ FIXED — ONLY REQUIRED CHANGE */
@@ -512,6 +626,7 @@ export const acceptFriendRequest = async (friendId, notificationId = null) => {
     })
   })
 
+  invalidateUsersCache()
   return safeJson(res)
 }
 
@@ -524,6 +639,7 @@ export const addMemberToSpace = async (userIdToDetail, spaceId) => {
     method: "POST",
     body: JSON.stringify({ userIdToDetail, spaceId })
   })
+  invalidateSpacesCache()
   return safeJson(res)
 }
 
@@ -533,6 +649,7 @@ export const removeMemberFromSpace = async (userIdToRemove, spaceId, channelId =
     method: "POST",
     body: JSON.stringify({ userIdToRemove, spaceId, channelId })
   })
+  invalidateSpacesCache()
   return safeJson(res)
 }
 
@@ -541,6 +658,7 @@ export const acceptInvite = async (userId, notificationId) => {
     method: "POST",
     body: JSON.stringify({ userId, notificationId })
   })
+  invalidateUsersCache()
   return safeJson(res)
 }
 
@@ -548,11 +666,35 @@ export const acceptInvite = async (userId, notificationId) => {
 // Events
 // --------------------
 
-export const getEvents = async () => {
+export const getEvents = async (options = {}) => {
+  const { forceRefresh = false, cacheTtl = 30000 } = options
+  const { data: cached, timestamp } = readSimpleCache(EVENTS_CACHE_KEY, EVENTS_CACHE_TIME_KEY)
+
+  if (!forceRefresh && Array.isArray(cached) && Date.now() - timestamp < cacheTtl) {
+    return cached
+  }
+
+  if (eventsRequestCache.has("events")) {
+    return eventsRequestCache.get("events")
+  }
+
   try {
-    const res = await authFetch(`${API_BASE}/events/`)
-    const data = await safeJson(res)
-    return ensureArray(data)
+    const request = (async () => {
+      const res = await authFetch(`${API_BASE}/events/`)
+      const data = await safeJson(res)
+      const arr = ensureArray(data)
+      writeSimpleCache(EVENTS_CACHE_KEY, EVENTS_CACHE_TIME_KEY, arr)
+      return arr
+    })()
+      .catch(err => {
+        if (Array.isArray(cached)) return cached
+        throw err
+      })
+      .finally(() => {
+        eventsRequestCache.delete("events")
+      })
+    eventsRequestCache.set("events", request)
+    return request
   } catch (err) {
     // fallback to localStorage
     try {
@@ -571,7 +713,10 @@ export const saveEvent = async event => {
       body: JSON.stringify(event)
     })
     // if backend accepted, return
-    if (res && res.ok) return safeJson(res)
+    if (res && res.ok) {
+      removeSimpleCache(EVENTS_CACHE_KEY, EVENTS_CACHE_TIME_KEY)
+      return safeJson(res)
+    }
   } catch (err) {
     // ignore and fallback
   }
@@ -581,6 +726,7 @@ export const saveEvent = async event => {
     const stored = JSON.parse(localStorage.getItem("spaces_events") || "[]")
     stored.push(event)
     localStorage.setItem("spaces_events", JSON.stringify(stored))
+    writeSimpleCache(EVENTS_CACHE_KEY, EVENTS_CACHE_TIME_KEY, stored)
   } catch (e) {
     console.error("saveEvent fallback failed", e)
   }
@@ -754,6 +900,7 @@ export const deleteNotification = async (userId, notificationId) => {
       method: "PUT",
       body: JSON.stringify(updated)
     })
+    invalidateUsersCache()
     return safeJson(res)
   } catch (e) {
     console.error("deleteNotification failed", e)
@@ -770,6 +917,7 @@ export const rejectFriendRequest = async (friendId, notificationId) => {
     method: "POST",
     body: JSON.stringify({ userId: user.id, friendId, notificationId })
   })
+  invalidateUsersCache()
   return safeJson(res)
 }
 

@@ -10,18 +10,16 @@ router = APIRouter(prefix="/spaces")
 def get_spaces():
     spaces = list(spaces_collection.find({}, {"_id": 0}))
 
-    # Ensure owner appears in members and is assigned as owner in channel roles for existing spaces
+    # Normalize legacy records in-memory for reads; avoid writes on hot read paths.
     for space in spaces:
         owner_id = space.get("ownerId")
         if not owner_id:
             continue
-        changed = False
         # ensure space members
         members = space.get('members') or []
         if owner_id not in members:
             members.append(owner_id)
             space['members'] = members
-            changed = True
 
         # ensure each channel has roles map and owner assigned
         channels = space.get('channels') or []
@@ -30,20 +28,12 @@ def get_spaces():
             if owner_id not in ch_members:
                 ch_members.append(owner_id)
                 ch['members'] = ch_members
-                changed = True
 
             roles = ch.get('roles') or {}
             # if no owner present in roles, assign space owner
             if not any(r == 'owner' for r in roles.values()):
                 roles[str(owner_id)] = 'owner'
                 ch['roles'] = roles
-                changed = True
-
-        if changed:
-            try:
-                spaces_collection.update_one({'id': space['id']}, {'$set': {'members': space.get('members'), 'channels': channels}})
-            except Exception:
-                pass
 
     return spaces
 
@@ -249,10 +239,9 @@ def get_spaces_for_user(space_ids: list[int]):
         )
     )
     
-    # Fix: Ensure owner is in members array for each space and its channels
+    # Normalize legacy records in-memory for reads; avoid writes on hot read paths.
     for space in spaces:
         owner_id = space.get("ownerId")
-        needs_update = False
         
         if owner_id:
             # Fix space members
@@ -260,7 +249,6 @@ def get_spaces_for_user(space_ids: list[int]):
             if owner_id not in members:
                 members.append(owner_id)
                 space["members"] = members
-                needs_update = True
             
             # Fix channel members for each channel
             channels = space.get("channels", [])
@@ -269,19 +257,10 @@ def get_spaces_for_user(space_ids: list[int]):
                 if owner_id not in channel_members:
                     channel_members.append(owner_id)
                     channel["members"] = channel_members
-                    needs_update = True
                 # Ensure roles map assigns owner role for previous spaces
                 roles = channel.get('roles') or {}
                 if not any(r == 'owner' for r in roles.values()):
                     roles[str(owner_id)] = 'owner'
                     channel['roles'] = roles
-                    needs_update = True
-            
-            # Update in database if needed
-            if needs_update:
-                spaces_collection.update_one(
-                    {"id": space["id"]},
-                    {"$set": {"members": space["members"], "channels": channels}}
-                )
     
     return spaces
