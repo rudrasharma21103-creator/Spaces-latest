@@ -69,7 +69,6 @@ import {
   LivingContextPanel,
   MessageActionButton,
   MessageActionsMenu,
-  MessageSelectionToggle,
 } from "./components/LivingContext"
 import { createContextRecord } from "./components/LivingContext.helpers"
 import * as TasksService from "./services/tasks"
@@ -9166,13 +9165,6 @@ export default function CollaborationApp() {
                                 isActionMenuOpen || isContextPickerOpen ? "z-40" : "z-0"
                               } group animate-fade-in`}
                             >
-                            <div className="pt-2">
-                              <MessageSelectionToggle
-                                isDarkMode={isDarkMode}
-                                checked={isMessageSelected}
-                                onChange={() => toggleMessageSelection(msg.id)}
-                              />
-                            </div>
                             {/* Avatar only for first in sequence */}
                             <div className="flex-shrink-0 w-10 flex flex-col items-center">
                               {!isSequence ? (
