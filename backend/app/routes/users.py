@@ -48,7 +48,7 @@ def get_users(request: Request):
                 except Exception:
                     requester = None
 
-    users_raw = list(users_collection.find({}, {"_id": 0}))
+    users_raw = list(users_collection.find({}, {"_id": 0, "password": 0}))
     users = [sanitize(u) for u in users_raw]
     for u in users:
         u.pop("password", None)
@@ -193,7 +193,7 @@ def search_users(query: str, request: Request):
     users = list(
         users_collection.find(
             {"name": {"$regex": query, "$options": "i"}},
-            {"_id": 0}
+            {"_id": 0, "password": 0}
         )
     )
     for u in users:
@@ -246,7 +246,7 @@ def search_users(query: str, request: Request):
 def users_by_domain(domain: str):
     # Return users whose email domain matches the requested domain
     q = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
-    users = list(users_collection.find(q, {"_id": 0}))
+    users = list(users_collection.find(q, {"_id": 0, "password": 0}))
     for u in users:
         u.pop("password", None)
     users = [sanitize(u) for u in users]

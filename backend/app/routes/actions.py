@@ -10,6 +10,7 @@ async def send_friend_request(payload: dict):
     notification = payload["notification"]
     # Determine sender id from notification or payload
     from_id = notification.get("fromId") or payload.get("fromId")
+    recipient = None
 
     # Permission enforcement: if sender has company-only invite permission,
     # ensure recipient is in the same organization or domain
@@ -60,6 +61,8 @@ async def send_friend_request(payload: dict):
                 recipient = users_collection.find_one({"id": int(to_id)})
             except Exception:
                 recipient = users_collection.find_one({"id": to_id})
+        if recipient is None:
+            raise HTTPException(status_code=404, detail="Recipient not found")
         existing_notifications = (recipient or {}).get("notifications") or []
         already_pending = any(
             n.get("type") == "friend_request"
@@ -69,17 +72,22 @@ async def send_friend_request(payload: dict):
         )
         if already_pending:
             return {"status": "sent"}
+    except HTTPException:
+        raise
     except Exception:
         pass
 
-    users_collection.update_one(
-        {"id": to_id},
+    recipient_id = recipient.get("id") if recipient else to_id
+    update_result = users_collection.update_one(
+        {"id": recipient_id},
         {"$push": {"notifications": notification}}
     )
+    if update_result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Recipient not found")
     
     # Send real-time WebSocket notification to the target user
     try:
-        await manager.send_to_user(str(to_id), {"type": "notification", "notification": notification})
+        await manager.send_to_user(str(recipient_id), {"type": "notification", "notification": notification})
     except Exception:
         pass
     
@@ -135,8 +143,9 @@ async def accept_friend(payload: dict):
                 users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
                 # Send real-time WebSocket notification immediately
                 await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
-                # Also notify the accepting user to refresh their friends list
+                # Notify both users to refresh friend state immediately
                 await manager.send_to_user(str(user_id), {"type": "friends_updated"})
+                await manager.send_to_user(str(friend_id), {"type": "friends_updated"})
         except Exception:
             pass
 
@@ -184,6 +193,7 @@ async def reject_friend(payload: dict):
                 users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
                 # Send real-time WebSocket notification immediately
                 await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
+                await manager.send_to_user(str(friend_id), {"type": "friends_updated"})
         except Exception:
                     pass
         except Exception:

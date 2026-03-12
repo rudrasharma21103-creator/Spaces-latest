@@ -959,10 +959,14 @@ export default function CollaborationApp() {
 
     const pollData = async () => {
       try {
-        const storedUsers = await Storage.getUsers()
+        const isPageHidden = typeof document !== "undefined" && document.hidden
+        const [storedUsers, availableSpaces, storedEvents] = await Promise.all([
+          Storage.getUsers(),
+          activeSpace || !isPageHidden ? Storage.getSpaces() : Promise.resolve([]),
+          isPageHidden ? Promise.resolve(events) : Storage.getEvents()
+        ])
         const freshUser = storedUsers.find(u => u.id === currentUser.id)
 
-        // Update User Data
         if (freshUser) {
           if (!freshUser.friends) freshUser.friends = []
           const filteredFresh = filterDismissedUser(freshUser)
@@ -979,10 +983,8 @@ export default function CollaborationApp() {
           }
         }
 
-        // Check for Active Space Data Updates (Members/Channels)
         if (activeSpace) {
-          const freshSpaces = await Storage.getSpaces()
-          const freshActiveSpace = freshSpaces.find(s => s.id === activeSpace)
+          const freshActiveSpace = availableSpaces.find(s => s.id === activeSpace)
           const currentActiveSpace = spaces.find(s => s.id === activeSpace)
 
           if (freshActiveSpace && currentActiveSpace) {
@@ -998,7 +1000,7 @@ export default function CollaborationApp() {
                   if (s.id === activeSpace) {
                     return {
                       ...freshActiveSpace,
-                      icon: s.icon, // Preserve ReactNode icon from existing state
+                      icon: s.icon,
                       expanded: s.expanded
                     }
                   }
@@ -1009,49 +1011,41 @@ export default function CollaborationApp() {
           }
         }
 
-        // Poll for unread channels using lightweight counts instead of full history fetches.
-        const allSpaces = await Storage.getSpaces()
-        const channelsToCheck = []
-        for (const space of allSpaces) {
-          for (const ch of (space.channels || [])) {
-            // Skip the currently active channel - we already have real-time updates
-            if (activeView === "channel" && activeChannel === ch.id) continue
-            channelsToCheck.push(ch)
+        if (!isPageHidden) {
+          const channelsToCheck = []
+          for (const space of availableSpaces) {
+            for (const ch of (space.channels || [])) {
+              if (activeView === "channel" && activeChannel === ch.id) continue
+              channelsToCheck.push(ch)
+            }
           }
-        }
-        
-        // Only check a few channels per poll cycle to avoid overloading
-        const maxChannelsPerPoll = 5
-        const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
-        
-        for (const ch of channelsThisCycle) {
-          try {
-            const count = await Storage.getMessageCount(ch.id)
-            const prevCount = messageCounts[ch.id] || 0
 
-            // If new message AND channel not active, mark unread
-            if (count > prevCount) {
-              if (!unreadChannels.includes(ch.id)) {
-                setUnreadChannels(prev => [...prev, ch.id])
+          const maxChannelsPerPoll = 5
+          const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
+          const channelCounts = await Promise.all(
+            channelsThisCycle.map(async ch => {
+              try {
+                const count = await Storage.getMessageCount(ch.id)
+                return { channelId: ch.id, count }
+              } catch (e) {
+                return { channelId: ch.id, count: null }
               }
+            })
+          )
+
+          for (const { channelId, count } of channelCounts) {
+            if (!Number.isFinite(count)) continue
+            const prevCount = messageCounts[channelId] || 0
+            if (count > prevCount && !unreadChannels.includes(channelId)) {
+              setUnreadChannels(prev => [...prev, channelId])
             }
-            // Update tracking map
-            messageCounts[ch.id] = count
-          } catch (e) {
-            if (e && e.status === 403) {
-              // Restricted channel — ignore for unread polling
-            } else {
-              // Silently ignore polling errors to avoid console spam
-            }
+            messageCounts[channelId] = count
+          }
+          if (channelCounts.length > 0) {
+            setMessageCounts({ ...messageCounts })
           }
         }
-        if (channelsThisCycle.length > 0) {
-          setMessageCounts({ ...messageCounts })
-        }
 
-        // Update Events
-        const storedEvents = await Storage.getEvents()
-        // Map current google calendar items (if any) into app event shape
         const mappedGoogle = (googleCalendarEvents || []).map(ge => {
           const startIso = ge.start?.dateTime || ge.start?.date || null
           const endIso = ge.end?.dateTime || ge.end?.date || null
@@ -1069,7 +1063,6 @@ export default function CollaborationApp() {
           }
         })
 
-        // Merge stored (local) events with google events, dedupe by id
         const stored = storedEvents || []
         const dedupedGoogle = mappedGoogle.filter(g => !stored.some(s => String(s.id) === String(g.id)))
         const merged = [...stored, ...dedupedGoogle]
@@ -1078,7 +1071,6 @@ export default function CollaborationApp() {
           setEvents(merged)
         }
 
-        // Poll Calls
         if (activeView !== "meeting") {
           const incoming = await Storage.getIncomingCall(currentUser.id)
           if (incoming && incoming.id !== incomingCall?.id) {
@@ -1091,12 +1083,10 @@ export default function CollaborationApp() {
         if (activeView === "meeting" && activeCallId) {
           const calls = await Storage.getCalls()
           const myCall = calls.find(c => c.id === activeCallId)
-          if (myCall) {
-            if (myCall.status === "rejected" || myCall.status === "ended") {
-              setActiveView("channel")
-              setActiveCallId(null)
-              setIncomingCall(null)
-            }
+          if (myCall && (myCall.status === "rejected" || myCall.status === "ended")) {
+            setActiveView("channel")
+            setActiveCallId(null)
+            setIncomingCall(null)
           }
         }
       } catch (e) {
@@ -1104,8 +1094,8 @@ export default function CollaborationApp() {
       }
     }
 
-    // Avoid hammering the API while still keeping unread badges reasonably fresh.
-    const interval = setInterval(pollData, 5000)
+    pollData()
+    const interval = setInterval(pollData, 10000)
     return () => clearInterval(interval)
   }, [
     isAuthenticated,
@@ -1439,6 +1429,13 @@ export default function CollaborationApp() {
               return
             }
 
+            if (data.type === "friends_updated") {
+              refreshRelationshipState(currentUser?.id).catch(e => {
+                console.error("Failed to refresh friend state", e)
+              })
+              return
+            }
+
             // Only react to 'notification' messages
             if (data.type === "notification" && data.notification) {
               const incoming = data.notification
@@ -1455,10 +1452,10 @@ export default function CollaborationApp() {
                 // Also refresh users and friends list to ensure real-time avatar sync
                 ;(async () => {
                   try {
-                    const allUsers = await Storage.getUsers()
+                    const allUsers = await Storage.getUsers({ forceRefresh: true })
                     if (Array.isArray(allUsers)) setUsers(allUsers)
                     if (currentUser?.friends?.length > 0) {
-                      const friendsList = await Storage.getFriends(currentUser.friends)
+                      const friendsList = await Storage.getFriends(currentUser.friends, { forceRefresh: true })
                       if (Array.isArray(friendsList)) setFriends(friendsList)
                     }
                   } catch (e) {
@@ -1508,15 +1505,21 @@ export default function CollaborationApp() {
                 return { ...prev, notifications: [...(prev.notifications || []), incoming] }
               })
 
-              // Also refresh users list so friend lists / counts stay in sync
-              ;(async () => {
-                try {
-                  const allUsers = await Storage.getUsers()
-                  setUsers(Array.isArray(allUsers) ? allUsers : [])
-                } catch (e) {
-                  console.error('Failed to refresh users after incoming notification', e)
-                }
-              })()
+              if (incoming.id?.startsWith("fr-accept-") || incoming.type === "friend_request") {
+                refreshRelationshipState(currentUser?.id).catch(e => {
+                  console.error('Failed to refresh users after incoming friend notification', e)
+                })
+              } else {
+                // Also refresh users list so friend lists / counts stay in sync
+                ;(async () => {
+                  try {
+                    const allUsers = await Storage.getUsers({ forceRefresh: true })
+                    setUsers(Array.isArray(allUsers) ? allUsers : [])
+                  } catch (e) {
+                    console.error('Failed to refresh users after incoming notification', e)
+                  }
+                })()
+              }
             }
 
             // Presence events and other types could be handled here in future
@@ -3186,6 +3189,20 @@ export default function CollaborationApp() {
     return { ...user, notifications: (user.notifications || []).filter(n => !dismissed.includes(n.id)) }
   }
 
+  const refreshRelationshipState = async (userId = currentUser?.id) => {
+    if (!userId) return null
+    const allUsers = await Storage.getUsers({ forceRefresh: true }).catch(() => [])
+    const normalizedUsers = Array.isArray(allUsers) ? allUsers : []
+    setUsers(normalizedUsers)
+    const updatedUser = normalizedUsers.find(u => String(u.id) === String(userId))
+    if (!updatedUser) return null
+    const filteredUser = filterDismissedUser(updatedUser)
+    setCurrentUser(filteredUser)
+    const friendsList = await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
+    setFriends(Array.isArray(friendsList) ? friendsList : [])
+    return filteredUser
+  }
+
   const renderWithHighlight = (text, highlight) => {
     if (!highlight || !text) return text
     const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -3920,11 +3937,12 @@ export default function CollaborationApp() {
     const message = getMessageById(messageId)
     if (!message) return
     const now = new Date().toISOString()
-    await patchMessage(messageId, current => ({
+    const updatedMessage = await patchMessage(messageId, current => ({
       ...current,
       contextIds: Array.from(new Set([...(current.contextIds || []), contextId])),
     }))
-    const decisionId = ensureDecisionForContext(contextId, message)
+    const effectiveMessage = updatedMessage || message
+    const decisionId = ensureDecisionForContext(contextId, effectiveMessage)
     setContextItems(prev =>
       prev.map(context => {
         if (String(context.id) !== String(contextId)) return context
@@ -3935,7 +3953,7 @@ export default function CollaborationApp() {
           messageId,
           timestamp: now,
         })
-        const attachmentIds = (message.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
+        const attachmentIds = (effectiveMessage.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
         let withFiles = next
         attachmentIds.forEach(fileId => {
           withFiles = appendContextActivity(withFiles, {
@@ -3957,16 +3975,16 @@ export default function CollaborationApp() {
           })
         }
         let derivedTaskIds = withDerived.taskIds || []
-        if (message.taskId) {
-          const sourceTask = getTaskById(message.taskId)
+        if (effectiveMessage.taskId) {
+          const sourceTask = getTaskById(effectiveMessage.taskId)
           const taskId = ensureTaskForContext(contextId, sourceTask || {
-            id: message.taskId,
-            message: message.text || "Task captured from message",
+            id: effectiveMessage.taskId,
+            message: effectiveMessage.text || "Task captured from message",
             assigned_to: [],
             status: "pending",
-            created_by: message.userId,
-            timestamp: message.timestamp,
-            sourceMessageId: message.id,
+            created_by: effectiveMessage.userId,
+            timestamp: effectiveMessage.timestamp,
+            sourceMessageId: effectiveMessage.id,
           })
           if (taskId) {
             withDerived = appendContextActivity(withDerived, {
@@ -3991,6 +4009,55 @@ export default function CollaborationApp() {
     setMessageContextPicker(null)
     setSelectedMessageIds(prev => Array.from(new Set([...prev.filter(id => String(id) !== String(messageId)), messageId])))
   }
+
+  useEffect(() => {
+    if (activeView !== "channel" || !activeChannel || currentMessages.length === 0) return
+
+    setContextItems(prev => {
+      let changed = false
+      const nextItems = prev.map(context => {
+        if (String(context.channelId) !== String(activeChannel)) return context
+
+        const linkedMessages = currentMessages.filter(message =>
+          (message.contextIds || []).some(contextId => String(contextId) === String(context.id))
+        )
+
+        if (!linkedMessages.length) return context
+
+        const linkedMessageIds = Array.from(new Set(linkedMessages.map(message => message.id)))
+        const linkedFileIds = Array.from(new Set(
+          linkedMessages.flatMap(message => (message.attachments || []).map(att => att.fileId || att.id).filter(Boolean))
+        ))
+        const contributorIds = Array.from(new Set([
+          ...(context.contributorIds || []),
+          ...linkedMessages.map(message => message.userId).filter(Boolean),
+        ]))
+
+        const hasSameMessages =
+          linkedMessageIds.length === (context.linkedMessageIds || []).length &&
+          linkedMessageIds.every(messageId => (context.linkedMessageIds || []).some(existingId => String(existingId) === String(messageId)))
+        const hasSameFiles =
+          linkedFileIds.length === (context.linkedFileIds || []).length &&
+          linkedFileIds.every(fileId => (context.linkedFileIds || []).some(existingId => String(existingId) === String(fileId)))
+        const hasSameContributors =
+          contributorIds.length === (context.contributorIds || []).length &&
+          contributorIds.every(userId => (context.contributorIds || []).some(existingId => String(existingId) === String(userId)))
+
+        if (hasSameMessages && hasSameFiles && hasSameContributors) return context
+
+        changed = true
+        return {
+          ...context,
+          linkedMessageIds,
+          linkedFileIds,
+          contributorIds,
+          updatedAt: context.updatedAt || new Date().toISOString(),
+        }
+      })
+
+      return changed ? nextItems : prev
+    })
+  }, [activeView, activeChannel, currentMessages])
 
   const toggleMessageSelection = messageId => {
     setSelectedMessageIds(prev =>
@@ -4146,7 +4213,14 @@ export default function CollaborationApp() {
 
   const currentContextMessages = useMemo(
     () => currentContext
-      ? (currentContext.linkedMessageIds || [])
+      ? Array.from(new Set([
+          ...(currentContext.linkedMessageIds || []).map(messageId => String(messageId)),
+          ...currentMessages
+            .filter(message =>
+              (message.contextIds || []).some(contextId => String(contextId) === String(currentContext.id))
+            )
+            .map(message => String(message.id)),
+        ]))
           .map(messageId => getMessageById(messageId))
           .filter(Boolean)
           .map(message => ({
@@ -4912,12 +4986,7 @@ export default function CollaborationApp() {
 
   const handleBulkFriendInvite = async () => {
     if (selectedFriendInvitees.length === 0) return
-    for (const id of selectedFriendInvitees) {
-      // await each to ensure backend compatibility
-      // errors are intentionally not thrown to keep UI flow
-      // eslint-disable-next-line no-await-in-loop
-      await sendFriendRequest(id)
-    }
+    await Promise.all(selectedFriendInvitees.map(id => sendFriendRequest(id)))
 
     setInviteSent(true)
     setTimeout(() => {
@@ -4998,28 +5067,39 @@ export default function CollaborationApp() {
 
       if (type === "info") {
         await Storage.deleteNotification(currentUser.id, notificationId)
-        // Refresh users and currentUser from server
-        const allUsers = await Storage.getUsers()
-        setUsers(Array.isArray(allUsers) ? allUsers : [])
-        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-        if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+        await refreshRelationshipState(currentUser.id)
       } else if (type === "friend_request") {
         const friendId = notif?.fromId
         if (!friendId) return
+
+        setCurrentUser(prev => {
+          if (!prev) return prev
+          const nextFriends = (prev.friends || []).some(id => String(id) === String(friendId))
+            ? (prev.friends || [])
+            : [...(prev.friends || []), friendId]
+          return {
+            ...prev,
+            friends: nextFriends,
+            notifications: (prev.notifications || []).filter(n => n.id !== notificationId)
+          }
+        })
+
+        const acceptedFriend = users.find(u => String(u.id) === String(friendId))
+        if (acceptedFriend) {
+          setFriends(prev => {
+            const safePrev = Array.isArray(prev) ? prev : []
+            if (safePrev.some(friend => String(friend.id) === String(friendId))) return safePrev
+            return [...safePrev, acceptedFriend]
+          })
+        }
+
         await Storage.acceptFriendRequest(friendId, notificationId)
-        // Refresh users and currentUser from server so friend lists and notifications stay in sync
-        const allUsers = await Storage.getUsers()
-        setUsers(Array.isArray(allUsers) ? allUsers : [])
-        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-        if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+        await refreshRelationshipState(currentUser.id)
       } else {
         const joinedSpace = await Storage.acceptInvite(currentUser.id, notificationId)
         // Force refresh user regardless of joinedSpace result to ensure notification is gone
-        const allUsers = await Storage.getUsers()
-        setUsers(Array.isArray(allUsers) ? allUsers : [])
-        const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+        const updatedUser = await refreshRelationshipState(currentUser.id)
         if (updatedUser) {
-          setCurrentUser(filterDismissedUser(updatedUser))
           if (joinedSpace) {
             setActiveSpace(joinedSpace.id)
             setActiveView("channel")
@@ -5053,6 +5133,14 @@ export default function CollaborationApp() {
       // Find the notification to extract sender id
       const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
 
+      setCurrentUser(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          notifications: (prev.notifications || []).filter(n => n.id !== notificationId)
+        }
+      })
+
       if (type === "friend_request") {
         const friendId = notif?.fromId
         if (!friendId) return
@@ -5061,11 +5149,7 @@ export default function CollaborationApp() {
         await Storage.rejectInvite(currentUser.id, notificationId)
       }
 
-      // Refresh users and currentUser
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
-      if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
+      await refreshRelationshipState(currentUser.id)
     } finally {
       pendingNotificationActionIdsRef.current.delete(notificationId)
       setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
