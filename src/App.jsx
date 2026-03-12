@@ -5666,20 +5666,18 @@ export default function CollaborationApp() {
 
   if (!isAuthenticated) {
     return (
-      <div className={`min-h-screen flex items-center justify-center p-6 font-sans relative overflow-hidden ${
+      <div className={`min-h-screen font-sans relative overflow-hidden ${
         isDarkMode 
-          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 text-white' 
-          : 'bg-gradient-to-br from-slate-100 via-indigo-50/50 to-purple-50/30 text-slate-900'
+          ? 'bg-[#06131d] text-white' 
+          : 'bg-[#eef3fb] text-slate-900'
       }`}>
-        {/* Theme Toggle for Login */}
-        {/* Back to Landing & Theme Toggle */}
         <div className="absolute top-6 left-6 right-6 z-20 flex items-center justify-between">
           <button
             onClick={() => setShowLandingPage(true)}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-medium transition-all duration-300 ${
               isDarkMode 
-                ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300' 
-                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+                ? 'border border-white/10 bg-white/5 hover:bg-white/10 text-slate-200' 
+                : 'border border-slate-900/10 bg-white/80 hover:bg-white text-slate-700 shadow-lg shadow-slate-200/40'
             } backdrop-blur-xl`}
           >
             <ChevronRight className="w-4 h-4 rotate-180" />
@@ -5692,264 +5690,278 @@ export default function CollaborationApp() {
             }}
             className={`p-3 rounded-2xl transition-all duration-300 ${
               isDarkMode 
-                ? 'bg-slate-800/80 hover:bg-slate-700 text-yellow-400' 
-                : 'bg-white/70 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/50'
+                ? 'border border-white/10 bg-white/5 hover:bg-white/10 text-amber-300' 
+                : 'border border-slate-900/10 bg-white/80 hover:bg-white text-slate-600 shadow-lg shadow-slate-200/40'
             } backdrop-blur-xl`}
           >
             {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
         </div>
 
-        {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className={`absolute -top-40 -right-40 w-80 h-80 rounded-full blur-3xl animate-float ${
-            isDarkMode ? 'bg-gradient-to-br from-violet-600/20 to-pink-600/20' : 'bg-gradient-to-br from-purple-300/25 to-pink-300/25'
+          <div className={`absolute -top-32 right-[-5rem] h-80 w-80 rounded-full blur-3xl animate-float ${
+            isDarkMode ? 'bg-cyan-500/12' : 'bg-cyan-300/30'
           }`}></div>
-          <div className={`absolute -bottom-40 -left-40 w-96 h-96 rounded-full blur-3xl animate-float ${
-            isDarkMode ? 'bg-gradient-to-br from-indigo-600/20 to-blue-600/20' : 'bg-gradient-to-br from-indigo-300/25 to-blue-300/25'
+          <div className={`absolute -bottom-40 -left-32 h-96 w-96 rounded-full blur-3xl animate-float ${
+            isDarkMode ? 'bg-blue-500/14' : 'bg-blue-300/30'
           }`} style={{animationDelay: '1s'}}></div>
-          <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full blur-3xl ${
-            isDarkMode ? 'bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10' : 'bg-gradient-to-br from-violet-200/15 to-fuchsia-200/15'
+          <div className={`absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl ${
+            isDarkMode ? 'bg-violet-500/10' : 'bg-violet-200/20'
           }`}></div>
         </div>
-        
-        <div className="w-full max-w-md animate-fade-in-up relative z-10">
-          <div className="text-center mb-10">
-            <div className={`inline-flex items-center justify-center w-24 h-24 rounded-[2rem] mb-6 shadow-2xl transform hover:scale-110 hover:rotate-6 transition-all duration-500 animate-float ${
-              isDarkMode 
-                ? 'shadow-violet-500/30' 
-                : 'shadow-slate-300/50'
+
+        <div className="relative z-10 mx-auto grid min-h-screen w-full max-w-7xl gap-12 px-6 pb-12 pt-28 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-10">
+          <div className="animate-fade-in-up">
+            <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] ${
+              isDarkMode ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200' : 'border-cyan-600/15 bg-white/70 text-cyan-800'
             }`}>
-              <div aria-hidden="true" className="w-full h-full rounded-[2rem]" />
+              <Sparkles className="h-3.5 w-3.5" />
+              Built for teams that hate clutter
             </div>
-            <h1 className={`text-5xl font-extrabold mb-3 tracking-tight bg-clip-text text-transparent ${
-              isDarkMode 
-                ? 'bg-gradient-to-r from-violet-400 via-purple-400 to-pink-400' 
-                : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600'
-            }`}>
-              Spaces
+
+            <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[0.92] tracking-[-0.05em] sm:text-6xl xl:text-[5rem]">
+              Team chat,
+              <span className={`block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>files, tasks, and calls</span>
+              <span className="block bg-gradient-to-r from-cyan-400 via-blue-500 to-orange-400 bg-clip-text text-transparent">in one sharp workspace.</span>
             </h1>
-            <p className={`text-lg font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              Where squads and pros collide.
+            <p className={`mt-6 max-w-2xl text-base leading-8 sm:text-lg ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-700'
+            }`}>
+              Spaces pulls conversation, docs, meetings, and ownership into a single interface so your team stops jumping between tabs and starts shipping.
             </p>
+
+            <div className="mt-10 grid gap-4 sm:grid-cols-3">
+              {[
+                ['Messages', 'Realtime chat with shared context and decisions'],
+                ['Files', 'Docs and assets connected directly to active work'],
+                ['Ownership', 'Tasks and accountability live beside every thread'],
+              ].map(([title, desc]) => (
+                <div
+                  key={title}
+                  className={`rounded-[1.6rem] border p-4 ${
+                    isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/70'
+                  }`}
+                >
+                  <p className="text-sm font-bold">{title}</p>
+                  <p className={`mt-2 text-sm leading-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{desc}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className={`rounded-[2rem] overflow-hidden p-1 backdrop-blur-2xl shadow-2xl border transition-shadow duration-500 ${
-            isDarkMode 
-              ? 'bg-slate-800/70 shadow-violet-500/20 border-slate-700/60 hover:shadow-violet-500/30' 
-              : 'bg-white/60 shadow-slate-300/30 border-white/50 hover:shadow-slate-400/40'
-          }`}>
-            <div className={`flex p-1.5 rounded-[1.6rem] mb-2 ${isDarkMode ? 'bg-slate-900/80' : 'bg-slate-100/60'}`}>
-              <button
-                onClick={() => setAuthMode("login")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
-                  authMode === "login"
-                    ? isDarkMode 
-                      ? "bg-slate-700 text-violet-400 shadow-lg shadow-violet-500/20" 
-                      : "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
-                    : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                onClick={() => setAuthMode("signup")}
-                className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
-                  authMode === "signup"
-                    ? isDarkMode 
-                      ? "bg-slate-700 text-violet-400 shadow-lg shadow-violet-500/20" 
-                      : "bg-white text-indigo-600 shadow-lg shadow-indigo-100/50"
-                    : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
-                }`}
-              >
-                Sign Up
-              </button>
-            </div>
-            <form onSubmit={handleAuthSubmit} className="p-8 space-y-5">
-              {authSuccess && (
-                <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
-                  isDarkMode 
-                    ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400' 
-                    : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
-                }`}>
-                  <CheckCircle className="w-5 h-5" />
-                  {authSuccess}
-                </div>
-              )}
-              {authError && (
-                <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
-                  isDarkMode 
-                    ? 'bg-red-500/20 border border-red-500/30 text-red-400' 
-                    : 'bg-red-50 border border-red-200 text-red-700'
-                }`}>
-                  <XCircle className="w-5 h-5" />
-                  {authError}
-                </div>
-              )}
+          <div className="animate-fade-in-up">
+            <div className={`rounded-[2rem] overflow-hidden border p-3 shadow-[0_30px_90px_rgba(15,23,42,0.16)] backdrop-blur-2xl ${
+              isDarkMode ? 'border-white/10 bg-slate-950/70' : 'border-white/80 bg-white/80'
+            }`}>
+              <div className={`flex p-1.5 rounded-[1.6rem] mb-2 ${isDarkMode ? 'bg-white/[0.04]' : 'bg-slate-100/80'}`}>
+                <button
+                  onClick={() => setAuthMode("login")}
+                  className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
+                    authMode === "login"
+                      ? isDarkMode 
+                        ? "bg-white/10 text-white shadow-lg shadow-slate-950/40" 
+                        : "bg-white text-slate-900 shadow-lg shadow-slate-200/70"
+                      : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => setAuthMode("signup")}
+                  className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
+                    authMode === "signup"
+                      ? isDarkMode 
+                        ? "bg-white/10 text-white shadow-lg shadow-slate-950/40" 
+                        : "bg-white text-slate-900 shadow-lg shadow-slate-200/70"
+                      : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Sign Up
+                </button>
+              </div>
+              <form onSubmit={handleAuthSubmit} className="p-8 space-y-5">
+                {authSuccess && (
+                  <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
+                    isDarkMode 
+                      ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400' 
+                      : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                  }`}>
+                    <CheckCircle className="w-5 h-5" />
+                    {authSuccess}
+                  </div>
+                )}
+                {authError && (
+                  <div className={`px-4 py-3 rounded-2xl text-sm flex items-center gap-3 ${
+                    isDarkMode 
+                      ? 'bg-red-500/20 border border-red-500/30 text-red-400' 
+                      : 'bg-red-50 border border-red-200 text-red-700'
+                  }`}>
+                    <XCircle className="w-5 h-5" />
+                    {authError}
+                  </div>
+                )}
 
-              {authMode === "signup" && (
+                {authMode === "signup" && (
+                  <div className="group">
+                    <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                      isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                    }`}>
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      value={authData.name}
+                      onChange={e =>
+                        setAuthData({ ...authData, name: e.target.value })
+                      }
+                      className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                        isDarkMode 
+                          ? 'bg-white/[0.04] border border-white/10 text-white placeholder-slate-500 focus:ring-cyan-500/40' 
+                          : 'bg-white/90 border border-slate-200/80 text-slate-700 placeholder-slate-400 focus:ring-cyan-500/30 shadow-sm'
+                      }`}
+                      placeholder="Jane Doe"
+                    />
+                  </div>
+                )}
                 <div className="group">
                   <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
                     isDarkMode ? 'text-slate-500' : 'text-slate-400'
                   }`}>
-                    Full Name
+                    Email
                   </label>
                   <input
-                    type="text"
-                    value={authData.name}
+                    type="email"
+                    value={authData.email}
                     onChange={e =>
-                      setAuthData({ ...authData, name: e.target.value })
+                      setAuthData({ ...authData, email: e.target.value })
                     }
                     className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
                       isDarkMode 
-                        ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
-                        : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
+                        ? 'bg-white/[0.04] border border-white/10 text-white placeholder-slate-500 focus:ring-cyan-500/40' 
+                        : 'bg-white/90 border border-slate-200/80 text-slate-700 placeholder-slate-400 focus:ring-cyan-500/30 shadow-sm'
                     }`}
-                    placeholder="Jane Doe"
+                    placeholder="jane@example.com"
                   />
                 </div>
-              )}
-              <div className="group">
-                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
-                  isDarkMode ? 'text-slate-500' : 'text-slate-400'
-                }`}>
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={authData.email}
-                  onChange={e =>
-                    setAuthData({ ...authData, email: e.target.value })
-                  }
-                  className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
-                    isDarkMode 
-                      ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
-                      : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
-                  }`}
-                  placeholder="jane@example.com"
-                />
-              </div>
-              <div className="group">
-                <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
-                  isDarkMode ? 'text-slate-500' : 'text-slate-400'
-                }`}>
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={authData.password}
-                  onChange={e =>
-                    setAuthData({ ...authData, password: e.target.value })
-                  }
-                  className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
-                    isDarkMode 
-                      ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
-                      : 'bg-white/70 border border-slate-200/60 text-slate-700 placeholder-slate-400 focus:ring-indigo-500/40 shadow-sm'
-                  }`}
-                  placeholder="••••••••"
-                />
-              </div>
-              {authMode === "signup" && (
                 <div className="group">
                   <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
                     isDarkMode ? 'text-slate-500' : 'text-slate-400'
                   }`}>
-                    Confirm Password
+                    Password
                   </label>
                   <input
                     type="password"
-                    value={authData.confirmPassword}
+                    value={authData.password}
                     onChange={e =>
-                      setAuthData({
-                        ...authData,
-                        confirmPassword: e.target.value
-                      })
+                      setAuthData({ ...authData, password: e.target.value })
                     }
                     className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
                       isDarkMode 
-                        ? 'bg-slate-700/50 border border-slate-600 text-white placeholder-slate-400 focus:ring-violet-500/50' 
-                        : 'bg-slate-50 border border-slate-200 text-slate-800 focus:ring-pink-500/50'
+                        ? 'bg-white/[0.04] border border-white/10 text-white placeholder-slate-500 focus:ring-cyan-500/40' 
+                        : 'bg-white/90 border border-slate-200/80 text-slate-700 placeholder-slate-400 focus:ring-cyan-500/30 shadow-sm'
                     }`}
-                    placeholder="••••••••"
+                    placeholder="........"
                   />
                 </div>
-              )}
-              <button
-                type="submit"
-                className={`w-full py-4 font-bold rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 text-white shadow-xl hover:scale-[1.02] ${
-                  isDarkMode 
-                    ? 'bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 hover:from-violet-600 hover:via-purple-600 hover:to-pink-600 shadow-violet-500/30 hover:shadow-violet-500/50' 
-                    : 'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 shadow-purple-300/40 hover:shadow-purple-400/50'
-                }`}
-              >
-                {authMode === "login" ? (
-                  <>
-                    <LogIn className="w-5 h-5" /> Enter Space
-                  </>
-                ) : (
-                  <>
-                    <UserPlusIcon className="w-5 h-5" /> Join the Crew
-                  </>
+                {authMode === "signup" && (
+                  <div className="group">
+                    <label className={`block text-[10px] font-bold uppercase tracking-widest mb-2 ml-1 ${
+                      isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                    }`}>
+                      Confirm Password
+                    </label>
+                    <input
+                      type="password"
+                      value={authData.confirmPassword}
+                      onChange={e =>
+                        setAuthData({
+                          ...authData,
+                          confirmPassword: e.target.value
+                        })
+                      }
+                      className={`w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:border-transparent transition-all font-medium ${
+                        isDarkMode 
+                          ? 'bg-white/[0.04] border border-white/10 text-white placeholder-slate-500 focus:ring-cyan-500/40' 
+                          : 'bg-white/90 border border-slate-200/80 text-slate-800 placeholder-slate-400 focus:ring-cyan-500/30'
+                      }`}
+                      placeholder="........"
+                    />
+                  </div>
                 )}
-              </button>
+                <button
+                  type="submit"
+                  className={`w-full py-4 font-bold rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 text-white shadow-xl hover:scale-[1.02] ${
+                    isDarkMode 
+                      ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 hover:from-cyan-400 hover:via-blue-400 hover:to-violet-400 shadow-blue-500/20 hover:shadow-blue-500/40' 
+                      : 'bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 hover:from-cyan-600 hover:via-blue-600 hover:to-violet-600 shadow-blue-300/40 hover:shadow-blue-400/50'
+                  }`}
+                >
+                  {authMode === "login" ? (
+                    <>
+                      <LogIn className="w-5 h-5" /> Enter Space
+                    </>
+                  ) : (
+                    <>
+                      <UserPlusIcon className="w-5 h-5" /> Join the Crew
+                    </>
+                  )}
+                </button>
 
-              {/* Google Sign-In Divider */}
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className={`w-full border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200/60'}`}></div>
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className={`w-full border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/80'}`}></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className={`px-3 font-bold ${isDarkMode ? 'bg-slate-950/80 text-slate-500' : 'bg-white/90 text-slate-400'}`}>Or continue with</span>
+                  </div>
                 </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className={`px-3 font-bold ${isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-white/60 text-slate-400'}`}>Or continue with</span>
-                </div>
-              </div>
 
-              {/* Google Sign-In Button */}
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                className={`w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 transform active:scale-[0.98] border-2 ${
-                  isDarkMode 
-                    ? 'bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 hover:shadow-md' 
-                    : 'bg-white/60 border-slate-200/60 text-slate-600 hover:bg-white hover:border-slate-300 hover:shadow-md shadow-sm'
-                }`}
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                Sign in with Google
-              </button>
-              {/* Register Company Button (glass style) - show only on Sign Up mode */}
-              {authMode === "signup" && (
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
-                      console.log('Opening org modal')
-                      setShowOrgModal(true);
-                      setOrgStage('form');
-                      setOrgError('');
-                      setOrgMessage('');
-                      setOrgForm({ name: '', adminEmail: '', domain: '', logoUrl: '' });
-                      setOrgOtp('');
-                      setOrgOtpExpiresAt(null);
-                      setOrgDnsStatus(null);
-                    }}
-                    className={`w-full py-3 font-semibold rounded-3xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-2 ${
-                      isDarkMode
-                        ? 'text-white shadow-xl bg-white/6 backdrop-blur-lg border border-white/10 hover:scale-[1.01] shadow-violet-600/20'
-                        : 'text-slate-800 shadow-sm bg-white border border-slate-200 hover:scale-[1.01]'
-                    }`}
-                  >
-                    <ShieldAlert className="w-4 h-4" />
-                    <span className="ml-2">Register your company with Spaces</span>
-                  </button>
-                </div>
-              )}
-            </form>
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  className={`w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 transform active:scale-[0.98] border-2 ${
+                    isDarkMode 
+                      ? 'bg-white/[0.03] border-white/10 text-slate-200 hover:bg-white/[0.06] hover:border-white/20 hover:shadow-md' 
+                      : 'bg-white/90 border-slate-200/80 text-slate-700 hover:bg-white hover:border-slate-300 hover:shadow-md shadow-sm'
+                  }`}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  Sign in with Google
+                </button>
+                {authMode === "signup" && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+                        console.log('Opening org modal')
+                        setShowOrgModal(true);
+                        setOrgStage('form');
+                        setOrgError('');
+                        setOrgMessage('');
+                        setOrgForm({ name: '', adminEmail: '', domain: '', logoUrl: '' });
+                        setOrgOtp('');
+                        setOrgOtpExpiresAt(null);
+                        setOrgDnsStatus(null);
+                      }}
+                      className={`w-full py-3 font-semibold rounded-3xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-2 ${
+                        isDarkMode
+                          ? 'text-white shadow-xl bg-white/6 backdrop-blur-lg border border-white/10 hover:scale-[1.01] shadow-blue-600/20'
+                          : 'text-slate-800 shadow-sm bg-white border border-slate-200 hover:scale-[1.01]'
+                      }`}
+                    >
+                      <ShieldAlert className="w-4 h-4" />
+                      <span className="ml-2">Register your company with Spaces</span>
+                    </button>
+                  </div>
+                )}
+              </form>
+            </div>
           </div>
         </div>
 
@@ -12083,6 +12095,4 @@ export default function CollaborationApp() {
     </div>
   )
 }
-
-
 

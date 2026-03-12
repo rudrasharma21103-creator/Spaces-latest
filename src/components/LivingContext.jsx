@@ -1,17 +1,16 @@
 import React from "react"
 import {
-  CircleDot,
+  Check,
   FileText,
   FolderOpen,
   MessageSquare,
   MoreVertical,
-  Plus,
   Sparkles,
   X,
 } from "lucide-react"
 import { CHANNEL_TABS, CONTEXT_STATUS_META } from "./LivingContext.helpers"
 
-export function ChannelTabs({ activeTab, isDarkMode, onChange, selectedCount = 0, onCreateFromSelection }) {
+export function ChannelTabs({ activeTab, isDarkMode, onChange }) {
   return (
     <div
       className={`mx-4 sm:mx-8 mb-3 rounded-2xl border px-3 py-2 flex items-center justify-between gap-3 ${
@@ -40,28 +39,14 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, selectedCount = 0
           )
         })}
       </div>
-
-      {selectedCount > 0 && (
-        <button
-          onClick={onCreateFromSelection}
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-semibold transition-colors ${
-            isDarkMode ? "bg-violet-500/15 text-violet-300 hover:bg-violet-500/25" : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-          }`}
-        >
-          <Plus className="w-4 h-4" />
-          Create context {selectedCount}
-        </button>
-      )}
     </div>
   )
 }
 
 export function MessageActionsMenu({
   isDarkMode,
-  isSelected,
   emojis = [],
   onReact,
-  onToggleSelection,
   onCreateContext,
   onAddToContext,
   onMarkDecision,
@@ -97,9 +82,6 @@ export function MessageActionsMenu({
       <button onClick={onAddToContext} className={itemClass}>Add to Context</button>
       <button onClick={onMarkDecision} className={itemClass}>Mark Decision</button>
       <button onClick={onCreateTask} className={itemClass}>Create Task</button>
-      <button onClick={onToggleSelection} className={itemClass}>
-        {isSelected ? "Remove from selection" : "Select message"}
-      </button>
     </div>
   )
 }
@@ -453,21 +435,24 @@ export function MessageActionButton({ isDarkMode, onClick }) {
   )
 }
 
-export function MessageSelectionToggle({ isDarkMode, checked, onChange }) {
+export function MessageSelectionToggle({ isDarkMode, checked = false, onChange }) {
   return (
     <button
+      type="button"
+      aria-pressed={checked}
+      aria-label={checked ? "Deselect message" : "Select message"}
       onClick={onChange}
-      className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+      className={`flex h-6 w-6 items-center justify-center rounded-lg border transition-colors ${
         checked
           ? isDarkMode
-            ? "bg-violet-500 border-violet-500 text-white"
-            : "bg-indigo-600 border-indigo-600 text-white"
+            ? "border-violet-400 bg-violet-500/20 text-violet-200"
+            : "border-indigo-500 bg-indigo-50 text-indigo-600"
           : isDarkMode
-            ? "border-slate-700 text-transparent hover:border-slate-500"
-            : "border-slate-300 text-transparent hover:border-slate-500"
+            ? "border-slate-700 bg-[#111317] text-transparent hover:border-slate-600"
+            : "border-slate-300 bg-white text-transparent hover:border-slate-400"
       }`}
     >
-      <CircleDot className="w-3 h-3" />
+      <Check className="h-3.5 w-3.5" />
     </button>
   )
 }
