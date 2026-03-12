@@ -49,7 +49,7 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, selectedCount = 0
           }`}
         >
           <Plus className="w-4 h-4" />
-          Create from {selectedCount}
+          Create context {selectedCount}
         </button>
       )}
     </div>
@@ -112,10 +112,9 @@ export function ContextBadge({ contexts = [], isDarkMode, onOpen }) {
     <button
       onClick={onOpen}
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
-        isDarkMode ? "bg-violet-500/10 text-violet-300 hover:bg-violet-500/20" : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+        isDarkMode ? "bg-sky-500/10 text-sky-300 hover:bg-sky-500/20" : "bg-sky-50 text-sky-700 hover:bg-sky-100"
       }`}
     >
-      <Sparkles className="w-3 h-3" />
       {label}
     </button>
   )

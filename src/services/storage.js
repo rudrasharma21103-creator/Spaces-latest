@@ -435,6 +435,32 @@ export const updateMessage = async (chatId, message) => {
   })
 }
 
+export const getContextState = async chatId => {
+  if (!chatId) return { chatId: null, contexts: [], decisions: [], tasks: [] }
+  const res = await authFetch(`${API_BASE}/contexts/${chatId}`)
+  const data = await safeJson(res)
+  return {
+    chatId,
+    contexts: Array.isArray(data?.contexts) ? data.contexts : [],
+    decisions: Array.isArray(data?.decisions) ? data.decisions : [],
+    tasks: Array.isArray(data?.tasks) ? data.tasks : [],
+    updatedAt: data?.updatedAt || null,
+  }
+}
+
+export const saveContextState = async (chatId, payload) => {
+  if (!chatId) return null
+  const res = await authFetch(`${API_BASE}/contexts/${chatId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      contexts: Array.isArray(payload?.contexts) ? payload.contexts : [],
+      decisions: Array.isArray(payload?.decisions) ? payload.decisions : [],
+      tasks: Array.isArray(payload?.tasks) ? payload.tasks : [],
+    })
+  })
+  return safeJson(res)
+}
+
 // --------------------
 // Friend & DM Logic
 // --------------------

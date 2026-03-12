@@ -54,6 +54,24 @@ async def send_friend_request(payload: dict):
         # On any unexpected failure, be conservative and deny
         raise HTTPException(status_code=403, detail="Invite not permitted")
 
+    try:
+        if recipient is None:
+            try:
+                recipient = users_collection.find_one({"id": int(to_id)})
+            except Exception:
+                recipient = users_collection.find_one({"id": to_id})
+        existing_notifications = (recipient or {}).get("notifications") or []
+        already_pending = any(
+            n.get("type") == "friend_request"
+            and str(n.get("fromId")) == str(from_id)
+            and n.get("status") == "pending"
+            for n in existing_notifications
+        )
+        if already_pending:
+            return {"status": "sent"}
+    except Exception:
+        pass
+
     users_collection.update_one(
         {"id": to_id},
         {"$push": {"notifications": notification}}
@@ -75,6 +93,25 @@ async def accept_friend(payload: dict):
 
     # Expect the frontend to provide the current user's id (userId)
     if user_id and friend_id:
+        processed = True
+        if notification_id:
+            remove_result = users_collection.update_one(
+                {
+                    "id": user_id,
+                    "notifications": {
+                        "$elemMatch": {
+                            "id": notification_id,
+                            "type": "friend_request",
+                            "fromId": friend_id
+                        }
+                    }
+                },
+                {"$pull": {"notifications": {"id": notification_id}}}
+            )
+            processed = remove_result.modified_count > 0
+        if not processed:
+            return {"status": "accepted"}
+
         users_collection.update_one(
             {"id": user_id},
             {"$addToSet": {"friends": friend_id}}
@@ -83,13 +120,6 @@ async def accept_friend(payload: dict):
             {"id": friend_id},
             {"$addToSet": {"friends": user_id}}
         )
-
-        # Remove the specific notification if provided
-        if notification_id:
-            users_collection.update_one(
-                {"id": user_id},
-                {"$pull": {"notifications": {"id": notification_id}}}
-            )
 
         # Notify the original requester (friend_id) that their request was accepted
         try:
@@ -121,12 +151,24 @@ async def reject_friend(payload: dict):
     notification_id = payload.get("notificationId")
 
     if user_id and friend_id:
-        # Remove the notification from the rejecting user's notifications
+        processed = True
         if notification_id:
-            users_collection.update_one(
-                {"id": user_id},
+            remove_result = users_collection.update_one(
+                {
+                    "id": user_id,
+                    "notifications": {
+                        "$elemMatch": {
+                            "id": notification_id,
+                            "type": "friend_request",
+                            "fromId": friend_id
+                        }
+                    }
+                },
                 {"$pull": {"notifications": {"id": notification_id}}}
             )
+            processed = remove_result.modified_count > 0
+        if not processed:
+            return {"status": "rejected"}
 
         # Notify the original requester that their request was rejected
         try:

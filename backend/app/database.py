@@ -18,6 +18,7 @@ spaces_collection = db["spaces"]
 messages_collection = db["messages"]
 notifications_collection = db["notifications"]
 tasks_collection = db["tasks"]
+contexts_collection = db["contexts"]
 # Events collection used by the frontend to fetch/save calendar events
 events_collection = db["events"]
 # Files metadata collection - store only metadata (no binaries)
@@ -38,6 +39,7 @@ try:
     messages_collection.create_index("chatId")
     messages_collection.create_index([("chatId", 1), ("message.id", 1)])
     messages_collection.create_index([("chatId", 1), ("message.timestamp", 1)])
+    contexts_collection.create_index("chatId", unique=True)
     # Tasks collection - index by assigned users and space for quick lookup
     tasks_collection.create_index("assigned_to")
     tasks_collection.create_index("space_id")
