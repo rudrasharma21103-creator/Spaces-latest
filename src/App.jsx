@@ -7429,9 +7429,11 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <h1 className={`font-extrabold text-xl tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                Spacess
-              </h1>
+              <img
+                src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+                alt="Spaces logo"
+                className="h-8 w-auto object-contain"
+              />
             </div>
           )}
           <div className="flex gap-2 ml-auto">
