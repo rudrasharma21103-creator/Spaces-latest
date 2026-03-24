@@ -6426,6 +6426,11 @@ body:not(.dark) .liquid-glass-navbar .liquid-glass-nav-item:hover {
   box-shadow: none !important;
 }
 
+html:not(.dark) .liquid-glass-navbar .theme-toggle-nav-button:hover,
+body:not(.dark) .liquid-glass-navbar .theme-toggle-nav-button:hover {
+  background: #f2f2f2 !important;
+}
+
 html:not(.dark) .liquid-glass-navbar .liquid-glass-header,
 body:not(.dark) .liquid-glass-navbar .liquid-glass-header {
   background: transparent !important;

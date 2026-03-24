@@ -5289,14 +5289,14 @@ export default function CollaborationApp() {
                 setIsDarkMode(!isDarkMode)
                 localStorage.setItem('spacexyz-dark-mode', JSON.stringify(!isDarkMode))
               }}
-              className={`flex h-11 w-11 items-center justify-center rounded-full border transition-colors ${
+              className={`flex h-11 w-11 items-center justify-center rounded-full border transition-none ${
                 isDarkMode
                   ? 'border-white/10 bg-white/5 text-amber-300 hover:bg-white/10'
-                  : 'border-slate-900/10 bg-white text-slate-600 hover:bg-slate-100'
+                  : 'border-slate-900/10 bg-white text-slate-600 hover:bg-[#eeedec]'
               }`}
               aria-label="Toggle theme"
             >
-              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {isDarkMode ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
             </button>
             <button
               onClick={() => { setShowLandingPage(false); setAuthMode('login'); }}
@@ -8533,18 +8533,17 @@ export default function CollaborationApp() {
                 {/* Theme Toggle Button */}
                 <button
                   onClick={() => setIsDarkMode(!isDarkMode)}
-                  className={`liquid-glass-nav-item relative p-3 transition-all duration-500 group overflow-hidden`}
+                  className={`liquid-glass-nav-item theme-toggle-nav-button p-3 transition-all group ${
+                    isDarkMode ? 'text-yellow-400' : 'text-slate-600'
+                  }`}
                   title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 >
-                  <div className={`relative z-10 transition-transform duration-500 group-hover:rotate-12 ${isDarkMode ? 'text-yellow-400' : 'text-slate-600'}`}>
+                  <div className="transition-transform group-hover:scale-110">
                     {isDarkMode ? (
                       <Sun className="w-5 h-5" />
                     ) : (
                       <Moon className="w-5 h-5" />
                     )}
-                  </div>
-                  <div className={`absolute inset-0 transition-opacity duration-500 opacity-0 group-hover:opacity-100`}>
-                    <div className="absolute inset-0 bg-[#2C2C2C]"></div>
                   </div>
                 </button>
 
