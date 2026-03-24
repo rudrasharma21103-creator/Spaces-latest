@@ -5254,7 +5254,7 @@ export default function CollaborationApp() {
             <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
               isDarkMode ? 'bg-white/5 ring-1 ring-white/10' : 'bg-slate-950 ring-1 ring-slate-900/10'
             }`}>
-              <img src="/Logo.png" alt="Spaces logo" className="h-7 w-7 object-contain" />
+              <img src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-7 w-7 object-contain" />
             </div>
             <div>
               <p className="text-lg font-black tracking-tight">Spaces</p>
@@ -5530,7 +5530,7 @@ export default function CollaborationApp() {
           isDarkMode ? 'border-white/10' : 'border-slate-900/10'
         }`}>
           <div className="flex items-center gap-3">
-            <img src="/Logo.png" alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
+            <img src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
             <span className="text-sm font-bold text-current">Spaces</span>
           </div>
           <p className="text-sm">Designed to show the real product, not hide it.</p>
