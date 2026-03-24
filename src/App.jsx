@@ -5254,7 +5254,7 @@ export default function CollaborationApp() {
             <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
               isDarkMode ? 'bg-white/5 ring-1 ring-white/10' : 'bg-slate-950 ring-1 ring-slate-900/10'
             }`}>
-              <img src="/New%20logo.png" alt="Spaces logo" className="h-7 w-7 object-contain" />
+              <img src="/Logo.png" alt="Spaces logo" className="h-7 w-7 object-contain" />
             </div>
             <div>
               <p className="text-lg font-black tracking-tight">Spaces</p>
@@ -5319,7 +5319,6 @@ export default function CollaborationApp() {
             <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] ${
               isDarkMode ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200' : 'border-cyan-600/15 bg-white/70 text-cyan-800'
             }`}>
-              <Sparkles className="h-3.5 w-3.5" />
               Built for teams that hate clutter
             </div>
 
@@ -5411,38 +5410,18 @@ export default function CollaborationApp() {
               <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>Product walkthrough</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">Use the actual product visuals.</h2>
             </div>
-            <button
-              onClick={() => setShowDemoModal(true)}
-              className={`hidden rounded-full border px-5 py-3 text-sm font-bold md:block ${
-                isDarkMode ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-slate-900/10 bg-white/70 hover:bg-white'
-              }`}
-            >
-              Open preview
-            </button>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
+          <div className="grid gap-6">
             <div className={`overflow-hidden rounded-[2rem] border p-3 ${
               isDarkMode ? 'border-white/10 bg-slate-950/70' : 'border-white/80 bg-white/80'
             }`}>
               <img src="/image 10.png" alt="Spaces full workspace interface" className="w-full rounded-[1.5rem] object-cover" />
             </div>
-            <div className="grid gap-6">
-              <div className={`rounded-[2rem] border p-3 ${
-                isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
-              }`}>
-                <img src="/image 11.png" alt="Spaces messaging interface" className="w-full rounded-[1.4rem] object-cover" />
-              </div>
-              <div className={`rounded-[2rem] border p-6 ${
-                isDarkMode ? 'border-white/10 bg-gradient-to-br from-orange-500/10 to-cyan-500/10' : 'border-slate-900/8 bg-gradient-to-br from-orange-50 to-cyan-50'
-              }`}>
-                <p className="text-lg font-bold">What changed</p>
-                <ul className={`mt-4 space-y-3 text-sm leading-6 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />The hero has clearer hierarchy and stronger contrast.</li>
-                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />Your screenshots are the core visual story.</li>
-                  <li className="flex gap-3"><CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />The page is full-width now instead of boxed by default Vite root styles.</li>
-                </ul>
-              </div>
+            <div className={`mx-auto w-full max-w-3xl rounded-[2rem] border p-3 ${
+              isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
+            }`}>
+              <img src="/image 11.png" alt="Spaces messaging interface" className="w-full rounded-[1.4rem] object-cover" />
             </div>
           </div>
         </div>
@@ -5488,9 +5467,6 @@ export default function CollaborationApp() {
           }`}>
             <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-violet-300' : 'text-violet-700'}`}>Built for</p>
             <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">Student teams, startups, and compact orgs that need clarity fast.</h2>
-            <p className={`mt-5 text-sm leading-7 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              The app already does a lot. The landing page should explain that value quickly instead of overwhelming people before they even sign in.
-            </p>
           </div>
 
           <div className="grid gap-6 sm:grid-cols-2">
@@ -5554,7 +5530,7 @@ export default function CollaborationApp() {
           isDarkMode ? 'border-white/10' : 'border-slate-900/10'
         }`}>
           <div className="flex items-center gap-3">
-            <img src="/New%20logo.png" alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
+            <img src="/Logo.png" alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
             <span className="text-sm font-bold text-current">Spaces</span>
           </div>
           <p className="text-sm">Designed to show the real product, not hide it.</p>
@@ -5714,7 +5690,6 @@ export default function CollaborationApp() {
             <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] ${
               isDarkMode ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200' : 'border-cyan-600/15 bg-white/70 text-cyan-800'
             }`}>
-              <Sparkles className="h-3.5 w-3.5" />
               Built for teams that hate clutter
             </div>
 
