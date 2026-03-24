@@ -9534,10 +9534,10 @@ export default function CollaborationApp() {
                 <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`rounded-[2rem] p-2 relative transition-all duration-300 focus-within:ring-2 ${
+                    className={`rounded-[2rem] p-2 relative transition-all duration-300 ${
                       isDarkMode
-                        ? 'bg-[#191b1f] border border-slate-700/50 focus-within:ring-purple-500/30'
-                        : 'bg-[#e9eef6] focus-within:ring-indigo-500/20'
+                        ? 'bg-[#191b1f] border border-slate-700/50'
+                        : 'bg-[#e9eef6]'
                     }`}
                   >
                     {/* Attachments Preview */}
@@ -9713,7 +9713,7 @@ export default function CollaborationApp() {
                             sendMessage()
                           }
                         }}
-                        className={`flex-1 bg-transparent border-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
+                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
                         style={{ minHeight: "48px" }}
                       />
 
