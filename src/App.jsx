@@ -50,7 +50,8 @@ import {
   Settings,
   MoreVertical,
   Smile,
-  LogOut
+  LogOut,
+  Zap
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
@@ -219,6 +220,7 @@ export default function CollaborationApp() {
   const [selectedMessageIds, setSelectedMessageIds] = useState([])
   const [messageActionMenu, setMessageActionMenu] = useState(null)
   const [messageContextPicker, setMessageContextPicker] = useState(null)
+  const [composerAttachMenuOpen, setComposerAttachMenuOpen] = useState(false)
   const [composerContextPickerOpen, setComposerContextPickerOpen] = useState(false)
   const [selectedComposerContextId, setSelectedComposerContextId] = useState(null)
   const [contextItems, setContextItems] = useState([])
@@ -3687,15 +3689,16 @@ export default function CollaborationApp() {
   }, [openContextId])
 
   useEffect(() => {
-    if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen) return undefined
+    if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen && !composerAttachMenuOpen) return undefined
     const closeMenus = () => {
       setMessageActionMenu(null)
       setMessageContextPicker(null)
+      setComposerAttachMenuOpen(false)
       setComposerContextPickerOpen(false)
     }
     document.addEventListener("click", closeMenus)
     return () => document.removeEventListener("click", closeMenus)
-  }, [messageActionMenu, messageContextPicker, composerContextPickerOpen])
+  }, [messageActionMenu, messageContextPicker, composerAttachMenuOpen, composerContextPickerOpen])
 
   const currentChannelContexts = useMemo(
     () => (
@@ -5390,14 +5393,6 @@ export default function CollaborationApp() {
                 <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Live workspace</p>
               </div>
               <img src="/image 10.png" alt="Spaces workspace preview" className="mt-3 w-full rounded-[1.5rem] object-cover" />
-            </div>
-            <div className={`absolute -bottom-6 -left-2 max-w-[240px] rounded-[1.6rem] border p-4 backdrop-blur-xl sm:-left-8 ${
-              isDarkMode ? 'border-white/10 bg-slate-950/80' : 'border-white/80 bg-white/85'
-            }`}>
-              <p className="text-sm font-bold">One view, less noise</p>
-              <p className={`mt-2 text-sm leading-6 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                The landing page now leads with the real interface instead of abstract filler.
-              </p>
             </div>
           </div>
         </div>
@@ -9603,51 +9598,82 @@ export default function CollaborationApp() {
                     <div className="flex items-end gap-2 px-2 pb-1 relative">
                       <div className="relative">
                         <button
-                          onClick={() => fileInputRef.current?.click()}
+                          onClick={e => {
+                            e.stopPropagation()
+                            setComposerAttachMenuOpen(prev => !prev)
+                            setComposerContextPickerOpen(false)
+                            setMessageActionMenu(null)
+                            setMessageContextPicker(null)
+                          }}
                           className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
                         >
                           <Paperclip className="w-5 h-5" />
                         </button>
 
-                        <button
-                          onClick={() => setShowTaskModal(true)}
-                          title="Create Task"
-                          className={`p-3 mb-1 ml-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-purple-400' : 'hover:bg-slate-100 text-slate-400 hover:text-indigo-600'}`}
-                        >
-                          <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
-                        </button>
-
-                        {activeView === "channel" && (
-                          <div className="relative inline-flex">
+                        {composerAttachMenuOpen && (
+                          <div
+                            className={`absolute left-0 bottom-[calc(100%+0.5rem)] z-30 min-w-[220px] rounded-2xl border p-2 shadow-2xl ${
+                              isDarkMode ? 'border-slate-700 bg-slate-900/95' : 'border-slate-200 bg-white/95'
+                            }`}
+                            onClick={e => e.stopPropagation()}
+                          >
                             <button
-                              onClick={e => {
-                                e.stopPropagation()
-                                setComposerContextPickerOpen(prev => !prev)
-                                setMessageActionMenu(null)
-                                setMessageContextPicker(null)
+                              onClick={() => {
+                                fileInputRef.current?.click()
+                                setComposerAttachMenuOpen(false)
                               }}
-                              title="Add message to context"
-                              className={`p-3 mb-1 ml-1 rounded-full transition-colors font-black text-sm leading-none ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-sky-300' : 'hover:bg-slate-100 text-slate-500 hover:text-sky-600'}`}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                              }`}
                             >
-                              C
+                              <Paperclip className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-600'}`} />
+                              Attach from computer
                             </button>
-
-                            {composerContextPickerOpen && (
-                              <div
-                                className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
-                                onClick={e => e.stopPropagation()}
+                            <button
+                              onClick={() => {
+                                setShowTaskModal(true)
+                                setComposerAttachMenuOpen(false)
+                              }}
+                              className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
+                              Create task
+                            </button>
+                            {activeView === "channel" && (
+                              <button
+                                onClick={() => {
+                                  setComposerAttachMenuOpen(false)
+                                  setComposerContextPickerOpen(true)
+                                  setMessageActionMenu(null)
+                                  setMessageContextPicker(null)
+                                }}
+                                className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                  isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                                }`}
                               >
-                                <AddToContextPopover
-                                  isDarkMode={isDarkMode}
-                                  contexts={currentChannelContexts}
-                                  onClose={() => setComposerContextPickerOpen(false)}
-                                  onSelect={contextId => {
-                                    setSelectedComposerContextId(contextId)
-                                    setComposerContextPickerOpen(false)
-                                  }}
-                                />
-                              </div>
+                                <Zap className={`w-4 h-4 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`} />
+                                Add to context
+                              </button>
                             )}
+                          </div>
+                        )}
+
+                        {activeView === "channel" && composerContextPickerOpen && (
+                          <div
+                            className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <AddToContextPopover
+                              isDarkMode={isDarkMode}
+                              contexts={currentChannelContexts}
+                              onClose={() => setComposerContextPickerOpen(false)}
+                              onSelect={contextId => {
+                                setSelectedComposerContextId(contextId)
+                                setComposerContextPickerOpen(false)
+                              }}
+                            />
                           </div>
                         )}
 
