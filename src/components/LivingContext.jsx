@@ -101,36 +101,36 @@ function FilePreview({ file, isDarkMode }) {
 
   if (kind === "image" && file?.url) {
     return (
-      <div className="relative overflow-hidden rounded-2xl">
-        <SmartImage src={file.url} alt={fileTitle} className="h-40 w-full object-cover" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/30 to-transparent" />
+      <div className={`relative overflow-hidden rounded-[1.1rem] border sm:rounded-[1.25rem] ${isDarkMode ? "border-slate-700/70" : "border-slate-200 bg-white/80"}`}>
+        <SmartImage src={file.url} alt={fileTitle} className="h-28 w-full object-cover sm:h-40" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/30 to-transparent sm:h-20" />
       </div>
     )
   }
 
   return (
-    <div className={`relative h-40 overflow-hidden rounded-2xl p-4 ${config.panel}`}>
+    <div className={`relative h-28 overflow-hidden rounded-[1.1rem] border p-3 sm:h-40 sm:rounded-[1.25rem] sm:p-4 ${isDarkMode ? `border-slate-700/70 ${config.panel}` : "border-slate-200 bg-white"}`}>
       <div className="absolute inset-0 opacity-60">
-        <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full ${isDarkMode ? "bg-white/5" : "bg-white/80"}`} />
-        <div className={`absolute -left-4 bottom-4 h-16 w-16 rounded-full ${isDarkMode ? "bg-white/5" : "bg-white/50"}`} />
+        <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full ${isDarkMode ? "bg-white/5" : "bg-slate-100"}`} />
+        <div className={`absolute -left-4 bottom-4 h-16 w-16 rounded-full ${isDarkMode ? "bg-white/5" : "bg-slate-100/90"}`} />
       </div>
       <div className="relative flex h-full flex-col justify-between">
         <div className="flex items-center justify-between gap-2">
-          <div className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-bold tracking-[0.18em] ${config.accent}`}>
+          <div className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-bold tracking-[0.16em] sm:gap-1.5 sm:text-[10px] sm:tracking-[0.18em] ${config.accent}`}>
             <PreviewIcon className="h-3.5 w-3.5" />
             {config.badge}
           </div>
           {kind === "video" && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm">
-              <Play className="ml-0.5 h-4 w-4 fill-current" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm sm:h-10 sm:w-10">
+              <Play className="ml-0.5 h-3.5 w-3.5 fill-current sm:h-4 sm:w-4" />
             </div>
           )}
         </div>
-        <div>
-          <div className={`line-clamp-2 text-[1.75rem] font-black leading-none tracking-tight ${config.display}`}>
+        <div className="min-w-0">
+          <div className={`line-clamp-2 break-words text-[1.05rem] font-black leading-tight tracking-tight sm:text-[1.55rem] sm:leading-none ${config.display}`}>
             {fileTitle}
           </div>
-          <div className={`mt-2 text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+          <div className={`mt-1 truncate text-xs font-medium sm:mt-2 sm:text-sm ${isDarkMode ? "text-slate-300" : "text-slate-500"}`}>
             {file.sourceLabel}
           </div>
         </div>
@@ -571,7 +571,7 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
         {files.map(file => {
           const kind = getFileKind(file)
           const kindConfig = getPreviewConfig(kind, isDarkMode)
@@ -582,69 +582,100 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
           return (
             <div
               key={file.id}
-              className={`rounded-[1.75rem] border p-3 transition-all duration-200 hover:-translate-y-0.5 ${
+              className={`min-w-0 transition-all duration-200 hover:-translate-y-0.5 ${
                 isDarkMode
-                  ? "bg-[#16181c] border-slate-800 hover:border-slate-700"
-                  : "bg-slate-100/90 border-slate-200 hover:border-slate-300 shadow-sm"
+                  ? "sm:overflow-hidden sm:rounded-[1.5rem] sm:border sm:bg-[#16181c] sm:p-3 sm:border-slate-800 sm:hover:border-slate-700"
+                  : "sm:overflow-hidden sm:rounded-[1.5rem] sm:border sm:bg-slate-100 sm:p-3 sm:border-slate-200 sm:hover:border-slate-300"
               }`}
             >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${kindConfig.accent}`}>
-                    <HeaderIcon className="h-4 w-4" />
+              <div className="sm:hidden">
+                <FilePreview file={file} isDarkMode={isDarkMode} />
+                <div className="mt-2 flex items-start gap-2">
+                  <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm ${kind === "image" ? "bg-sky-500 text-white" : kindConfig.accent}`}>
+                    <HeaderIcon className="h-3 w-3" />
                   </div>
-                  <div className={`truncate text-[0.95rem] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>
-                    {file.name}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={event => {
-                    event.stopPropagation()
-                    onDownloadFile?.(file)
-                  }}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-white/80"}`}
-                  title="Download file"
-                  aria-label={`Download ${file.name}`}
-                >
-                  <ArrowDown className="h-4 w-4" />
-                </button>
-              </div>
-
-              <FilePreview file={file} isDarkMode={isDarkMode} />
-
-              <div className="mt-3 space-y-2">
-                <div className={`line-clamp-2 text-[1.05rem] font-medium leading-snug ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-                  {file.messageLabel}
-                </div>
-                <div className={`flex items-center gap-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${isDarkMode ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"}`}>
-                    {(file.author || "U").trim().charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate">{file.author}</div>
-                    <div className="truncate text-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className={`line-clamp-2 break-words text-[0.72rem] font-medium leading-[1.05rem] ${isDarkMode ? "text-white" : "text-slate-800"}`}>
+                      {file.name}
+                    </div>
+                    <div className={`mt-1 truncate text-[0.65rem] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
                       {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center justify-start pt-1">
                   <button
                     type="button"
                     onClick={event => {
                       event.stopPropagation()
-                      onAttachFile?.(file)
+                      onDownloadFile?.(file)
                     }}
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
-                      isDarkMode
-                        ? "bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25"
-                        : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-                    }`}
-                    title={`Attach ${file.name} to message`}
-                    aria-label={`Attach ${file.name} to message`}
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-slate-100"}`}
+                    title="Download file"
+                    aria-label={`Download ${file.name}`}
                   >
-                    <Plus className="h-4 w-4" />
+                    <MoreVertical className="h-3.5 w-3.5" />
                   </button>
+                </div>
+              </div>
+
+              <div className="hidden sm:flex min-h-[292px] flex-col">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${kindConfig.accent}`}>
+                      <HeaderIcon className="h-4 w-4" />
+                    </div>
+                    <div className={`min-w-0 truncate text-[1.02rem] font-medium ${isDarkMode ? "text-white" : "text-slate-800"}`}>
+                      {file.name}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onDownloadFile?.(file)
+                    }}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-white/80"}`}
+                    title="Download file"
+                    aria-label={`Download ${file.name}`}
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <FilePreview file={file} isDarkMode={isDarkMode} />
+
+                <div className="mt-3 flex min-w-0 flex-1 flex-col justify-between space-y-2">
+                  <div className={`line-clamp-2 break-words text-[0.98rem] font-medium leading-snug ${isDarkMode ? "text-slate-100" : "text-slate-700"}`}>
+                    {file.messageLabel}
+                  </div>
+                  <div className="flex items-end justify-between gap-2 pt-1">
+                    <div className={`flex min-w-0 items-center gap-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isDarkMode ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-200 text-indigo-700"}`}>
+                        {(file.author || "U").trim().charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate">{file.author}</div>
+                        <div className="truncate text-xs">
+                          {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation()
+                        onAttachFile?.(file)
+                      }}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
+                        isDarkMode
+                          ? "bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25"
+                          : "bg-white text-indigo-700 hover:bg-indigo-50"
+                      }`}
+                      title={`Attach ${file.name} to message`}
+                      aria-label={`Attach ${file.name} to message`}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
