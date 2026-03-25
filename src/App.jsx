@@ -72,7 +72,7 @@ import {
   MessageActionButton,
   MessageActionsMenu,
 } from "./components/LivingContext"
-import { createContextRecord } from "./components/LivingContext.helpers"
+import { CHANNEL_TABS, FRIEND_CHAT_TABS, createContextRecord } from "./components/LivingContext.helpers"
 import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
 import AdminDashboard from "./AdminDashboard"
@@ -3747,47 +3747,48 @@ export default function CollaborationApp() {
   }
 
   useEffect(() => {
-    if (activeView !== "channel" || !activeChannel) return undefined
+    const chatId = getActiveChatId()
+    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return undefined
 
-    const chatId = String(activeChannel)
-    activeContextStateRef.current = { chatId, loaded: false }
+    const normalizedChatId = String(chatId)
+    activeContextStateRef.current = { chatId: normalizedChatId, loaded: false }
 
     let cancelled = false
     ;(async () => {
       try {
-        const state = await Storage.getContextState(chatId)
+        const state = await Storage.getContextState(normalizedChatId)
         if (cancelled) return
 
         setContextItems(prev => [
-          ...prev.filter(context => String(context.channelId) !== chatId),
+          ...prev.filter(context => String(context.channelId) !== normalizedChatId),
           ...(state.contexts || []).map(context => ({
             ...context,
-            channelId: context.channelId || chatId,
+            channelId: context.channelId || normalizedChatId,
           })),
         ])
         setContextDecisions(prev => [
-          ...prev.filter(item => String(item.channelId) !== chatId),
+          ...prev.filter(item => String(item.channelId) !== normalizedChatId),
           ...(state.decisions || []).map(item => ({
             ...item,
-            channelId: item.channelId || chatId,
+            channelId: item.channelId || normalizedChatId,
           })),
         ])
         setContextTasks(prev => [
-          ...prev.filter(item => String(item.channelId) !== chatId),
+          ...prev.filter(item => String(item.channelId) !== normalizedChatId),
           ...(state.tasks || []).map(item => ({
             ...item,
-            channelId: item.channelId || chatId,
+            channelId: item.channelId || normalizedChatId,
           })),
         ])
       } catch (e) {
         console.error("Failed to load context state", e)
         if (cancelled) return
-        setContextItems(prev => prev.filter(context => String(context.channelId) !== chatId))
-        setContextDecisions(prev => prev.filter(item => String(item.channelId) !== chatId))
-        setContextTasks(prev => prev.filter(item => String(item.channelId) !== chatId))
+        setContextItems(prev => prev.filter(context => String(context.channelId) !== normalizedChatId))
+        setContextDecisions(prev => prev.filter(item => String(item.channelId) !== normalizedChatId))
+        setContextTasks(prev => prev.filter(item => String(item.channelId) !== normalizedChatId))
       } finally {
         if (!cancelled) {
-          activeContextStateRef.current = { chatId, loaded: true }
+          activeContextStateRef.current = { chatId: normalizedChatId, loaded: true }
         }
       }
     })()
@@ -3795,29 +3796,30 @@ export default function CollaborationApp() {
     return () => {
       cancelled = true
     }
-  }, [activeView, activeChannel])
+  }, [activeView, activeChannel, activeDMUser, currentUser])
 
   useEffect(() => {
-    if (activeView !== "channel" || !activeChannel) return undefined
+    const chatId = getActiveChatId()
+    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return undefined
 
-    const chatId = String(activeChannel)
+    const normalizedChatId = String(chatId)
     if (
-      activeContextStateRef.current.chatId !== chatId ||
+      activeContextStateRef.current.chatId !== normalizedChatId ||
       !activeContextStateRef.current.loaded
     ) {
       return undefined
     }
 
-    const contexts = contextItems.filter(context => String(context.channelId) === chatId)
-    const decisions = contextDecisions.filter(item => String(item.channelId) === chatId)
-    const tasks = contextTasks.filter(item => String(item.channelId) === chatId)
+    const contexts = contextItems.filter(context => String(context.channelId) === normalizedChatId)
+    const decisions = contextDecisions.filter(item => String(item.channelId) === normalizedChatId)
+    const tasks = contextTasks.filter(item => String(item.channelId) === normalizedChatId)
 
     if (contextSaveTimeoutRef.current) {
       clearTimeout(contextSaveTimeoutRef.current)
     }
 
     contextSaveTimeoutRef.current = setTimeout(() => {
-      Storage.saveContextState(chatId, { contexts, decisions, tasks }).catch(error => {
+      Storage.saveContextState(normalizedChatId, { contexts, decisions, tasks }).catch(error => {
         console.error("Failed to save context state", error)
       })
     }, 400)
@@ -3828,7 +3830,7 @@ export default function CollaborationApp() {
         contextSaveTimeoutRef.current = null
       }
     }
-  }, [activeView, activeChannel, contextItems, contextDecisions, contextTasks])
+  }, [activeView, activeChannel, activeDMUser, currentUser, contextItems, contextDecisions, contextTasks])
 
   useEffect(() => {
     setSelectedMessageIds([])
@@ -3838,7 +3840,7 @@ export default function CollaborationApp() {
     setSelectedComposerContextId(null)
     setOpenContextId(null)
     setActiveChannelTab("messages")
-  }, [activeChannel, activeView])
+  }, [activeChannel, activeView, activeDMUser])
 
   useEffect(() => {
     if (!openContextId) return undefined
@@ -3865,14 +3867,11 @@ export default function CollaborationApp() {
     return () => document.removeEventListener("click", closeMenus)
   }, [messageActionMenu, messageContextPicker, composerAttachMenuOpen, composerContextPickerOpen])
 
-  const currentChannelContexts = useMemo(
-    () => (
-      activeView === "channel"
-        ? contextItems.filter(context => String(context.channelId) === String(activeChannel))
-        : []
-    ),
-    [activeView, contextItems, activeChannel]
-  )
+  const currentChannelContexts = useMemo(() => {
+    const chatId = getActiveChatId()
+    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return []
+    return contextItems.filter(context => String(context.channelId) === String(chatId))
+  }, [activeView, activeChannel, activeDMUser, currentUser, contextItems])
 
   const contextsById = useMemo(
     () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),
@@ -3908,6 +3907,9 @@ export default function CollaborationApp() {
 
   const isContextManager = context => {
     if (!context || !currentUser) return false
+    if (activeView === "dm") {
+      return String(context.ownerId) === String(currentUser.id)
+    }
     const role = getChannelRole(currentUser.id)
     return String(context.ownerId) === String(currentUser.id) || role === "owner" || role === "admin"
   }
@@ -3951,7 +3953,7 @@ export default function CollaborationApp() {
     if (existing) return existing.id
     const decision = {
       id: `decision-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      channelId: activeChannel,
+      channelId: getActiveChatId(),
       contextId,
       messageId: message.id,
       text: message.text || "Decision captured",
@@ -3970,7 +3972,7 @@ export default function CollaborationApp() {
     if (exists) return exists.id
     const item = {
       id: taskPayload.id,
-      channelId: activeChannel,
+      channelId: getActiveChatId(),
       contextId,
       taskId: taskPayload.id,
       messageId: taskPayload.sourceMessageId || null,
@@ -3985,9 +3987,11 @@ export default function CollaborationApp() {
   }
 
   const createOrUpdateContextFromDraft = async () => {
-    if (!contextDraft?.title?.trim() || !currentUser || activeView !== "channel") return
+    if (!contextDraft?.title?.trim() || !currentUser || (activeView !== "channel" && activeView !== "dm")) return
     const now = new Date().toISOString()
     const messageIds = Array.from(new Set(contextDraft.messageIds || []))
+    const activeChatId = getActiveChatId()
+    if (!activeChatId) return
     if (editingContextId) {
       setContextItems(prev =>
         prev.map(context => {
@@ -4022,7 +4026,7 @@ export default function CollaborationApp() {
     }
 
     const created = createContextRecord({
-      channelId: activeChannel,
+      channelId: activeChatId,
       title: contextDraft.title.trim(),
       summary: contextDraft.summary.trim(),
       status: contextDraft.status,
@@ -4178,12 +4182,13 @@ export default function CollaborationApp() {
   }
 
   useEffect(() => {
-    if (activeView !== "channel" || !activeChannel || currentMessages.length === 0) return
+    const activeChatId = getActiveChatId()
+    if (!activeChatId || (activeView !== "channel" && activeView !== "dm") || currentMessages.length === 0) return
 
     setContextItems(prev => {
       let changed = false
       const nextItems = prev.map(context => {
-        if (String(context.channelId) !== String(activeChannel)) return context
+        if (String(context.channelId) !== String(activeChatId)) return context
 
         const linkedMessages = currentMessages.filter(message =>
           (message.contextIds || []).some(contextId => String(contextId) === String(context.id))
@@ -4224,7 +4229,7 @@ export default function CollaborationApp() {
 
       return changed ? nextItems : prev
     })
-  }, [activeView, activeChannel, currentMessages])
+  }, [activeView, activeChannel, activeDMUser, currentUser, currentMessages])
 
   const toggleMessageSelection = messageId => {
     setSelectedMessageIds(prev =>
@@ -4415,7 +4420,7 @@ export default function CollaborationApp() {
 
   const handleChannelTabChange = nextTab => {
     const activeChatId = getActiveChatId()
-    if (activeView === "channel" && activeChatId) {
+    if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
         const container = messagesContainerRef.current
         if (container) {
@@ -4434,7 +4439,7 @@ export default function CollaborationApp() {
   }
 
   useEffect(() => {
-    if (activeView !== "channel") return
+    if (activeView !== "channel" && activeView !== "dm") return
     const activeChatId = getActiveChatId()
     if (!activeChatId) return
 
@@ -9116,6 +9121,17 @@ export default function CollaborationApp() {
                     activeTab={activeChannelTab}
                     isDarkMode={isDarkMode}
                     onChange={handleChannelTabChange}
+                    tabs={CHANNEL_TABS}
+                    selectedCount={selectedMessageIds.length}
+                    onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
+                  />
+                )}
+                {activeView === "dm" && (
+                  <ChannelTabs
+                    activeTab={activeChannelTab}
+                    isDarkMode={isDarkMode}
+                    onChange={handleChannelTabChange}
+                    tabs={FRIEND_CHAT_TABS}
                     selectedCount={selectedMessageIds.length}
                     onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
                   />
@@ -9123,7 +9139,7 @@ export default function CollaborationApp() {
                 {/* Updated Container with Custom Pattern Background */}
                 {/* day label computed above via `messageDateLabel` */}
 
-                {activeView === "channel" && activeChannelTab !== "messages" && (
+                {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
                   <div className="flex-1 overflow-y-auto py-2 pb-6">
                     {activeChannelTab === "contexts" && (
                       <ContextsTabView
@@ -9142,7 +9158,7 @@ export default function CollaborationApp() {
                         onDownloadFile={downloadAttachment}
                       />
                     )}
-                    {activeChannelTab === "decisions" && (
+                    {activeView === "channel" && activeChannelTab === "decisions" && (
                       <DecisionList
                         decisions={currentChannelDecisionItems}
                         isDarkMode={isDarkMode}
@@ -9156,7 +9172,7 @@ export default function CollaborationApp() {
                     )}
                   </div>
                 )}
-                <div className={`${activeView === "channel" && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
+                <div className={`${(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
                 <div
                   ref={messagesContainerRef}
                   onScroll={() => {
@@ -9432,10 +9448,10 @@ export default function CollaborationApp() {
                                         onAddToContext={() => {
                                           setMessageContextPicker({ messageId: msg.id })
                                         }}
-                                        onMarkDecision={() => {
+                                        onMarkDecision={activeView === "channel" ? (() => {
                                           markMessageDecision(msg)
                                           setMessageActionMenu(null)
-                                        }}
+                                        }) : undefined}
                                         onCreateTask={() => {
                                           openTaskFromMessage(msg)
                                           setMessageActionMenu(null)
@@ -9897,7 +9913,7 @@ export default function CollaborationApp() {
                               <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
                               Create task
                             </button>
-                            {activeView === "channel" && (
+                            {(activeView === "channel" || activeView === "dm") && (
                               <button
                                 onClick={() => {
                                   setComposerAttachMenuOpen(false)
@@ -9916,7 +9932,7 @@ export default function CollaborationApp() {
                           </div>
                         )}
 
-                        {activeView === "channel" && composerContextPickerOpen && (
+                        {(activeView === "channel" || activeView === "dm") && composerContextPickerOpen && (
                           <div
                             className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
                             onClick={e => e.stopPropagation()}
@@ -9996,7 +10012,7 @@ export default function CollaborationApp() {
                 </div>
               </div>
 
-              {activeView === "channel" && currentContext && (
+              {(activeView === "channel" || activeView === "dm") && currentContext && (
                 <LivingContextPanel
                   isDarkMode={isDarkMode}
                   context={currentContext}
@@ -10017,10 +10033,10 @@ export default function CollaborationApp() {
                       await addMessageToContext(currentContext.id, messageId)
                     }
                   }}
-                  onMarkDecision={() => {
+                  onMarkDecision={activeView === "channel" ? (() => {
                     const selected = getMessageById(selectedMessageIds[0])
                     if (selected) markMessageDecision(selected)
-                  }}
+                  }) : undefined}
                   onCreateTask={() => {
                     const selected = getMessageById(selectedMessageIds[0])
                     if (selected) openTaskFromMessage(selected)
@@ -10038,7 +10054,7 @@ export default function CollaborationApp() {
                   onClose={() => setOpenContextId(null)}
                   formatTime={formatContextTime}
                   panelStyle={{
-                    top: activeView === "channel" ? 72 : 16,
+                    top: activeView === "channel" || activeView === "dm" ? 72 : 16,
                     right: 16,
                     bottom: activeChannelTab === "messages"
                       ? (messageInputRef.current?.offsetHeight || 120) + 16

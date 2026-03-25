@@ -1,4 +1,5 @@
 export const CHANNEL_TABS = ["messages", "contexts", "files", "decisions"]
+export const FRIEND_CHAT_TABS = ["messages", "contexts", "files"]
 
 export const CONTEXT_STATUS_META = {
   active: {

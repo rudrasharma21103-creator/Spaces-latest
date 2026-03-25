@@ -139,7 +139,7 @@ function FilePreview({ file, isDarkMode }) {
   )
 }
 
-export function ChannelTabs({ activeTab, isDarkMode, onChange }) {
+export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
   return (
     <div
       className={`mx-4 sm:mx-8 mb-3 rounded-2xl border px-3 py-2 flex items-center justify-between gap-3 ${
@@ -147,7 +147,7 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange }) {
       }`}
     >
       <div className="flex items-center gap-1">
-        {CHANNEL_TABS.map(tab => {
+        {tabs.map(tab => {
           const active = activeTab === tab
           return (
             <button
@@ -213,7 +213,7 @@ export function MessageActionsMenu({
       {onDelete && <button onClick={onDelete} className={itemClass}>Delete Message</button>}
       <button onClick={onCreateContext} className={itemClass}>Create Context</button>
       <button onClick={onAddToContext} className={itemClass}>Add to Context</button>
-      <button onClick={onMarkDecision} className={itemClass}>Mark Decision</button>
+      {onMarkDecision && <button onClick={onMarkDecision} className={itemClass}>Mark Decision</button>}
       <button onClick={onCreateTask} className={itemClass}>Create Task</button>
     </div>
   )
@@ -473,7 +473,9 @@ export function LivingContextPanel({
             >
               Add selected
             </button>
-            <button onClick={onMarkDecision} className={`px-3 py-2 rounded-xl text-sm font-medium ${isDarkMode ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>Mark decision</button>
+            {onMarkDecision && (
+              <button onClick={onMarkDecision} className={`px-3 py-2 rounded-xl text-sm font-medium ${isDarkMode ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>Mark decision</button>
+            )}
             <button onClick={onCreateTask} className={`px-3 py-2 rounded-xl text-sm font-medium ${isDarkMode ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>Create task</button>
           </div>
           {canEdit && (
