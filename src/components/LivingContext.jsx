@@ -176,6 +176,8 @@ export function MessageActionsMenu({
   isDarkMode,
   emojis = [],
   onReact,
+  onEdit,
+  onDelete,
   onCreateContext,
   onAddToContext,
   onMarkDecision,
@@ -207,6 +209,8 @@ export function MessageActionsMenu({
           </div>
         </div>
       )}
+      {onEdit && <button onClick={onEdit} className={itemClass}>Edit Message</button>}
+      {onDelete && <button onClick={onDelete} className={itemClass}>Delete Message</button>}
       <button onClick={onCreateContext} className={itemClass}>Create Context</button>
       <button onClick={onAddToContext} className={itemClass}>Add to Context</button>
       <button onClick={onMarkDecision} className={itemClass}>Mark Decision</button>

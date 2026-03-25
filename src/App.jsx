@@ -249,6 +249,9 @@ export default function CollaborationApp() {
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
+  const [editingMessageId, setEditingMessageId] = useState(null)
+  const [editingMessageText, setEditingMessageText] = useState("")
+  const [isSavingEditedMessage, setIsSavingEditedMessage] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState("")
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
@@ -3405,6 +3408,62 @@ export default function CollaborationApp() {
     }
   }
 
+  const startEditingMessage = message => {
+    if (!message || !currentUser) return
+    if (String(message.userId) !== String(currentUser.id)) return
+    setEditingMessageId(message.id)
+    setEditingMessageText(message.text || "")
+    setMessageActionMenu(null)
+    setMessageContextPicker(null)
+  }
+
+  const cancelEditingMessage = () => {
+    setEditingMessageId(null)
+    setEditingMessageText("")
+    setIsSavingEditedMessage(false)
+  }
+
+  const saveEditedMessage = async (chatId, message) => {
+    if (!chatId || !message || !currentUser) return
+    if (String(message.userId) !== String(currentUser.id)) return
+
+    const trimmedText = editingMessageText.trim()
+    if (!trimmedText || trimmedText === (message.text || "").trim()) {
+      cancelEditingMessage()
+      return
+    }
+
+    const updatedMessage = {
+      ...message,
+      text: trimmedText,
+      editedAt: new Date().toISOString()
+    }
+
+    setIsSavingEditedMessage(true)
+    setMessages(prev => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map(item =>
+        item.id === message.id
+          ? { ...item, text: trimmedText, editedAt: updatedMessage.editedAt }
+          : item
+      )
+    }))
+
+    try {
+      await Storage.updateMessage(chatId, sanitizeMessagePayload(updatedMessage))
+      cancelEditingMessage()
+    } catch (e) {
+      console.error("Failed to edit message", e)
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).map(item =>
+          item.id === message.id ? message : item
+        )
+      }))
+      setIsSavingEditedMessage(false)
+    }
+  }
+
   const getActiveChatId = () => {
     if (activeView === "channel") return Number(activeChannel)
     if (activeView === "dm" && activeDMUser && currentUser) {
@@ -3427,6 +3486,10 @@ export default function CollaborationApp() {
     () => (activeChatId ? messages[activeChatId] || [] : []),
     [messages, activeChatId]
   )
+
+  useEffect(() => {
+    cancelEditingMessage()
+  }, [activeChatId])
 
   const getCurrentMessages = () => {
     return currentMessages
@@ -4915,6 +4978,28 @@ export default function CollaborationApp() {
           else setActiveChannel("")
         }
       }
+    } else if (showDeleteConfirm.type === "message" && showDeleteConfirm.chatId) {
+      if (!String(showDeleteConfirm.id).startsWith("tmp-")) {
+        await Storage.deleteMessage(showDeleteConfirm.chatId, showDeleteConfirm.id)
+      }
+      setMessages(prev => ({
+        ...prev,
+        [showDeleteConfirm.chatId]: (prev[showDeleteConfirm.chatId] || []).filter(
+          message => String(message.id) !== String(showDeleteConfirm.id)
+        )
+      }))
+      if (editingMessageId === showDeleteConfirm.id) {
+        cancelEditingMessage()
+      }
+      if (pinnedMessageId === showDeleteConfirm.id) {
+        setPinnedMessageId(null)
+      }
+      if (targetMessageId === showDeleteConfirm.id) {
+        setTargetMessageId(null)
+      }
+      setSelectedMessageIds(prev =>
+        prev.filter(messageId => String(messageId) !== String(showDeleteConfirm.id))
+      )
     }
     setShowDeleteConfirm(null)
   }
@@ -7483,7 +7568,7 @@ export default function CollaborationApp() {
         )}
         {/* ... (Sidebar Content) ... */}
         <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
-          {!sidebarCollapsed && (
+          {(!sidebarCollapsed || isMobile) && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
               onClick={() => {
@@ -7577,7 +7662,7 @@ export default function CollaborationApp() {
           </div>
         </div>
 
-        {!sidebarCollapsed && (
+        {(!sidebarCollapsed || isMobile) && (
           <div className="px-5 pt-6 pb-2 animate-fade-in">
             <div className="relative group">
               <Search className="absolute left-4 top-3.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-indigo-500" />
@@ -7597,7 +7682,7 @@ export default function CollaborationApp() {
         )}
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-6">
-          {!sidebarCollapsed ? (
+          {(!sidebarCollapsed || isMobile) ? (
             <div className="animate-fade-in">
               {/* Conditional Rendering: Show Search Results or Standard Tree */}
               {debouncedSearchQuery.trim().length > 0 ? (
@@ -9167,7 +9252,7 @@ export default function CollaborationApp() {
 
                       {currentMessages.map((msg, idx) => {
                         const user = getUser(msg.userId)
-                        const isMe = user?.id === currentUser?.id
+                        const isMe = String(msg.userId) === String(currentUser?.id)
                         const prevMsg =
                           idx > 0 ? currentMessages[idx - 1] : null
                         // Date separator logic
@@ -9208,6 +9293,12 @@ export default function CollaborationApp() {
                           )
                         })()
 
+                        const canEditMessage =
+                          isMe &&
+                          Boolean(msg.text) &&
+                          msg.type !== "meet-invite" &&
+                          msg.type !== "task"
+                        const isEditingThisMessage = editingMessageId === msg.id
                         const isActionMenuOpen = messageActionMenu?.messageId === msg.id
                         const isContextPickerOpen = messageContextPicker?.messageId === msg.id
 
@@ -9232,7 +9323,7 @@ export default function CollaborationApp() {
                               } ${
                                 isSequence ? "mt-1" : "mt-6"
                               } ${
-                                isActionMenuOpen || isContextPickerOpen ? "z-40" : "z-0"
+                                isActionMenuOpen || isContextPickerOpen || isEditingThisMessage ? "z-40" : "z-0"
                               } group animate-fade-in`}
                             >
                             {/* Avatar only for first in sequence */}
@@ -9272,6 +9363,11 @@ export default function CollaborationApp() {
                                       ? formatTime(msg.timestamp)
                                       : "now"}
                                   </span>
+                                  {msg.editedAt && (
+                                    <span className={`text-[10px] font-medium italic ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                      edited
+                                    </span>
+                                  )}
                                 </div>
                               )}
 
@@ -9312,6 +9408,17 @@ export default function CollaborationApp() {
                                         emojis={EMOJIS}
                                         onReact={emoji => {
                                           toggleReaction(getActiveChatId(), msg.id, emoji)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
+                                        onDelete={() => {
+                                          const chatId = getActiveChatId()
+                                          if (!chatId) return
+                                          setShowDeleteConfirm({
+                                            type: "message",
+                                            id: msg.id,
+                                            chatId
+                                          })
                                           setMessageActionMenu(null)
                                         }}
                                         onToggleSelection={() => {
@@ -9393,16 +9500,68 @@ export default function CollaborationApp() {
                                   </div>
                                 )}
                                 
-                                {msg.text && msg.type !== 'meet-invite' && (
-                                  <div>
-                                    {renderWithHighlight(
-                                      msg.text,
-                                      highlightTerm
-                                    )}
+                                {isEditingThisMessage ? (
+                                  <div className="space-y-3">
+                                    <textarea
+                                      value={editingMessageText}
+                                      onChange={e => setEditingMessageText(e.target.value)}
+                                      rows={3}
+                                      className={`w-full resize-none rounded-2xl border px-4 py-3 text-sm outline-none ${
+                                        isDarkMode
+                                          ? "bg-slate-900/60 border-slate-600 text-white placeholder:text-slate-500"
+                                          : "bg-white/90 border-slate-200 text-slate-800 placeholder:text-slate-400"
+                                      }`}
+                                      placeholder="Edit your message"
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button
+                                        onClick={cancelEditingMessage}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                                          isDarkMode
+                                            ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                        }`}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        onClick={() => saveEditedMessage(getActiveChatId(), msg)}
+                                        disabled={isSavingEditedMessage || !editingMessageText.trim()}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                                          isSavingEditedMessage || !editingMessageText.trim()
+                                            ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                                            : isDarkMode
+                                              ? "bg-violet-500 text-white hover:bg-violet-400"
+                                              : "bg-indigo-600 text-white hover:bg-indigo-500"
+                                        }`}
+                                      >
+                                        {isSavingEditedMessage ? "Saving..." : "Save"}
+                                      </button>
+                                    </div>
                                   </div>
+                                ) : (
+                                  msg.text && msg.type !== 'meet-invite' && (
+                                    <div>
+                                      {renderWithHighlight(
+                                        msg.text,
+                                        highlightTerm
+                                      )}
+                                    </div>
+                                  )
                                 )}
 
                                 <div className={`flex flex-wrap gap-2 ${msg.text ? 'mt-2' : ''}`}>
+                                  {msg.editedAt && (
+                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold ${
+                                      isMe
+                                        ? "bg-white/15 text-white/85"
+                                        : isDarkMode
+                                          ? "bg-slate-700/70 text-slate-300"
+                                          : "bg-slate-100 text-slate-500"
+                                    }`}>
+                                      Edited
+                                    </span>
+                                  )}
                                   {msg.isDecision && (
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
                                       isDarkMode ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-700'
@@ -10735,7 +10894,11 @@ export default function CollaborationApp() {
                   : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <div aria-hidden="true" className="w-5 h-5 rounded-md transition-transform duration-200" />
+              <SmartImage
+                src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+                alt="Spaces"
+                className="h-5 w-5 object-contain transition-transform duration-200"
+              />
               <span className="text-[10px] font-semibold">Spaces</span>
             </button>
             <button

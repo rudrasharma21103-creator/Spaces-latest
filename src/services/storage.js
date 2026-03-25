@@ -504,9 +504,40 @@ export const getMessageCount = async (chatId, options = {}) => {
 
 export const updateMessage = async (chatId, message) => {
   if (!chatId || !message || !message.id) return
+
+  try {
+    const cached = peekMessages(chatId)
+    const next = Array.isArray(cached)
+      ? cached.map(item =>
+          String(item.id) === String(message.id)
+            ? { ...item, ...message }
+            : item
+        )
+      : []
+    writeMessagesCache(chatId, next)
+    writeMessageCountCache(chatId, next.length)
+  } catch (e) {}
+
   await authFetch(`${API_BASE}/messages/${chatId}/${message.id}`, {
     method: "PATCH",
     body: JSON.stringify(message)
+  })
+}
+
+export const deleteMessage = async (chatId, messageId) => {
+  if (!chatId || !messageId) return
+
+  try {
+    const cached = peekMessages(chatId)
+    const next = Array.isArray(cached)
+      ? cached.filter(message => String(message.id) !== String(messageId))
+      : []
+    writeMessagesCache(chatId, next)
+    writeMessageCountCache(chatId, next.length)
+  } catch (e) {}
+
+  await authFetch(`${API_BASE}/messages/${chatId}/${messageId}`, {
+    method: "DELETE"
   })
 }
 
