@@ -581,7 +581,6 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
           return (
             <div
               key={file.id}
-              onClick={() => onAttachFile?.(file)}
               className={`rounded-[1.75rem] border p-3 transition-all duration-200 hover:-translate-y-0.5 ${
                 isDarkMode
                   ? "bg-[#16181c] border-slate-800 hover:border-slate-700"
