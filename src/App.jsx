@@ -119,6 +119,21 @@ try {
   // keep default
 }
 
+function getAttachmentCacheKey(att) {
+  if (!att) return null
+
+  return (
+    att.fileId ||
+    att.drive_file_id ||
+    att.gmailAttachmentId ||
+    att.id ||
+    att.url ||
+    att.public_url ||
+    att.webViewLink ||
+    null
+  )
+}
+
 // Custom hook to detect window size for responsive design
 function useWindowSize() {
   const [windowSize, setWindowSize] = useState({
@@ -552,8 +567,20 @@ export default function CollaborationApp() {
   const contextSaveTimeoutRef = useRef(null)
   const activeContextStateRef = useRef({ chatId: null, loaded: false })
   const collapsedSpaceMenuRef = useRef(null)
+  const protectedFileUrlCacheRef = useRef(new Map())
+  const protectedFileInflightRef = useRef(new Map())
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
+
+  useEffect(() => {
+    return () => {
+      for (const objectUrl of protectedFileUrlCacheRef.current.values()) {
+        URL.revokeObjectURL(objectUrl)
+      }
+      protectedFileUrlCacheRef.current.clear()
+      protectedFileInflightRef.current.clear()
+    }
+  }, [])
 
   // --- Initialize Google API on mount ---
   useEffect(() => {
@@ -3498,35 +3525,62 @@ export default function CollaborationApp() {
 
   // Fetch a protected file URL using auth headers and return an object URL for preview/download
   const fetchProtectedUrlAndCreateObjectURL = async att => {
-    try {
-      const url = att.url || att.public_url || null
-      const fid = (att.fileId || att.id) || null
-      // Prefer explicit URL if available
-      if (url) {
-        const token = getToken()
-        const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-        const resp = await fetch(url, { headers })
-        if (!resp.ok) return null
-        const blob = await resp.blob()
-        return URL.createObjectURL(blob)
-      }
-      // Otherwise try fileId metadata endpoint
-      if (fid) {
-        const meta = await fetchFileMetadata(fid)
-        const realUrl = meta && (meta.url || meta.public_url)
-        if (realUrl) {
+    const cacheKey = getAttachmentCacheKey(att)
+    if (att?.previewUrl?.startsWith?.("blob:")) return att.previewUrl
+    if (cacheKey && protectedFileUrlCacheRef.current.has(cacheKey)) {
+      return protectedFileUrlCacheRef.current.get(cacheKey)
+    }
+    if (cacheKey && protectedFileInflightRef.current.has(cacheKey)) {
+      return protectedFileInflightRef.current.get(cacheKey)
+    }
+
+    const request = (async () => {
+      try {
+        const url = att.url || att.public_url || null
+        const fid = (att.fileId || att.id) || null
+        // Prefer explicit URL if available
+        if (url) {
           const token = getToken()
           const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-          const resp = await fetch(realUrl, { headers })
+          const resp = await fetch(url, { headers })
           if (!resp.ok) return null
           const blob = await resp.blob()
           return URL.createObjectURL(blob)
         }
+        // Otherwise try fileId metadata endpoint
+        if (fid) {
+          const meta = await fetchFileMetadata(fid)
+          const realUrl = meta && (meta.url || meta.public_url)
+          if (realUrl) {
+            const token = getToken()
+            const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+            const resp = await fetch(realUrl, { headers })
+            if (!resp.ok) return null
+            const blob = await resp.blob()
+            return URL.createObjectURL(blob)
+          }
+        }
+      } catch (e) {
+        console.error('fetchProtectedUrl failed', e)
+      } finally {
+        if (cacheKey) {
+          protectedFileInflightRef.current.delete(cacheKey)
+        }
       }
-    } catch (e) {
-      console.error('fetchProtectedUrl failed', e)
+
+      return null
+    })()
+
+    if (cacheKey) {
+      protectedFileInflightRef.current.set(cacheKey, request)
     }
-    return null
+
+    const objectUrl = await request
+    if (cacheKey && objectUrl) {
+      protectedFileUrlCacheRef.current.set(cacheKey, objectUrl)
+    }
+
+    return objectUrl
   }
 
   const startPollingFileStatus = (fileId) => {
@@ -4663,7 +4717,6 @@ export default function CollaborationApp() {
           document.body.appendChild(a)
           a.click()
           a.remove()
-          URL.revokeObjectURL(blobUrl)
           return
         }
       } catch (e) {
@@ -4696,7 +4749,6 @@ export default function CollaborationApp() {
             document.body.appendChild(a)
             a.click()
             a.remove()
-            URL.revokeObjectURL(blobUrl)
             return
           }
         } catch (e) {
@@ -4710,18 +4762,13 @@ export default function CollaborationApp() {
     }
 
     if (att.previewUrl) {
-      // download the blob from previewUrl
       try {
-        const res = await fetch(att.previewUrl)
-        const blob = await res.blob()
-        const url2 = URL.createObjectURL(blob)
         const a = document.createElement("a")
-        a.href = url2
+        a.href = att.previewUrl
         a.download = att.name || "attachment"
         document.body.appendChild(a)
         a.click()
         a.remove()
-        URL.revokeObjectURL(url2)
       } catch (e) {
         console.error("downloadAttachment failed", e)
       }
@@ -9506,6 +9553,7 @@ export default function CollaborationApp() {
                                                   src={srcUrl}
                                                   title={att.name}
                                                   className="w-full h-60"
+                                                  loading="lazy"
                                                   frameBorder="0"
                                                 />
                                               </div>

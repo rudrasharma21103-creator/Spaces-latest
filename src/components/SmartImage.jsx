@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from "react"
+import React, { memo, useEffect, useMemo, useRef, useState } from "react"
 
 function buildImageSrc(src, apiBase, cacheKey) {
   if (!src || typeof src !== "string") return ""
@@ -42,23 +42,53 @@ function SmartImageComponent({
     () => buildImageSrc(src, apiBase, cacheKey),
     [apiBase, cacheKey, src]
   )
+  const imageRef = useRef(null)
   const [imgSrc, setImgSrc] = useState(resolvedSrc)
   const [hasFailed, setHasFailed] = useState(!resolvedSrc)
+  const [isVisible, setIsVisible] = useState(loading === "eager")
 
   useEffect(() => {
     setImgSrc(resolvedSrc)
     setHasFailed(!resolvedSrc)
-  }, [resolvedSrc])
+    setIsVisible(loading === "eager")
+  }, [loading, resolvedSrc])
+
+  useEffect(() => {
+    if (loading === "eager") {
+      setIsVisible(true)
+      return
+    }
+
+    const node = imageRef.current
+    if (!node || typeof IntersectionObserver === "undefined") {
+      setIsVisible(true)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          setIsVisible(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "240px 0px" }
+    )
+
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [imgSrc, loading])
 
   if (hasFailed) return fallback
 
   return (
     <img
       {...rest}
-      src={imgSrc}
+      ref={imageRef}
+      src={isVisible ? imgSrc : undefined}
       alt={alt}
       className={className}
-      style={style}
+      style={loading === "eager" ? style : { contentVisibility: "auto", ...style }}
       loading={loading}
       decoding={decoding}
       fetchPriority={fetchPriority}
