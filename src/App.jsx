@@ -19,7 +19,6 @@ import {
   Mail,
   UserPlus,
   Check,
-  Sparkles,
   GraduationCap,
   Briefcase,
   User as UserIcon,
@@ -41,6 +40,7 @@ import {
   Grid3x3,
   FileText,
   ClipboardList,
+  ArrowDown,
   Download,
   Clock,
   Sun,
@@ -61,12 +61,12 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import {
   AddToContextPopover,
+  ChannelFilesGallery,
   ChannelTabs,
   ContextBadge,
   ContextsTabView,
   CreateContextModal,
   DecisionList,
-  FilesList,
   LivingContextPanel,
   MessageActionButton,
   MessageActionsMenu,
@@ -2285,6 +2285,45 @@ export default function CollaborationApp() {
     
     // Show success message
     setSuccessMessage(`"${doc.name}" added to message`)
+    setShowSuccessToast(true)
+    setTimeout(() => setShowSuccessToast(false), 3000)
+  }
+
+  const addChannelFileAsAttachment = file => {
+    if (!file) return
+
+    const identity = String(file.fileId || file.id || file.url || file.name || "")
+    const alreadyAdded = selectedFiles.some(existing => {
+      const existingIdentity = String(existing.fileId || existing.id || existing.url || existing.name || "")
+      return existingIdentity && existingIdentity === identity
+    })
+
+    if (alreadyAdded) {
+      setSuccessMessage(`"${file.name}" is already attached`)
+      setShowSuccessToast(true)
+      setTimeout(() => setShowSuccessToast(false), 3000)
+      return
+    }
+
+    const newAttachment = {
+      id: file.id || Date.now() + Math.random(),
+      fileId: file.fileId || null,
+      name: file.name || "Attachment",
+      size: file.size || 0,
+      type: file.mimeType || file.type || "",
+      mimeType: file.mimeType || file.type || "",
+      url: file.url || file.public_url || file.webViewLink || null,
+      source: file.sourceLabel || file.source || "chat",
+      public_url: file.public_url || null,
+      webViewLink: file.webViewLink || null,
+      previewUrl: file.previewUrl || null,
+      drive_file_id: file.drive_file_id || null,
+      gmailMessageId: file.gmailMessageId || null,
+      gmailAttachmentId: file.gmailAttachmentId || null,
+    }
+
+    setSelectedFiles(prev => [...prev, newAttachment])
+    setSuccessMessage(`"${newAttachment.name}" added to message`)
     setShowSuccessToast(true)
     setTimeout(() => setShowSuccessToast(false), 3000)
   }
@@ -8955,7 +8994,12 @@ export default function CollaborationApp() {
                       />
                     )}
                     {activeChannelTab === "files" && (
-                      <FilesList files={currentChannelFiles} isDarkMode={isDarkMode} />
+                      <ChannelFilesGallery
+                        files={currentChannelFiles}
+                        isDarkMode={isDarkMode}
+                        onAttachFile={addChannelFileAsAttachment}
+                        onDownloadFile={downloadAttachment}
+                      />
                     )}
                     {activeChannelTab === "decisions" && (
                       <DecisionList
@@ -9032,7 +9076,6 @@ export default function CollaborationApp() {
                       {pinnedMessageId && (
                         <div className={`sticky top-0 z-20 mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-purple-600/30' : 'bg-white/90 border-slate-100'}`}>
                           <div className="flex items-center gap-3">
-                            <Sparkles className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-indigo-500'}`} />
                             <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : ''}`}>Pinned Search Result</div>
                             <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Reviewing highlighted message</div>
                           </div>
@@ -9365,8 +9408,10 @@ export default function CollaborationApp() {
                                               downloadAttachment(att)
                                             }}
                                             className="absolute top-2 right-2 z-10 p-1 rounded-lg bg-white/90 border border-slate-100 hover:bg-white shadow-md text-slate-600"
+                                            title="Download"
+                                            aria-label={`Download ${att.name || "attachment"}`}
                                           >
-                                            Download
+                                            <ArrowDown className="w-4 h-4" />
                                           </button>
                                         )}
                                         {/* Gmail Attachment */}
@@ -9383,7 +9428,7 @@ export default function CollaborationApp() {
                                                 <span className="text-[10px] text-slate-500">
                                                   Gmail Attachment
                                                 </span>
-                                                <Download className="w-3 h-3 text-slate-400" />
+                                                <ArrowDown className="w-3 h-3 text-slate-400" />
                                               </div>
                                             </div>
                                           </div>

@@ -1,14 +1,142 @@
 import React from "react"
 import {
+  ArrowDown,
   Check,
+  File,
+  FileArchive,
+  FileImage,
+  FileSpreadsheet,
   FileText,
+  Film,
   FolderOpen,
   MessageSquare,
   MoreVertical,
+  Plus,
+  Play,
+  Presentation,
   Sparkles,
   X,
 } from "lucide-react"
 import { CHANNEL_TABS, CONTEXT_STATUS_META } from "./LivingContext.helpers"
+
+function getFileKind(file) {
+  const mime = (file?.mimeType || "").toLowerCase()
+  const name = (file?.name || "").toLowerCase()
+
+  if (mime.startsWith("image/")) return "image"
+  if (mime.startsWith("video/")) return "video"
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "pdf"
+  if (mime.includes("spreadsheet") || mime.includes("excel") || mime.includes("csv") || name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls")) return "sheet"
+  if (mime.includes("presentation") || mime.includes("powerpoint") || name.endsWith(".ppt") || name.endsWith(".pptx")) return "slides"
+  if (mime.includes("document") || mime.includes("word") || mime.includes("text") || name.endsWith(".doc") || name.endsWith(".docx") || name.endsWith(".txt")) return "doc"
+  if (mime.includes("zip") || mime.includes("rar") || mime.includes("tar") || mime.includes("7z") || name.endsWith(".zip") || name.endsWith(".rar") || name.endsWith(".7z")) return "archive"
+
+  return "file"
+}
+
+function formatFileSize(size) {
+  if (!size) return ""
+  if (size >= 1024 * 1024 * 1024) return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.max(size / 1024, 0.1).toFixed(1)} KB`
+}
+
+function formatFileDate(timestamp) {
+  if (!timestamp) return ""
+
+  try {
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "short",
+    })
+  } catch {
+    return ""
+  }
+}
+
+function getPreviewConfig(kind, isDarkMode) {
+  if (isDarkMode) {
+    switch (kind) {
+      case "pdf":
+        return { badge: "PDF", icon: FileText, accent: "bg-rose-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950", display: "text-rose-200" }
+      case "sheet":
+        return { badge: "XLS", icon: FileSpreadsheet, accent: "bg-emerald-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-emerald-950/80 to-slate-950", display: "text-emerald-200" }
+      case "slides":
+        return { badge: "PPT", icon: Presentation, accent: "bg-amber-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-amber-950/70 to-slate-950", display: "text-amber-200" }
+      case "doc":
+        return { badge: "DOC", icon: FileText, accent: "bg-blue-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-blue-950/70 to-slate-950", display: "text-blue-200" }
+      case "video":
+        return { badge: "MP4", icon: Film, accent: "bg-fuchsia-500 text-white", panel: "bg-gradient-to-br from-slate-900 via-fuchsia-950/60 to-slate-950", display: "text-fuchsia-200" }
+      case "archive":
+        return { badge: "ZIP", icon: FileArchive, accent: "bg-slate-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-slate-900 to-black", display: "text-slate-200" }
+      default:
+        return { badge: "FILE", icon: File, accent: "bg-slate-600 text-white", panel: "bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950", display: "text-slate-100" }
+    }
+  }
+
+  switch (kind) {
+    case "pdf":
+      return { badge: "PDF", icon: FileText, accent: "bg-rose-500 text-white", panel: "bg-gradient-to-br from-white via-rose-50 to-slate-100", display: "text-slate-950" }
+    case "sheet":
+      return { badge: "XLS", icon: FileSpreadsheet, accent: "bg-emerald-500 text-white", panel: "bg-gradient-to-br from-white via-emerald-50 to-slate-100", display: "text-slate-950" }
+    case "slides":
+      return { badge: "PPT", icon: Presentation, accent: "bg-amber-500 text-white", panel: "bg-gradient-to-br from-white via-amber-50 to-slate-100", display: "text-slate-950" }
+    case "doc":
+      return { badge: "DOC", icon: FileText, accent: "bg-blue-500 text-white", panel: "bg-gradient-to-br from-white via-blue-50 to-slate-100", display: "text-slate-950" }
+    case "video":
+      return { badge: "MP4", icon: Film, accent: "bg-fuchsia-500 text-white", panel: "bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-pink-500", display: "text-white" }
+    case "archive":
+      return { badge: "ZIP", icon: FileArchive, accent: "bg-slate-500 text-white", panel: "bg-gradient-to-br from-white via-slate-100 to-slate-200", display: "text-slate-900" }
+    default:
+      return { badge: "FILE", icon: File, accent: "bg-slate-600 text-white", panel: "bg-gradient-to-br from-white via-slate-50 to-slate-100", display: "text-slate-950" }
+  }
+}
+
+function FilePreview({ file, isDarkMode }) {
+  const kind = getFileKind(file)
+  const config = getPreviewConfig(kind, isDarkMode)
+  const PreviewIcon = config.icon
+  const fileTitle = file?.name || "Untitled file"
+
+  if (kind === "image" && file?.url) {
+    return (
+      <div className="relative overflow-hidden rounded-2xl">
+        <img src={file.url} alt={fileTitle} className="h-40 w-full object-cover" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/30 to-transparent" />
+      </div>
+    )
+  }
+
+  return (
+    <div className={`relative h-40 overflow-hidden rounded-2xl p-4 ${config.panel}`}>
+      <div className="absolute inset-0 opacity-60">
+        <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full ${isDarkMode ? "bg-white/5" : "bg-white/80"}`} />
+        <div className={`absolute -left-4 bottom-4 h-16 w-16 rounded-full ${isDarkMode ? "bg-white/5" : "bg-white/50"}`} />
+      </div>
+      <div className="relative flex h-full flex-col justify-between">
+        <div className="flex items-center justify-between gap-2">
+          <div className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-bold tracking-[0.18em] ${config.accent}`}>
+            <PreviewIcon className="h-3.5 w-3.5" />
+            {config.badge}
+          </div>
+          {kind === "video" && (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm">
+              <Play className="ml-0.5 h-4 w-4 fill-current" />
+            </div>
+          )}
+        </div>
+        <div>
+          <div className={`line-clamp-2 text-[1.75rem] font-black leading-none tracking-tight ${config.display}`}>
+            {fileTitle}
+          </div>
+          <div className={`mt-2 text-sm font-medium ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+            {file.sourceLabel}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function ChannelTabs({ activeTab, isDarkMode, onChange }) {
   return (
@@ -424,6 +552,109 @@ export function FilesList({ files, isDarkMode }) {
   )
 }
 
+export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloadFile }) {
+  if (!files.length) {
+    return (
+      <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+        No files linked in this channel yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-4 sm:mx-8 space-y-4">
+      <div className={`rounded-[1.75rem] border px-5 py-4 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
+        <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>Channel Files</div>
+        <div className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+          {files.length} file{files.length === 1 ? "" : "s"} shared in this channel
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {files.map(file => {
+          const kind = getFileKind(file)
+          const kindConfig = getPreviewConfig(kind, isDarkMode)
+          const HeaderIcon = kind === "image" ? FileImage : kindConfig.icon
+          const compactDate = formatFileDate(file.timestamp)
+          const compactSize = formatFileSize(file.size)
+
+          return (
+            <div
+              key={file.id}
+              onClick={() => onAttachFile?.(file)}
+              className={`rounded-[1.75rem] border p-3 transition-all duration-200 hover:-translate-y-0.5 ${
+                isDarkMode
+                  ? "bg-[#16181c] border-slate-800 hover:border-slate-700"
+                  : "bg-slate-100/90 border-slate-200 hover:border-slate-300 shadow-sm"
+              }`}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${kindConfig.accent}`}>
+                    <HeaderIcon className="h-4 w-4" />
+                  </div>
+                  <div className={`truncate text-[0.95rem] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                    {file.name}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={event => {
+                    event.stopPropagation()
+                    onDownloadFile?.(file)
+                  }}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-white/80"}`}
+                  title="Download file"
+                  aria-label={`Download ${file.name}`}
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </button>
+              </div>
+
+              <FilePreview file={file} isDarkMode={isDarkMode} />
+
+              <div className="mt-3 space-y-2">
+                <div className={`line-clamp-2 text-[1.05rem] font-medium leading-snug ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+                  {file.messageLabel}
+                </div>
+                <div className={`flex items-center gap-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${isDarkMode ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"}`}>
+                    {(file.author || "U").trim().charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate">{file.author}</div>
+                    <div className="truncate text-xs">
+                      {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-start pt-1">
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onAttachFile?.(file)
+                    }}
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+                      isDarkMode
+                        ? "bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25"
+                        : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                    }`}
+                    title={`Attach ${file.name} to message`}
+                    aria-label={`Attach ${file.name} to message`}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function MessageActionButton({ isDarkMode, onClick }) {
   return (
     <button
@@ -456,3 +687,4 @@ export function MessageSelectionToggle({ isDarkMode, checked = false, onChange }
     </button>
   )
 }
+
