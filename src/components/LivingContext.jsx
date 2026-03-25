@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react"
 import { CHANNEL_TABS, CONTEXT_STATUS_META } from "./LivingContext.helpers"
+import SmartImage from "./SmartImage"
 
 function getFileKind(file) {
   const mime = (file?.mimeType || "").toLowerCase()
@@ -101,7 +102,7 @@ function FilePreview({ file, isDarkMode }) {
   if (kind === "image" && file?.url) {
     return (
       <div className="relative overflow-hidden rounded-2xl">
-        <img src={file.url} alt={fileTitle} className="h-40 w-full object-cover" />
+        <SmartImage src={file.url} alt={fileTitle} className="h-40 w-full object-cover" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/30 to-transparent" />
       </div>
     )
@@ -686,4 +687,3 @@ export function MessageSelectionToggle({ isDarkMode, checked = false, onChange }
     </button>
   )
 }
-

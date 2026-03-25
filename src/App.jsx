@@ -59,6 +59,7 @@ import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./servi
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
+import SmartImage from "./components/SmartImage"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -585,28 +586,43 @@ export default function CollaborationApp() {
     const initial = (name && name[0]) ? name[0].toUpperCase() : "?"
 
     const sizeStyle = { width: size, height: size, lineHeight: `${size}px`, fontSize: Math.floor(size/2) }
+    const avatarCacheKey =
+      user.avatar_version ||
+      user.avatarVersion ||
+      user.avatar_updated_at ||
+      user.avatarUpdatedAt ||
+      user.updated_at ||
+      user.updatedAt ||
+      ""
 
     // Handle relative URLs by prepending API_BASE
     if (url && typeof url === 'string') {
-      // Convert relative URLs to absolute
-      if (url.startsWith('/')) {
-        url = `${API_BASE}${url}`
-      }
-      
       if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
-        // Ensure we bust browser cache if server did not include a version param
-        let finalUrl = url
-        try {
-          if (!rawUrlStartsWithDataOrBlob(url)) {
-            const hasVersion = /[?&]v=\d+/.test(url)
-            if (!hasVersion) {
-              const sep = url.includes("?") ? "&" : "?"
-              finalUrl = `${url}${sep}v=${Date.now()}`
-            }
-          }
-        } catch (e) {}
         return (
-          <img src={finalUrl} alt={name} className="rounded-full object-cover" style={sizeStyle} />
+          <SmartImage
+            src={url}
+            alt={name}
+            apiBase={API_BASE}
+            cacheKey={avatarCacheKey}
+            className="rounded-full object-cover"
+            style={sizeStyle}
+            loading="eager"
+            fetchPriority="high"
+          />
+        )
+      }
+      if (url.startsWith('/')) {
+        return (
+          <SmartImage
+            src={url}
+            alt={name}
+            apiBase={API_BASE}
+            cacheKey={avatarCacheKey}
+            className="rounded-full object-cover"
+            style={sizeStyle}
+            loading="eager"
+            fetchPriority="high"
+          />
         )
       }
     }
@@ -636,13 +652,6 @@ export default function CollaborationApp() {
         {initial}
       </div>
     )
-  }
-
-  // small helper to detect data/blob urls
-  const rawUrlStartsWithDataOrBlob = u => {
-    try {
-      return typeof u === 'string' && (u.startsWith('data:') || u.startsWith('blob:'))
-    } catch (e) { return false }
   }
 
   // Helper: return local YYYY-MM-DD for a Date or date string (avoids UTC shift from toISOString)
@@ -5296,7 +5305,7 @@ export default function CollaborationApp() {
             <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
               isDarkMode ? 'bg-white/5 ring-1 ring-white/10' : 'bg-slate-950 ring-1 ring-slate-900/10'
             }`}>
-              <img src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-7 w-7 object-contain" />
+              <SmartImage src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-7 w-7 object-contain" loading="eager" fetchPriority="high" />
             </div>
             <div>
               <p className="text-lg font-black tracking-tight">Spaces</p>
@@ -5431,7 +5440,7 @@ export default function CollaborationApp() {
                 </div>
                 <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Live workspace</p>
               </div>
-              <img src="/image 10.png" alt="Spaces workspace preview" className="mt-3 w-full rounded-[1.5rem] object-cover" />
+              <SmartImage src="/image 10.png" alt="Spaces workspace preview" className="mt-3 w-full rounded-[1.5rem] object-cover" loading="eager" fetchPriority="high" />
             </div>
           </div>
         </div>
@@ -5450,12 +5459,12 @@ export default function CollaborationApp() {
             <div className={`overflow-hidden rounded-[2rem] border p-3 ${
               isDarkMode ? 'border-white/10 bg-slate-950/70' : 'border-white/80 bg-white/80'
             }`}>
-              <img src="/image 10.png" alt="Spaces full workspace interface" className="w-full rounded-[1.5rem] object-cover" />
+              <SmartImage src="/image 10.png" alt="Spaces full workspace interface" className="w-full rounded-[1.5rem] object-cover" />
             </div>
             <div className={`mx-auto w-full max-w-3xl rounded-[2rem] border p-3 ${
               isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-slate-900/8 bg-white/75'
             }`}>
-              <img src="/image 11.png" alt="Spaces messaging interface" className="w-full rounded-[1.4rem] object-cover" />
+              <SmartImage src="/image 11.png" alt="Spaces messaging interface" className="w-full rounded-[1.4rem] object-cover" />
             </div>
           </div>
         </div>
@@ -5564,7 +5573,7 @@ export default function CollaborationApp() {
           isDarkMode ? 'border-white/10' : 'border-slate-900/10'
         }`}>
           <div className="flex items-center gap-3">
-            <img src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" />
+            <SmartImage src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" loading="eager" fetchPriority="high" />
             <span className="text-sm font-bold text-current">Spaces</span>
           </div>
           <p className="text-sm">Designed to show the real product, not hide it.</p>
@@ -5616,9 +5625,9 @@ export default function CollaborationApp() {
             <div className={`aspect-video w-full ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
               {/* Placeholder for demo - shows screenshot as fallback */}
               <div className="w-full h-full flex items-center justify-center relative">
-                <img 
-                  src="/image 10.png" 
-                  alt="Spacess Demo Preview" 
+                <SmartImage
+                  src="/image 10.png"
+                  alt="Spacess Demo Preview"
                   className="w-full h-full object-cover"
                 />
                 {/* Overlay with play icon for video placeholder */}
@@ -6926,10 +6935,11 @@ export default function CollaborationApp() {
                   </label>
                   {avatarPreview && (
                     <div className="mt-3">
-                      <img
+                      <SmartImage
                         src={avatarPreview}
                         alt="preview"
                         className="w-32 h-32 rounded-full object-cover border"
+                        loading="eager"
                       />
                     </div>
                   )}
@@ -7438,10 +7448,12 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <img
+              <SmartImage
                 src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
                 alt="Spaces logo"
                 className="h-8 w-auto object-contain"
+                loading="eager"
+                fetchPriority="high"
               />
             </div>
           )}
@@ -7708,7 +7720,7 @@ export default function CollaborationApp() {
                           setActiveView("channel")
                         }}
                       >
-                        <img
+                        <SmartImage
                           src="/hexagon-gradient%20For%20spaces..png"
                           alt={space.name || 'space'}
                           className={`w-5 h-5 object-contain transition-all duration-300 ${
@@ -7923,7 +7935,7 @@ export default function CollaborationApp() {
                       openCollapsedSpaceMenu(s, event)
                     }}
                   >
-                    <img src="/hexagon-gradient%20For%20spaces..png" alt={s.name} className="w-8 h-8 object-contain" />
+                    <SmartImage src="/hexagon-gradient%20For%20spaces..png" alt={s.name} className="w-8 h-8 object-contain" />
                     <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold ${activeSpace === s.id ? 'text-white' : 'text-white'}`}>
                       {s.name.charAt(0).toUpperCase()}
                     </span>
@@ -8491,14 +8503,11 @@ export default function CollaborationApp() {
                               onClick={() => setShowGoogleAppsMenu(false)}
                             >
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${app.color} group-hover:scale-110 transition-all duration-300 shadow-sm group-hover:shadow-md`}>
-                                <img 
-                                  src={app.icon} 
-                                  alt={app.name} 
+                                <SmartImage
+                                  src={app.icon}
+                                  alt={app.name}
                                   className="w-8 h-8 object-contain"
-                                  onError={(e) => {
-                                    e.target.style.display = 'none'
-                                    e.target.parentElement.innerHTML = '<span class="text-2xl">' + (app.name.charAt(0)) + '</span>'
-                                  }}
+                                  fallback={<span className="text-2xl">{app.name.charAt(0)}</span>}
                                 />
                               </div>
                               <span className={`text-xs font-semibold text-center ${isDarkMode ? 'text-slate-300 group-hover:text-white' : 'text-slate-700 group-hover:text-slate-900'}`}>{app.name}</span>
@@ -9435,7 +9444,7 @@ export default function CollaborationApp() {
                                         ) : (((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)) ? (
                                           <div className="p-3 flex items-center gap-3 rounded-xl min-w-[200px]">
                                             <div className="p-2 rounded-lg bg-white shadow-sm text-blue-600">
-                                              <img
+                                              <SmartImage
                                                 src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg"
                                                 className="w-6 h-6"
                                                 alt="Drive"
@@ -9470,26 +9479,22 @@ export default function CollaborationApp() {
                                           const mime = att.type || att.mimeType || att.mimetype || ''
                                           if (mime && mime.startsWith && mime.startsWith('image/') && srcUrl) {
                                             return (
-                                              <img
+                                              <SmartImage
                                                 src={srcUrl}
                                                 alt={att.name}
                                                 className="max-w-[240px] max-h-[240px] object-cover"
-                                                onError={async (e) => {
+                                                onResolveError={async () => {
                                                   try {
-                                                    // Attempt to fetch protected URL and replace src
                                                     const blobUrl = await fetchProtectedUrlAndCreateObjectURL(att)
                                                     if (blobUrl) {
-                                                      // Update message attachment preview so UI persists
                                                       updateMessageMeta(getActiveChatId(), msg.id, m => ({
                                                         ...m,
                                                         attachments: (m.attachments || []).map(a => (String(a.id) === String(att.id) ? { ...a, previewUrl: blobUrl } : a))
                                                       }))
-                                                      // swap image src immediately
-                                                      e.currentTarget.src = blobUrl
+                                                      return blobUrl
                                                     }
-                                                  } catch (err) {
-                                                    // ignore
-                                                  }
+                                                  } catch (err) {}
+                                                  return ""
                                                 }}
                                               />
                                             )
@@ -9593,13 +9598,13 @@ export default function CollaborationApp() {
                             className={`relative group border rounded-2xl p-2 flex items-center gap-3 flex-shrink-0 pr-8 transition-all duration-200 ${isDarkMode ? 'bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 hover:border-purple-500/50 hover:shadow-md hover:shadow-purple-500/20' : 'bg-gradient-to-br from-slate-50 to-white border-slate-200/80 hover:border-indigo-200 hover:shadow-md'}`}
                           >
                             {file.source === "drive" || file.source === "gmail" ? (
-                              <img
+                              <SmartImage
                                 src={file.iconLink || GoogleService.getAppIcon(GoogleService.getAppTypeFromMime(file.type)).iconUrl || "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png"}
                                 className="w-6 h-6"
                                 alt={file.source === "gmail" ? "Gmail" : "Drive"}
                               />
                             ) : file.type && file.type.startsWith("image/") && (file.previewUrl || file.url) ? (
-                              <img
+                              <SmartImage
                                 src={file.url || file.previewUrl}
                                 className="w-10 h-10 rounded-xl object-cover"
                                 alt=""
@@ -10651,14 +10656,11 @@ export default function CollaborationApp() {
                   onClick={() => setShowGoogleAppsMenu(false)}
                 >
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${app.color} shadow-sm`}>
-                    <img 
-                      src={app.icon} 
-                      alt={app.name} 
+                    <SmartImage
+                      src={app.icon}
+                      alt={app.name}
                       className="w-7 h-7 object-contain"
-                      onError={(e) => {
-                        e.target.style.display = 'none'
-                        e.target.parentElement.innerHTML = '<span class="text-xl">' + (app.name.charAt(0)) + '</span>'
-                      }}
+                      fallback={<span className="text-xl">{app.name.charAt(0)}</span>}
                     />
                   </div>
                   <span className={`text-[10px] font-semibold text-center ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{app.name}</span>
@@ -11355,7 +11357,7 @@ export default function CollaborationApp() {
                         className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200 border-slate-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
                         title="Show Drive Files"
                       >
-                        <img src="/google-drive.png" alt="Drive" className="w-5 h-5" />
+                        <SmartImage src="/google-drive.png" alt="Drive" className="w-5 h-5" />
                         <span className="hidden sm:inline">Open Drive</span>
                       </button>
                       <button
@@ -11514,7 +11516,7 @@ export default function CollaborationApp() {
                             : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-100'
                         }`}
                       >
-                        <img src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
+                        <SmartImage src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
                       </button>
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
                         <button
@@ -11528,7 +11530,7 @@ export default function CollaborationApp() {
                               : isDarkMode ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
                           }`}
                         >
-                          <img src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
+                          <SmartImage src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
                         </button>
                       )}
                       <button
@@ -11541,7 +11543,7 @@ export default function CollaborationApp() {
                             : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                         >
-                        <img src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
+                        <SmartImage src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
                       </button>
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
                         <button
@@ -11555,7 +11557,7 @@ export default function CollaborationApp() {
                               : isDarkMode ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-green-50 text-green-600 hover:bg-green-100'
                           }`}
                         >
-                          <img src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
+                          <SmartImage src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
                         </button>
                       )}
                       {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
@@ -11570,7 +11572,7 @@ export default function CollaborationApp() {
                               : isDarkMode ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
                           }`}
                           >
-                          <img src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
+                          <SmartImage src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
                         </button>
                       )}
                       {gmailAttachments.length > 0 && (
@@ -11585,7 +11587,7 @@ export default function CollaborationApp() {
                               : isDarkMode ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
                           }`}
                         >
-                          <img src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
+                          <SmartImage src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
                         </button>
                       )}
                       </div>
@@ -11617,8 +11619,7 @@ export default function CollaborationApp() {
                                         onClick={() => openAttachment(attachment)}
                                       >
                                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
-                                          <img src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
-                                          <span className="text-xl hidden">{attAppIcon.emoji}</span>
+                                          <SmartImage src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{attAppIcon.emoji}</span>} />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                           <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-purple-300' : 'text-slate-800 group-hover:text-indigo-600'}`}>
@@ -11716,8 +11717,7 @@ export default function CollaborationApp() {
                               >
                                 {/* Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${appIcon.color}`}>
-                                  <img src={doc.iconLink || appIcon.iconUrl} alt={appType} className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
-                                  <span className="text-xl hidden">{appIcon.emoji}</span>
+                                  <SmartImage src={doc.iconLink || appIcon.iconUrl} alt={appType} className="w-6 h-6" fallback={<span className="text-xl">{appIcon.emoji}</span>} />
                                 </div>
                                 
                                 {/* Info */}
@@ -11776,8 +11776,7 @@ export default function CollaborationApp() {
                               >
                                 {/* Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
-                                  <img src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
-                                  <span className="text-xl hidden">{attAppIcon.emoji}</span>
+                                  <SmartImage src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{attAppIcon.emoji}</span>} />
                                 </div>
                                 
                                 {/* Info */}
@@ -11851,8 +11850,7 @@ export default function CollaborationApp() {
                               >
                                 {/* File Icon */}
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${gmailAppIcon.color}`}>
-                                  <img src={gmailAppIcon.iconUrl} alt="file" className="w-6 h-6" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
-                                  <span className="text-xl hidden">{gmailAppIcon.emoji}</span>
+                                  <SmartImage src={gmailAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{gmailAppIcon.emoji}</span>} />
                                 </div>
                                 
                                 {/* Info */}
@@ -12025,7 +12023,7 @@ export default function CollaborationApp() {
                   {
                     (() => {
                       const imgSrc = app.id === 'docs' ? '/google-docs.png' : app.id === 'sheets' ? '/google-sheets.png' : app.id === 'slides' ? '/slides.png' : app.id === 'gmail' ? '/gmail.png' : '/google-drive.png'
-                      return <img src={imgSrc} alt={app.name} className="w-8 h-8 rounded-md" />
+                      return <SmartImage src={imgSrc} alt={app.name} className="w-8 h-8 rounded-md" />
                     })()
                   }
                   <div className="flex-1 text-left">
