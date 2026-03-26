@@ -451,10 +451,13 @@ export const saveMessage = async (chatId, message) => {
     writeMessageCountCache(chatId, arr.length)
   } catch (e) {}
 
-  await authFetch(`${API_BASE}/messages/${chatId}`, {
+  const res = await authFetch(`${API_BASE}/messages/${chatId}`, {
     method: "POST",
     body: JSON.stringify(message)
   })
+  if (!res.ok) {
+    throw new Error(`Failed to save message (${res.status})`)
+  }
 }
 
 export const getMessageCount = async (chatId, options = {}) => {
@@ -518,10 +521,13 @@ export const updateMessage = async (chatId, message) => {
     writeMessageCountCache(chatId, next.length)
   } catch (e) {}
 
-  await authFetch(`${API_BASE}/messages/${chatId}/${message.id}`, {
+  const res = await authFetch(`${API_BASE}/messages/${chatId}/${message.id}`, {
     method: "PATCH",
     body: JSON.stringify(message)
   })
+  if (!res.ok) {
+    throw new Error(`Failed to update message (${res.status})`)
+  }
 }
 
 export const deleteMessage = async (chatId, messageId) => {
@@ -536,9 +542,12 @@ export const deleteMessage = async (chatId, messageId) => {
     writeMessageCountCache(chatId, next.length)
   } catch (e) {}
 
-  await authFetch(`${API_BASE}/messages/${chatId}/${messageId}`, {
+  const res = await authFetch(`${API_BASE}/messages/${chatId}/${messageId}`, {
     method: "DELETE"
   })
+  if (!res.ok) {
+    throw new Error(`Failed to delete message (${res.status})`)
+  }
 }
 
 export const getContextState = async chatId => {

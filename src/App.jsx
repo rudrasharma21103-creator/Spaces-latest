@@ -1757,6 +1757,28 @@ export default function CollaborationApp() {
         return
       }
 
+      if (data.type === 'message_deleted' && data.messageId) {
+        setMessages(prev => ({
+          ...prev,
+          [chatId]: (prev[chatId] || []).filter(
+            message => String(message.id) !== String(data.messageId)
+          )
+        }))
+        if (String(editingMessageId) === String(data.messageId)) {
+          cancelEditingMessage()
+        }
+        if (String(pinnedMessageId) === String(data.messageId)) {
+          setPinnedMessageId(null)
+        }
+        if (String(targetMessageId) === String(data.messageId)) {
+          setTargetMessageId(null)
+        }
+        setSelectedMessageIds(prev =>
+          prev.filter(messageId => String(messageId) !== String(data.messageId))
+        )
+        return
+      }
+
       const normalized = { ...data, status: "sent", optimistic: false }
 
       setMessages(prev => {
@@ -4984,7 +5006,7 @@ export default function CollaborationApp() {
         }
       }
     } else if (showDeleteConfirm.type === "message" && showDeleteConfirm.chatId) {
-      if (!String(showDeleteConfirm.id).startsWith("tmp-")) {
+      if (!showDeleteConfirm.optimistic) {
         await Storage.deleteMessage(showDeleteConfirm.chatId, showDeleteConfirm.id)
       }
       setMessages(prev => ({
@@ -9433,7 +9455,8 @@ export default function CollaborationApp() {
                                           setShowDeleteConfirm({
                                             type: "message",
                                             id: msg.id,
-                                            chatId
+                                            chatId,
+                                            optimistic: Boolean(msg.optimistic),
                                           })
                                           setMessageActionMenu(null)
                                         }}

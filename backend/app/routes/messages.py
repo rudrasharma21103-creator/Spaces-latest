@@ -29,6 +29,30 @@ def _get_user_id_from_request(request: Request):
 router = APIRouter(prefix="/messages")
 
 
+def _message_id_candidates(message_id: str):
+    candidates = [message_id]
+    try:
+        mid = int(message_id)
+        candidates.append(mid)
+        candidates.append(str(mid))
+    except Exception:
+        pass
+    # Preserve order while removing duplicates
+    deduped = []
+    seen = set()
+    for item in candidates:
+        key = f"{type(item).__name__}:{item}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _message_filter(chat_id: str, message_id):
+    return {"chatId": chat_id, "message.id": {"$in": _message_id_candidates(str(message_id))}}
+
+
 def _check_channel_access(chat_id: str, user_id: int):
     # Allow DM chats where chat id is like 'dm_<id1>_<id2>' if user is participant
     if isinstance(chat_id, str) and chat_id.startswith("dm_"):
@@ -186,11 +210,19 @@ async def save_message(request: Request, chat_id: str, message: dict):
     if user_id is None or not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    # Persist the message
-    messages_collection.insert_one({
-        "chatId": chat_id,
-        "message": message
-    })
+    # Persist the message idempotently so retries do not create duplicates.
+    message_id = message.get("id")
+    if message_id is not None:
+        messages_collection.update_one(
+            _message_filter(chat_id, message_id),
+            {"$set": {"chatId": chat_id, "message": message}},
+            upsert=True,
+        )
+    else:
+        messages_collection.insert_one({
+            "chatId": chat_id,
+            "message": message
+        })
 
     # Broadcast immediately to connected websocket clients in this chat
     try:
@@ -208,15 +240,9 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
     if user_id is None or not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    # Try to convert message_id to int for matching numeric ids
-    try:
-        mid = int(message_id)
-    except Exception:
-        mid = message_id
-
     # Update the message document where message.id matches
     res = messages_collection.update_one(
-        {"chatId": chat_id, "message.id": mid},
+        _message_filter(chat_id, message_id),
         {"$set": {"message": message}}
     )
 
@@ -224,3 +250,28 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
     return {"status": "updated"}
+
+
+@router.delete("/{chat_id}/{message_id}")
+async def delete_message(request: Request, chat_id: str, message_id: str):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None or not _check_channel_access(chat_id, user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    res = messages_collection.delete_many(
+        _message_filter(chat_id, message_id)
+    )
+
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    try:
+        await manager.broadcast(chat_id, {
+            "type": "message_deleted",
+            "chatId": chat_id,
+            "messageId": message_id,
+        })
+    except Exception:
+        pass
+
+    return {"status": "deleted"}
