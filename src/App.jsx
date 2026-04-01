@@ -5638,7 +5638,7 @@ export default function CollaborationApp() {
         <div className="mx-auto max-w-7xl">
           <div className="mb-10 max-w-3xl">
             <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-orange-300' : 'text-orange-700'}`}>Why it feels better</p>
-            <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">A landing page with direction, not random blocks.</h2>
+            <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl"></h2>
           </div>
 
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -5706,9 +5706,9 @@ export default function CollaborationApp() {
         }`}>
           <div className="max-w-2xl">
             <p className={`text-xs font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-cyan-200' : 'text-cyan-800'}`}>Ready to launch</p>
-            <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">Make the first screen feel as strong as the product idea.</h2>
+            <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">If you need 5 tools and 15 more subtools to work, something is broken.</h2>
             <p className={`mt-4 text-sm leading-7 sm:text-base ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-              Start with signup, or preview the interface again before you decide.
+              
             </p>
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
