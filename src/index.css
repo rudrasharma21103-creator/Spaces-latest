@@ -5937,8 +5937,8 @@ body.dark .message-bubble-sent {
    ============================================ */
 
 :root {
-  --workspace-panel-radius: 22px;
-  --workspace-nav-radius: 14px;
+  --workspace-panel-radius: 0;
+  --workspace-nav-radius: 0;
 }
 
 .liquid-glass-navbar {
