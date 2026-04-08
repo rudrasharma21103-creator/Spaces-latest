@@ -67,7 +67,7 @@ function getPreviewConfig(kind, isDarkMode) {
       case "doc":
         return { badge: "DOC", icon: FileText, accent: "bg-blue-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-blue-950/70 to-slate-950", display: "text-blue-200" }
       case "video":
-        return { badge: "MP4", icon: Film, accent: "bg-fuchsia-500 text-white", panel: "bg-gradient-to-br from-slate-900 via-fuchsia-950/60 to-slate-950", display: "text-fuchsia-200" }
+        return { badge: "MP4", icon: Film, accent: "bg-cyan-500 text-white", panel: "bg-gradient-to-br from-slate-900 via-cyan-950/60 to-slate-950", display: "text-cyan-200" }
       case "archive":
         return { badge: "ZIP", icon: FileArchive, accent: "bg-slate-500 text-white", panel: "bg-gradient-to-br from-slate-800 via-slate-900 to-black", display: "text-slate-200" }
       default:
@@ -85,7 +85,7 @@ function getPreviewConfig(kind, isDarkMode) {
     case "doc":
       return { badge: "DOC", icon: FileText, accent: "bg-blue-500 text-white", panel: "bg-gradient-to-br from-white via-blue-50 to-slate-100", display: "text-slate-950" }
     case "video":
-      return { badge: "MP4", icon: Film, accent: "bg-fuchsia-500 text-white", panel: "bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-pink-500", display: "text-white" }
+      return { badge: "MP4", icon: Film, accent: "bg-cyan-500 text-white", panel: "bg-gradient-to-br from-sky-500 via-cyan-500 to-teal-500", display: "text-white" }
     case "archive":
       return { badge: "ZIP", icon: FileArchive, accent: "bg-slate-500 text-white", panel: "bg-gradient-to-br from-white via-slate-100 to-slate-200", display: "text-slate-900" }
     default:
@@ -239,7 +239,7 @@ export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, for
   if (!contexts.length) {
     return (
       <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
-        <div className={`mx-auto mb-4 w-16 h-16 rounded-3xl flex items-center justify-center ${isDarkMode ? "bg-slate-800 text-violet-300" : "bg-indigo-50 text-indigo-600"}`}>
+        <div className={`mx-auto mb-4 w-16 h-16 rounded-3xl flex items-center justify-center ${isDarkMode ? "bg-slate-800 text-sky-300" : "bg-sky-50 text-sky-600"}`}>
           <FolderOpen className="w-8 h-8" />
         </div>
         <div className={`text-lg font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>No living context yet</div>
@@ -348,7 +348,7 @@ export function CreateContextModal({
 
         <div className="flex items-center justify-end gap-3 mt-6">
           <button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-medium ${isDarkMode ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancel</button>
-          <button onClick={onSubmit} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDarkMode ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
+          <button onClick={onSubmit} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDarkMode ? "bg-sky-500 text-white hover:bg-sky-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
             {isEditing ? "Save context" : "Create context"}
           </button>
         </div>
@@ -387,7 +387,7 @@ function Section({ title, count, icon, isDarkMode, children }) {
     <section className={`rounded-[1.5rem] border p-4 ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-slate-50/80 border-slate-200/80"}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <SectionIcon className={`w-4 h-4 ${isDarkMode ? "text-violet-300" : "text-indigo-600"}`} />
+          <SectionIcon className={`w-4 h-4 ${isDarkMode ? "text-sky-300" : "text-sky-600"}`} />
           <h4 className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{title}</h4>
         </div>
         {typeof count === "number" && <span className={`text-xs ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{count}</span>}
@@ -479,7 +479,7 @@ export function LivingContextPanel({
             <button onClick={onCreateTask} className={`px-3 py-2 rounded-xl text-sm font-medium ${isDarkMode ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>Create task</button>
           </div>
           {canEdit && (
-            <button onClick={onEdit} className={`px-3 py-2 rounded-xl text-sm font-semibold ${isDarkMode ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
+            <button onClick={onEdit} className={`px-3 py-2 rounded-xl text-sm font-semibold ${isDarkMode ? "bg-sky-500 text-white hover:bg-sky-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
               Edit context
             </button>
           )}
@@ -655,7 +655,7 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
                   </div>
                   <div className="flex items-end justify-between gap-2 pt-1">
                     <div className={`flex min-w-0 items-center gap-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isDarkMode ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-200 text-indigo-700"}`}>
+                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${isDarkMode ? "bg-sky-500/20 text-sky-200" : "bg-sky-200 text-sky-700"}`}>
                         {(file.author || "U").trim().charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
@@ -673,8 +673,8 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
                       }}
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
                         isDarkMode
-                          ? "bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25"
-                          : "bg-white text-indigo-700 hover:bg-indigo-50"
+                          ? "bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
+                          : "bg-white text-sky-700 hover:bg-sky-50"
                       }`}
                       title={`Attach ${file.name} to message`}
                       aria-label={`Attach ${file.name} to message`}
@@ -713,8 +713,8 @@ export function MessageSelectionToggle({ isDarkMode, checked = false, onChange }
       className={`flex h-6 w-6 items-center justify-center rounded-lg border transition-colors ${
         checked
           ? isDarkMode
-            ? "border-violet-400 bg-violet-500/20 text-violet-200"
-            : "border-indigo-500 bg-indigo-50 text-indigo-600"
+            ? "border-sky-400 bg-sky-500/20 text-sky-200"
+            : "border-sky-500 bg-sky-50 text-sky-600"
           : isDarkMode
             ? "border-slate-700 bg-[#111317] text-transparent hover:border-slate-600"
             : "border-slate-300 bg-white text-transparent hover:border-slate-400"
@@ -724,3 +724,4 @@ export function MessageSelectionToggle({ isDarkMode, checked = false, onChange }
     </button>
   )
 }
+

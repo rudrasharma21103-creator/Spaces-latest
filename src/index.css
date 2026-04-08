@@ -1413,7 +1413,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   transform: translateY(-2px);
 }
 
-/* Dark Mode Liquid Glass - Purple Tinted */
+/* Dark Mode Liquid Glass - cyan Tinted */
 .dark .liquid-glass {
   background: linear-gradient(
     135deg,
@@ -2600,7 +2600,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 
 /* Improve visibility of own/sent messages in dark mode with a liquid-glass border */
 .dark .message-bubble-sent {
-  background: linear-gradient(135deg, rgba(99,102,241,0.85) 0%, rgba(139,92,246,0.85) 100%);
+  background: linear-gradient(135deg, rgba(14,165,233,0.85) 0%, rgba(6,182,212,0.85) 100%);
   color: #ffffff;
   border: none;
   box-shadow: 0 8px 28px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04) inset;
@@ -4558,25 +4558,25 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
   -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.05);
   border: 1px solid rgba(255,255,255,0.6);
-  box-shadow: 0 4px 16px rgba(31,38,135,0.10), 0 0 32px rgba(99,102,241,0.08), inset 0 0 12px rgba(255,255,255,0.18);
+  box-shadow: 0 4px 16px rgba(15,23,42,0.10), 0 0 32px rgba(14,165,233,0.08), inset 0 0 12px rgba(255,255,255,0.18);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
 }
 .liquid-glass-sidebar-icon:hover {
   background: linear-gradient(135deg, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.35) 40%, rgba(255,255,255,0.45) 100%);
-  box-shadow: 0 8px 32px rgba(99,102,241,0.12), 0 0 48px rgba(99,102,241,0.10);
-  border-color: rgba(99,102,241,0.25);
+  box-shadow: 0 8px 32px rgba(14,165,233,0.12), 0 0 48px rgba(14,165,233,0.10);
+  border-color: rgba(14,165,233,0.25);
   transform: translateY(-2px) scale(1.04);
 }
 .dark .liquid-glass-sidebar-icon {
-  background: linear-gradient(135deg, rgba(139,92,246,0.18) 0%, rgba(99,102,241,0.12) 40%, rgba(168,85,247,0.18) 100%);
-  border: 1px solid rgba(139,92,246,0.4);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 32px rgba(139,92,246,0.10), inset 0 0 12px rgba(139,92,246,0.08);
+  background: linear-gradient(135deg, rgba(6,182,212,0.18) 0%, rgba(14,165,233,0.12) 40%, rgba(34,211,238,0.18) 100%);
+  border: 1px solid rgba(6,182,212,0.4);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 32px rgba(6,182,212,0.10), inset 0 0 12px rgba(6,182,212,0.08);
 }
 .dark .liquid-glass-sidebar-icon:hover {
-  background: linear-gradient(135deg, rgba(139,92,246,0.28) 0%, rgba(99,102,241,0.18) 40%, rgba(168,85,247,0.28) 100%);
-  box-shadow: 0 8px 32px rgba(139,92,246,0.18), 0 0 48px rgba(139,92,246,0.15);
-  border-color: rgba(139,92,246,0.6);
+  background: linear-gradient(135deg, rgba(6,182,212,0.28) 0%, rgba(14,165,233,0.18) 40%, rgba(34,211,238,0.28) 100%);
+  box-shadow: 0 8px 32px rgba(6,182,212,0.18), 0 0 48px rgba(6,182,212,0.15);
+  border-color: rgba(6,182,212,0.6);
   transform: translateY(-2px) scale(1.04);
 }
 
@@ -6523,3 +6523,4 @@ body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
 }
+

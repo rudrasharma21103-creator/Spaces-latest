@@ -58,7 +58,7 @@ export const GOOGLE_APPS = [
     name: 'Photos',
     icon: 'https://ssl.gstatic.com/images/branding/product/1x/photos_48dp.png',
     url: 'https://photos.google.com',
-    color: 'bg-pink-50 text-pink-600',
+    color: 'bg-teal-50 text-teal-600',
     iconSize: 'w-8 h-8'
   }
 ]
@@ -799,3 +799,4 @@ export const createCalendarEvent = async (accessToken, {summary, description, st
     throw err
   }
 }
+

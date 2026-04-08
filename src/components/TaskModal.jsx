@@ -80,9 +80,10 @@ export default function TaskModal({
 
         <div className="flex justify-end gap-2">
           <button className="px-3 py-2 rounded border" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="px-4 py-2 rounded bg-indigo-600 text-white" onClick={submit} disabled={loading || selected.length===0}>Create</button>
+          <button className="px-4 py-2 rounded bg-sky-600 text-white" onClick={submit} disabled={loading || selected.length===0}>Create</button>
         </div>
       </div>
     </div>
   )
 }
+

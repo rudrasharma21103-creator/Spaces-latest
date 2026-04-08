@@ -224,7 +224,7 @@ export default function AdminDashboard() {
     return <div className="p-8 text-red-600">Error loading dashboard: {error}</div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-sky-50 dark:from-slate-900 dark:to-slate-800 p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <header className="flex items-center justify-between mb-8">
@@ -251,7 +251,7 @@ export default function AdminDashboard() {
           </div>
           <div className="text-right">
             <div className="text-sm text-slate-500">Total Employees</div>
-            <div className="text-3xl font-bold text-indigo-600">
+            <div className="text-3xl font-bold text-sky-600">
               {overview?.stats?.totalEmployees || 0}
             </div>
           </div>
@@ -359,7 +359,7 @@ export default function AdminDashboard() {
                             onClick={() => handleInvitePermission(u, "all")}
                             className={`px-3 py-1 rounded-md border text-xs transition ${
                               isAll
-                                ? "bg-indigo-100 text-indigo-700 border-indigo-400"
+                                ? "bg-sky-100 text-sky-700 border-sky-400"
                                 : "hover:bg-slate-100 dark:hover:bg-slate-700"
                             }`}
                           >
@@ -370,7 +370,7 @@ export default function AdminDashboard() {
                             onClick={() => handleInvitePermission(u, "company")}
                             className={`px-3 py-1 rounded-md border text-xs transition ${
                               isCompany
-                                ? "bg-indigo-100 text-indigo-700 border-indigo-400"
+                                ? "bg-sky-100 text-sky-700 border-sky-400"
                                 : "hover:bg-slate-100 dark:hover:bg-slate-700"
                             }`}
                           >
