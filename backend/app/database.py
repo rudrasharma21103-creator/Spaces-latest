@@ -23,6 +23,7 @@ contexts_collection = db["contexts"]
 events_collection = db["events"]
 # Files metadata collection - store only metadata (no binaries)
 files_collection = db["files"]
+drafts_collection = db["drafts"]
 # Organizations collection for enterprise registrations
 organizations_collection = db["organizations"]
 
@@ -43,6 +44,8 @@ try:
     # Tasks collection - index by assigned users and space for quick lookup
     tasks_collection.create_index("assigned_to")
     tasks_collection.create_index("space_id")
+    drafts_collection.create_index([("userId", 1), ("updatedAt", -1)])
+    drafts_collection.create_index([("userId", 1), ("id", 1)], unique=True)
     # Index for notifications
     notifications_collection.create_index("userId")
     # Index for organizations

@@ -51,7 +51,8 @@ import {
   MoreVertical,
   Smile,
   LogOut,
-  Zap
+  Zap,
+  Home as HomeIcon
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
@@ -60,6 +61,7 @@ import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
+import HomeHub from "./components/HomeHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -75,6 +77,7 @@ import {
 import { CHANNEL_TABS, FRIEND_CHAT_TABS, createContextRecord } from "./components/LivingContext.helpers"
 import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
+import * as DraftsService from "./services/drafts"
 import AdminDashboard from "./AdminDashboard"
 
 // Backend API base used for uploads and metadata fetches
@@ -206,8 +209,14 @@ export default function CollaborationApp() {
   // UI State
   const [activeSpace, setActiveSpace] = useState(null)
   const [activeChannel, setActiveChannel] = useState(null)
-  const [activeView, setActiveView] = useState("channel")
+  const [activeView, setActiveView] = useState("home")
   const [activeDMUser, setActiveDMUser] = useState(null)
+  const [homeSection, setHomeSection] = useState("overview")
+  const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
+  const [homeDMInput, setHomeDMInput] = useState("")
+  const [homeDMSending, setHomeDMSending] = useState(false)
+  const [drafts, setDrafts] = useState([])
+  const [activeDraftId, setActiveDraftId] = useState(null)
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
@@ -308,7 +317,8 @@ export default function CollaborationApp() {
         saveAuth(user, token)
         setCurrentUser(user)
         setIsAuthenticated(true)
-        setActiveView('channel')
+        setActiveView("home")
+        setHomeSection("overview")
         setShowAdminDashboard(true)
       } catch (e) {
         console.error('Failed during post-set-password login', e)
@@ -384,7 +394,8 @@ export default function CollaborationApp() {
     if (orgStage === 'verified') {
       console.log('orgStage is verified — running auto-login flow')
       try { setShowOrgModal(false) } catch (e) {}
-      try { setActiveView('channel') } catch (e) {}
+      try { setActiveView("home") } catch (e) {}
+      try { setHomeSection("overview") } catch (e) {}
       try { setShowAdminDashboard(true) } catch (e) {}
       (async () => {
         try {
@@ -480,6 +491,17 @@ export default function CollaborationApp() {
     }
   }, [currentUser, isAuthenticated])
 
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) {
+      setDrafts([])
+      return
+    }
+
+    DraftsService.getDrafts()
+      .then(items => setDrafts(Array.isArray(items) ? items : []))
+      .catch(error => console.warn("Failed to load drafts", error))
+  }, [isAuthenticated, currentUser?.id])
+
   // File Attachment State
   const [selectedFiles, setSelectedFiles] = useState([])
   const [isUploading, setIsUploading] = useState(false)
@@ -565,6 +587,7 @@ export default function CollaborationApp() {
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
   const justSwitchedThreadRef = useRef(false)
+  const previousActiveChatIdRef = useRef(null)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
   const contextSaveTimeoutRef = useRef(null)
@@ -1665,7 +1688,7 @@ export default function CollaborationApp() {
         // Silently ignore other errors
       }
     }
-    loadMessages(Boolean(cachedMessages.length === 0))
+    loadMessages(true)
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
     const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
@@ -2021,6 +2044,8 @@ export default function CollaborationApp() {
       
       setCurrentUser(newUser)
       setIsAuthenticated(true)
+      setActiveView("home")
+      setHomeSection("overview")
       setActiveSpace(defaultSpace.id)
       setActiveChannel(defaultSpace.channels[0].id)
       setAuthSuccess("Account created successfully!")
@@ -2034,6 +2059,8 @@ export default function CollaborationApp() {
         if (data?.user && data?.token) {
           setCurrentUser(data.user)
           setIsAuthenticated(true)
+          setActiveView("home")
+          setHomeSection("overview")
           setAuthSuccess("Logged in successfully!")
         } else {
           setAuthError(data?.error || "Invalid credentials")
@@ -2055,7 +2082,12 @@ export default function CollaborationApp() {
     setFriends([])
     setEvents([])
     setActiveSpace(null)
-    setActiveView("channel")
+    setActiveView("home")
+    setHomeSection("overview")
+    setHomeActiveDMUser(null)
+    setHomeDMInput("")
+    setDrafts([])
+    setActiveDraftId(null)
     setAuthData({ email: "", password: "", confirmPassword: "", name: "" })
     setAuthError("")
     setAuthSuccess("")
@@ -2087,6 +2119,8 @@ export default function CollaborationApp() {
           
           setCurrentUser(existingUser)
           setIsAuthenticated(true)
+          setActiveView("home")
+          setHomeSection("overview")
           setAuthSuccess("Logged in with Google successfully!")
         } else {
           // Create new user from Google data
@@ -2145,6 +2179,8 @@ export default function CollaborationApp() {
           
           setCurrentUser(newUser)
           setIsAuthenticated(true)
+          setActiveView("home")
+          setHomeSection("overview")
           setActiveSpace(defaultSpace.id)
           setActiveChannel(defaultSpace.channels[0].id)
           setAuthSuccess("Account created with Google successfully!")
@@ -2417,6 +2453,59 @@ export default function CollaborationApp() {
       shared: sharedChatDocs.length,
     }
   }, [googleDocs, gmailAttachments, sharedChatDocs])
+
+  const homeFiles = useMemo(() => {
+    const sharedFiles = extractSharedChatDocs(messages).map(file => ({
+      ...file,
+      source: file.source || "chat",
+      modifiedTime: file.timestamp || null,
+    }))
+
+    const driveFiles = sortedGoogleDocs.map(file => ({
+      ...file,
+      source: "drive",
+    }))
+
+    const gmailFiles = gmailAttachments.map(file => ({
+      id: `gmail-${file.messageId}-${file.id}`,
+      name: file.filename,
+      source: "gmail",
+      messageId: file.messageId,
+      gmailMessageId: file.messageId,
+      gmailAttachmentId: file.id,
+      mimeType: file.mimeType,
+      size: file.size,
+      modifiedTime: file.internalDate || file.timestamp || null,
+      timestamp: file.internalDate || file.timestamp || null,
+    }))
+
+    return [...sharedFiles, ...driveFiles, ...gmailFiles]
+  }, [messages, sortedGoogleDocs, gmailAttachments])
+
+  const homeDMChatId = useMemo(() => getDMChatId(homeActiveDMUser), [currentUser?.id, homeActiveDMUser])
+  const homeDMMessages = useMemo(() => (homeDMChatId ? messages[homeDMChatId] || [] : []), [messages, homeDMChatId])
+
+  const handleHomeSectionChange = nextSection => {
+    setActiveView("home")
+    setHomeSection(nextSection)
+    if (nextSection === "files" && googleAccessToken) {
+      loadGoogleDocs(googleAccessToken).catch(error => console.warn("Failed to refresh home files", error))
+    }
+  }
+
+  const openHomeFile = file => {
+    if (!file) return
+    if (file.webViewLink) {
+      window.open(file.webViewLink, "_blank")
+      return
+    }
+    openAttachment(file)
+  }
+
+  const openTaskDetailView = task => {
+    setActiveView("tasks")
+    setActiveSpace(null)
+  }
 
   // Connect Google Calendar
   const handleConnectGoogleCalendar = () => {
@@ -3340,6 +3429,240 @@ export default function CollaborationApp() {
   const getCurrentSpace = () => currentSpace
   const getCurrentChannels = () => currentChannels
 
+  const pendingFriendRequests = useMemo(
+    () => (currentUser?.notifications || []).filter(notification => notification.type === "friend_request"),
+    [currentUser?.notifications]
+  )
+
+  function getDMChatId(partnerId) {
+    if (!currentUser || partnerId === undefined || partnerId === null) return null
+    const left = Number(currentUser.id)
+    const right = Number(partnerId)
+    if (Number.isFinite(left) && Number.isFinite(right)) {
+      const ids = [left, right].sort((a, b) => a - b)
+      return `dm_${ids[0]}_${ids[1]}`
+    }
+    const ids = [String(currentUser.id), String(partnerId)].sort()
+    return `dm_${ids[0]}_${ids[1]}`
+  }
+
+  const refreshDrafts = async () => {
+    try {
+      const items = await DraftsService.getDrafts()
+      setDrafts(Array.isArray(items) ? items : [])
+    } catch (error) {
+      console.warn("Failed to refresh drafts", error)
+    }
+  }
+
+  const removeDraftLocally = draftId => {
+    setDrafts(prev => prev.filter(item => String(item.id) !== String(draftId)))
+    setActiveDraftId(prev => (String(prev) === String(draftId) ? null : prev))
+  }
+
+  const persistDraft = async payload => {
+    const existingDraft = drafts.find(item => String(item.id) === String(activeDraftId))
+    const saved = await DraftsService.saveDraft({
+      ...payload,
+      id: activeDraftId || undefined,
+      createdAt: existingDraft?.createdAt,
+    })
+    setDrafts(prev => {
+      const next = Array.isArray(prev) ? [...prev] : []
+      const index = next.findIndex(item => String(item.id) === String(saved.id))
+      if (index >= 0) next[index] = saved
+      else next.unshift(saved)
+      return next.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+    })
+    return saved
+  }
+
+  const deleteDraftById = async draftId => {
+    if (!draftId) return
+    try {
+      await DraftsService.deleteDraft(draftId)
+    } catch (error) {
+      console.warn("Failed to delete draft", error)
+    }
+    removeDraftLocally(draftId)
+  }
+
+  const loadDMMessagesForUser = async partnerId => {
+    const chatId = getDMChatId(partnerId)
+    if (!chatId) return
+    try {
+      const items = await Storage.getMessages(chatId, { forceRefresh: true })
+      setMessages(prev => ({ ...prev, [chatId]: Array.isArray(items) ? items : [] }))
+    } catch (error) {
+      console.warn("Failed to load DM messages", error)
+    }
+  }
+
+  const openWorkspaceHome = () => {
+    setActiveDraftId(null)
+    const targetSpace = currentSpace || spaces[0] || null
+    if (targetSpace) {
+      const accessible = getAccessibleChannelsForSpace(targetSpace)
+      const targetChannel =
+        accessible.find(channel => String(channel.id) === String(activeChannel)) ||
+        accessible[0] ||
+        targetSpace.channels?.[0] ||
+        null
+      setActiveSpace(targetSpace.id)
+      if (targetChannel) setActiveChannel(targetChannel.id)
+    }
+    setActiveView("channel")
+    setHomeSection("overview")
+  }
+
+  const openWorkspaceFriendsHome = () => {
+    setActiveDraftId(null)
+    const targetDMUser = homeActiveDMUser || activeDMUser || friends[0]?.id || null
+    if (targetDMUser) {
+      setActiveDMUser(targetDMUser)
+      setHomeActiveDMUser(targetDMUser)
+      setActiveView("dm")
+    } else {
+      const targetSpace = currentSpace || spaces[0] || null
+      if (targetSpace) {
+        const accessible = getAccessibleChannelsForSpace(targetSpace)
+        const targetChannel =
+          accessible.find(channel => String(channel.id) === String(activeChannel)) ||
+          accessible[0] ||
+          targetSpace.channels?.[0] ||
+          null
+        setActiveSpace(targetSpace.id)
+        if (targetChannel) setActiveChannel(targetChannel.id)
+      }
+      setActiveView("channel")
+    }
+    setHomeSection("overview")
+  }
+
+  const openHomeDM = async (partnerId, options = {}) => {
+    if (options.clearDraft !== false) {
+      setActiveDraftId(null)
+    }
+    setActiveDMUser(partnerId)
+    setHomeActiveDMUser(partnerId)
+    setActiveView("dm")
+    setSidebarCollapsed(true)
+    if (isMobile) setMobileView("chat")
+    await loadDMMessagesForUser(partnerId)
+  }
+
+  const saveWorkspaceDraft = async () => {
+    const text = messageInput.trim()
+    if (!text || !currentUser) return
+
+    if (activeView === "channel" && activeChannel) {
+      const channel = currentChannels.find(item => String(item.id) === String(activeChannel))
+      await persistDraft({
+        text,
+        chatId: String(activeChannel),
+        chatType: "channel",
+        chatName: channel?.name || "Channel",
+        spaceId: activeSpace,
+        channelId: activeChannel,
+      })
+      setMessageInput("")
+      setSelectedFiles([])
+      setActiveDraftId(null)
+      return
+    }
+
+    if (activeView === "dm" && activeDMUser) {
+      const friend = friends.find(item => String(item.id) === String(activeDMUser))
+      await persistDraft({
+        text,
+        chatId: getDMChatId(activeDMUser),
+        chatType: "dm",
+        chatName: friend?.name || "Direct message",
+        recipientId: activeDMUser,
+        recipientName: friend?.name || "",
+      })
+      setMessageInput("")
+      setSelectedFiles([])
+      setActiveDraftId(null)
+    }
+  }
+
+  const saveHomeDraft = async () => {
+    const text = homeDMInput.trim()
+    if (!text || !currentUser || !homeActiveDMUser) return
+    const friend = friends.find(item => String(item.id) === String(homeActiveDMUser))
+    await persistDraft({
+      text,
+      chatId: getDMChatId(homeActiveDMUser),
+      chatType: "dm",
+      chatName: friend?.name || "Direct message",
+      recipientId: homeActiveDMUser,
+      recipientName: friend?.name || "",
+    })
+    setHomeDMInput("")
+    setActiveDraftId(null)
+  }
+
+  const openDraft = async draft => {
+    if (!draft) return
+    setActiveDraftId(draft.id)
+
+    if (draft.chatType === "channel" && draft.channelId) {
+      setActiveSpace(draft.spaceId || activeSpace)
+      setActiveChannel(draft.channelId)
+      setActiveView("channel")
+      setMessageInput(draft.text || "")
+      return
+    }
+
+    if (draft.recipientId) {
+      setMessageInput(draft.text || "")
+      setHomeDMInput(draft.text || "")
+      await openHomeDM(draft.recipientId, { clearDraft: false })
+    }
+  }
+
+  const sendHomeDM = async () => {
+    const text = homeDMInput.trim()
+    const chatId = getDMChatId(homeActiveDMUser)
+    if (!text || !chatId || !currentUser || homeDMSending) return
+
+    const message = {
+      id: `home-dm-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      userId: currentUser.id,
+      text,
+      timestamp: new Date().toISOString(),
+      reactions: {},
+      thread: [],
+      attachments: [],
+      status: "sent",
+      optimistic: false,
+    }
+
+    setHomeDMSending(true)
+    setMessages(prev => ({ ...prev, [chatId]: [...(prev[chatId] || []), message] }))
+    setHomeDMInput("")
+
+    try {
+      await Storage.saveMessage(chatId, message)
+      if (activeDraftId) await deleteDraftById(activeDraftId)
+    } catch (error) {
+      console.error("Failed to send home DM", error)
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).filter(item => String(item.id) !== String(message.id)),
+      }))
+    } finally {
+      setHomeDMSending(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeView === "home" && homeSection === "dm" && homeActiveDMUser) {
+      loadDMMessagesForUser(homeActiveDMUser)
+    }
+  }, [activeView, homeSection, homeActiveDMUser])
+
   // Reactions / Emoji helpers
   const EMOJIS = ['👍','❤️','😂','😮','😢','🎉','🔥']
   const longPressTimerRef = useRef(null)
@@ -3513,6 +3836,33 @@ export default function CollaborationApp() {
     () => (activeChatId ? messages[activeChatId] || [] : []),
     [messages, activeChatId]
   )
+
+  useEffect(() => {
+    const normalizedActiveChatId = activeChatId ? String(activeChatId) : null
+    const previousActiveChatId = previousActiveChatIdRef.current
+
+    if (!normalizedActiveChatId) {
+      previousActiveChatIdRef.current = null
+      return
+    }
+
+    if (previousActiveChatId !== normalizedActiveChatId) {
+      justSwitchedThreadRef.current = true
+      restoreMessageScrollRef.current = false
+      pendingTabScrollRestoreRef.current = null
+      previousChannelTabRef.current = "messages"
+      prevScrollHeightRef.current = 0
+      setIsAtBottom(true)
+      setVisibleDateLabel("Today")
+      setTargetMessageId(null)
+      setPinnedMessageId(null)
+      if (activeChannelTab !== "messages") {
+        setActiveChannelTab("messages")
+      }
+    }
+
+    previousActiveChatIdRef.current = normalizedActiveChatId
+  }, [activeChatId, activeChannelTab])
 
   useEffect(() => {
     cancelEditingMessage()
@@ -4698,6 +5048,9 @@ export default function CollaborationApp() {
     setSelectedFiles([])
     setSelectedComposerContextId(null)
     setComposerContextPickerOpen(false)
+    if (activeDraftId) {
+      deleteDraftById(activeDraftId)
+    }
 
     if (selectedContextIds.length > 0) {
       const activityTimestamp = newMsg.timestamp
@@ -7580,6 +7933,52 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {activeView === "home" ? (
+        <HomeHub
+          currentUser={currentUser}
+          friends={friends}
+          drafts={drafts}
+          tasks={tasksList || []}
+          files={homeFiles}
+          pendingRequests={pendingFriendRequests}
+          section={homeSection}
+          activeDMUser={homeActiveDMUser}
+          dmMessages={homeDMMessages}
+          dmInput={homeDMInput}
+          dmSending={homeDMSending}
+          renderAvatar={renderAvatar}
+          onSectionChange={handleHomeSectionChange}
+          onOpenWorkspace={openWorkspaceHome}
+          onOpenDirectMessages={openWorkspaceFriendsHome}
+          onOpenDM={openHomeDM}
+          onOpenAddConnection={() => {
+            setInviteSearchQuery("")
+            setSelectedFriendInvitees([])
+            setShowAddFriendModal(true)
+          }}
+          onOpenTask={openTaskDetailView}
+          onOpenDraft={openDraft}
+          onDeleteDraft={deleteDraftById}
+          onSendDM={sendHomeDM}
+          onSaveDraft={saveHomeDraft}
+          onAcceptRequest={notificationId => handleNotificationAction(notificationId, "friend_request")}
+          onRejectRequest={notificationId => handleRejectNotification(notificationId, "friend_request")}
+          onOpenFile={openHomeFile}
+          onOpenDocumentsHub={handleDocsClick}
+          onOpenNotifications={() => setShowNotificationsModal(true)}
+          onOpenProfile={() => {
+            setAvatarPreview(currentUser?.avatar_url || null)
+            setShowProfileModal(true)
+          }}
+          setDmInput={setHomeDMInput}
+          isDarkMode={isDarkMode}
+          isMobile={isMobile}
+          apiBase={API_BASE}
+          resolveProtectedFileUrl={fetchProtectedUrlAndCreateObjectURL}
+          onThemeChange={setIsDarkMode}
+        />
+      ) : (
+        <>
       {/* Mobile Sidebar Overlay */}
       {isMobile && (mobileView === "spaces" || mobileView === "friends") && (
         <div 
@@ -7591,8 +7990,8 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          sidebarCollapsed ? "w-20" : "w-80"
-        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-y-0 left-0 w-[85%] max-w-[320px] mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
+          isMobile ? "" : sidebarCollapsed ? "w-20" : "w-80"
+        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "spaces" && (
@@ -7622,6 +8021,15 @@ export default function CollaborationApp() {
             </div>
           )}
           <div className="flex gap-2 ml-auto">
+            {isMobile && (
+              <button
+                onClick={() => { setActiveView("home"); setHomeSection("overview"); setMobileView("chat") }}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                title="Home"
+              >
+                <HomeIcon className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+              </button>
+            )}
             {isMobile && (
               <button
                 onClick={() => { setActiveView('tasks'); setActiveSpace(null); setMobileView('chat') }}
@@ -7654,6 +8062,15 @@ export default function CollaborationApp() {
                 className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
               >
                 <Plus className="w-5 h-5" />
+              </button>
+            )}
+            {!sidebarCollapsed && !isMobile && (
+              <button
+                onClick={() => { setActiveView("home"); setHomeSection("overview") }}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                title="Home"
+              >
+                <HomeIcon className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {!sidebarCollapsed && !isMobile && (
@@ -7872,10 +8289,10 @@ export default function CollaborationApp() {
                             activeView === "channel" && activeSpace === space.id
                               ? (isDarkMode
                                   ? "bg-[#2C2C2C] border border-slate-700/70 text-white"
-                                  : "bg-[#f1f0ef] border border-slate-200/80 text-slate-900")
+                              : "bg-[#f4f7fb] border border-slate-200/80 text-slate-900")
                               : (isDarkMode
                                   ? "bg-transparent border border-transparent hover:bg-[#2C2C2C] hover:border-slate-700/60"
-                                  : "bg-transparent border border-transparent hover:bg-[#f1f0ef] hover:border-slate-200/70")
+                                  : "bg-transparent border border-transparent hover:bg-[#f4f7fb] hover:border-slate-200/70")
                           }`}
                         onClick={() => {
                           setActiveSpace(space.id)
@@ -7883,6 +8300,15 @@ export default function CollaborationApp() {
                           toggleSpaceExpansion(space.id)
                         }}
                       >
+                        <span
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                            activeSpace === space.id
+                              ? (isDarkMode ? "bg-[#3A3A3A] text-white" : "bg-white text-slate-700")
+                              : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
+                          }`}
+                        >
+                          <Briefcase className="w-4 h-4" />
+                        </span>
                         <span
                           className={`font-semibold text-sm truncate flex-1 transition-colors ${
                             activeSpace === space.id
@@ -7956,10 +8382,10 @@ export default function CollaborationApp() {
                                   activeChannel === channel.id
                                     ? (isDarkMode
                                         ? "bg-[#2C2C2C] text-slate-200"
-                                        : "bg-[#eeedec] text-slate-700 shadow-sm")
+                                        : "bg-[#f4f7fb] text-slate-700 shadow-sm")
                                     : (isDarkMode
                                         ? "text-slate-400 hover:text-slate-200 hover:bg-[#2C2C2C] hover:shadow-sm"
-                                        : "text-slate-500 hover:text-slate-800 hover:bg-[#f1f0ef] hover:shadow-sm")
+                                        : "text-slate-500 hover:text-slate-800 hover:bg-[#f4f7fb] hover:shadow-sm")
                                 }`} 
                               >
                                 <Hash
@@ -8059,8 +8485,8 @@ export default function CollaborationApp() {
                     key={s.id}
                     className={`w-11 h-11 flex items-center justify-center rounded-[10px] transition-all duration-300 relative ${
                       activeSpace === s.id || isMenuOpen
-                        ? (isDarkMode ? 'bg-transparent' : 'bg-sky-50')
-                        : (isDarkMode ? 'hover:bg-[#2C2C2C]' : 'hover:bg-[#f1f0ef]')
+                        ? (isDarkMode ? 'bg-transparent' : 'bg-[#f4f7fb]')
+                        : (isDarkMode ? 'hover:bg-[#2C2C2C]' : 'hover:bg-[#f4f7fb]')
                     }`}
                     title={s.name}
                     onClick={event => {
@@ -8094,7 +8520,7 @@ export default function CollaborationApp() {
       {/* ... (Main Content, Headers, etc.) ... */}
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 relative ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 relative ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
         {/* VIEW: VIDEO MEETING / CALENDAR (No changes needed) ... */}
         {activeView === "meeting" ? (
           <div className="flex-1 flex flex-col relative bg-slate-900">
@@ -9115,7 +9541,7 @@ export default function CollaborationApp() {
 
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
-            <div className={`flex-1 flex overflow-hidden liquid-glass-chat-area relative ${isMobile ? 'mt-[70px]' : ''}`}>
+            <div className={`flex-1 flex min-h-0 overflow-hidden liquid-glass-chat-area relative ${isMobile ? 'mt-[70px]' : ''}`}>
               <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
                 {activeView === "channel" && (
                   <ChannelTabs
@@ -9991,20 +10417,34 @@ export default function CollaborationApp() {
                         style={{ minHeight: "48px" }}
                       />
 
-                      <button  
-  onClick={sendMessage}
-  disabled={
-    (!messageInput.trim() && selectedFiles.length === 0) ||
-    isUploading
-  }
-  className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
-    isDarkMode
-      ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
-      : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
-  } disabled:opacity-70 hover:scale-105`}
->
-  <Send className="w-5 h-5 ml-0.5" />
-</button>
+                      {(activeView === "channel" || activeView === "dm") && (
+                        <button
+                          onClick={saveWorkspaceDraft}
+                          disabled={!messageInput.trim()}
+                          className={`mb-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition-all duration-300 ${
+                            isDarkMode
+                              ? 'border-slate-700 text-slate-300 hover:bg-slate-800 disabled:text-slate-500'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:text-slate-400'
+                          } disabled:cursor-not-allowed disabled:opacity-70`}
+                        >
+                          Save draft
+                        </button>
+                      )}
+
+                      <button
+                        onClick={sendMessage}
+                        disabled={
+                          (!messageInput.trim() && selectedFiles.length === 0) ||
+                          isUploading
+                        }
+                        className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
+                          isDarkMode
+                            ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
+                            : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
+                        } disabled:opacity-70 hover:scale-105`}
+                      >
+                        <Send className="w-5 h-5 ml-0.5" />
+                      </button>
                     </div>
                   </div>
                   <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -10295,7 +10735,7 @@ export default function CollaborationApp() {
         )}
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-y-0 right-0 w-[85%] max-w-[320px] mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${isMobile ? "" : friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "friends" && (
           <div className="swipe-indicator mt-2" />
@@ -10550,6 +10990,8 @@ export default function CollaborationApp() {
           )}
         </div>
       </div>
+      </>
+      )}
 
       {/* --- MODALS --- */}
 
@@ -10905,7 +11347,12 @@ export default function CollaborationApp() {
         }`}>
           <div className="flex items-center justify-around h-16 px-2">
             <button
-              onClick={() => setMobileView("spaces")}
+              onClick={() => {
+                if (activeView === "home") {
+                  openWorkspaceHome()
+                }
+                setMobileView("spaces")
+              }}
               className={`mobile-nav-item ${mobileView === "spaces" ? "active" : ""} ${
                 mobileView === "spaces"
                   ? isDarkMode ? "text-sky-400" : "text-sky-600"
@@ -10931,7 +11378,12 @@ export default function CollaborationApp() {
               <span className="text-[10px] font-semibold">Chat</span>
             </button>
             <button
-              onClick={() => setMobileView("friends")}
+              onClick={() => {
+                if (activeView === "home") {
+                  openWorkspaceFriendsHome()
+                }
+                setMobileView("friends")
+              }}
               className={`mobile-nav-item ${mobileView === "friends" ? "active" : ""} ${
                 mobileView === "friends"
                   ? isDarkMode ? "text-sky-400" : "text-sky-600"
@@ -12543,4 +12995,3 @@ export default function CollaborationApp() {
     </div>
   )
 }
-

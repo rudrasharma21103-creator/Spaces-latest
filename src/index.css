@@ -3731,8 +3731,8 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   position: fixed;
   top: 0;
   bottom: 0;
-  width: 85%;
-  max-width: 320px;
+  width: 100vw;
+  max-width: 100vw;
   z-index: 45;
   overflow-y: auto;
   overflow-x: hidden;
@@ -4829,8 +4829,8 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
     bottom: 0 !important;
     z-index: 60 !important;
     background: #ffffff !important;
-    width: 85% !important;
-    max-width: 320px !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
     transform: translateX(0) !important;
   }
 
@@ -4878,8 +4878,9 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   .mobile-slide-in-left,
   .mobile-slide-in-right,
   .fixed.top-0.right-0.bottom-0.w-\[280px\] {
-    border-radius: 0.75rem !important;
-    max-width: 92% !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    border-radius: 0 !important;
     box-shadow: 0 20px 40px rgba(0,0,0,0.22) !important;
     overflow: hidden !important;
   }
@@ -6186,8 +6187,8 @@ body.dark .liquid-glass-navbar {
    ============================================ */
 
 :root {
-  --app-ui-scale: 0.9;
-  --app-ui-vh: calc(100vh / var(--app-ui-scale));
+  --app-ui-scale: 1;
+  --app-ui-vh: 100dvh;
 }
 
 html,
@@ -6203,9 +6204,9 @@ body {
 }
 
 #root {
-  transform: scale(var(--app-ui-scale));
+  transform: none;
   transform-origin: top left;
-  width: calc(100% / var(--app-ui-scale));
+  width: 100%;
   height: var(--app-ui-vh);
   min-height: var(--app-ui-vh);
 }
@@ -6217,6 +6218,13 @@ body {
 
 .min-h-screen {
   min-height: var(--app-ui-vh) !important;
+}
+
+@media (max-width: 1024px) {
+  #root {
+    height: auto;
+    min-height: 100dvh;
+  }
 }
 
 /* ============================================
@@ -6469,7 +6477,7 @@ body.dark .liquid-glass-navbar button[title="Add people"]:not(:disabled):hover {
 /* Light theme navbar background */
 html:not(.dark) .liquid-glass-navbar,
 body:not(.dark) .liquid-glass-navbar {
-  background: #f8fafd !important;
+  background: #ffffff !important;
 }
 
 /* Dark theme navbar background */
@@ -6510,8 +6518,24 @@ body.dark .liquid-glass-navbar {
 
 /* Light theme sidebars */
 html:not(.dark) .liquid-glass-sidebar,
-html:not(.dark) .liquid-glass-sidebar-right {
-  background: #f9f8f7 !important;
+body:not(.dark) .liquid-glass-sidebar {
+  background: #f6f8fc !important;
+}
+
+html:not(.dark) .liquid-glass-navbar::before,
+html:not(.dark) .liquid-glass-navbar::after,
+body:not(.dark) .liquid-glass-navbar::before,
+body:not(.dark) .liquid-glass-navbar::after {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .liquid-glass-sidebar::before,
+html:not(.dark) .liquid-glass-sidebar::after,
+body:not(.dark) .liquid-glass-sidebar::before,
+body:not(.dark) .liquid-glass-sidebar::after {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Dark theme navbar + sidebars background */
@@ -6523,4 +6547,3 @@ body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
 }
-
