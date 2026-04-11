@@ -298,69 +298,171 @@ export default function HomeHub({
     )
   }
 
+  const openTaskCount = filteredTasks.filter(task => task.status !== "completed").length
+
   const mobileHomeNavItems = [
-    { key: "overview", label: "Home", icon: BriefcaseBusiness, action: () => onSectionChange("overview") },
-    { key: "dm", label: "Direct messages", icon: MessageCircle, action: onOpenDirectMessages },
-    ...navItems,
+    {
+      key: "overview",
+      label: "Home",
+      description: "Daily overview and activity pulse",
+      badge: "Live",
+      icon: BriefcaseBusiness,
+      action: () => onSectionChange("overview"),
+    },
+    {
+      key: "workspaces",
+      label: "Workspaces",
+      description: "Jump back into your active spaces",
+      badge: "Open",
+      icon: BriefcaseBusiness,
+      action: onOpenWorkspace,
+    },
+    {
+      key: "connect",
+      label: "Connect",
+      description: friends.length ? `${friends.length} connection${friends.length === 1 ? "" : "s"} ready` : "Start building your network",
+      badge: friends.length ? String(friends.length) : "Add",
+      icon: UserPlus,
+      action: () => onSectionChange("connect"),
+    },
+    {
+      key: "drafts",
+      label: "Drafts",
+      description: filteredDrafts.length ? `${filteredDrafts.length} saved message${filteredDrafts.length === 1 ? "" : "s"}` : "No saved drafts right now",
+      badge: filteredDrafts.length ? String(filteredDrafts.length) : "Clear",
+      icon: FileText,
+      action: () => onSectionChange("drafts"),
+    },
+    {
+      key: "files",
+      label: "Files",
+      description: filteredFiles.length ? `${filteredFiles.length} recent file${filteredFiles.length === 1 ? "" : "s"} surfaced` : "Shared files appear here",
+      badge: filteredFiles.length ? String(filteredFiles.length) : "Quiet",
+      icon: FileText,
+      action: () => onSectionChange("files"),
+    },
+    {
+      key: "tasks",
+      label: "Tasks",
+      description: openTaskCount ? `${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} to move forward` : "You're caught up for now",
+      badge: openTaskCount ? String(openTaskCount) : "Done",
+      icon: ClipboardList,
+      action: () => onSectionChange("tasks"),
+    },
   ]
 
-  const renderMobileHomeNav = () => (
-    <div className={cx("border-b px-4 py-3 sm:px-5", ui.border)}>
-      <button onClick={() => onSectionChange("overview")} className="flex w-full min-w-0 items-center gap-3 text-left">
-        <div className={cx("flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-[0_10px_20px_rgba(17,24,39,0.14)]", isDarkMode ? "bg-gradient-to-br from-sky-500 to-cyan-500" : "bg-[#111827]")}>
-          <BriefcaseBusiness className="h-5 w-5" />
-        </div>
-        <div>
-          <div className={cx("text-[17px] font-semibold", ui.textPrimary)}>Spacess</div>
-          <div className={cx("text-sm", ui.textMuted)}>Home</div>
-        </div>
-      </button>
+  const renderThoughtsCard = (className = "") => (
+    <div className={cx("flex flex-col rounded-[24px] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : cx("bg-gradient-to-br text-[#111827]", thought.accent), className)}>
+      <div className={cx("text-xs font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-[#3f3f46]/65")}>Thoughts</div>
+      <h3 className="mt-3 text-[1.8rem] font-semibold leading-tight">{thought.title}</h3>
+      <p className={cx("mt-3 text-sm leading-7", isDarkMode ? "text-slate-300" : "text-[#27272a]/78")}>{thought.body}</p>
+      <div className={cx("mt-6 rounded-[18px] px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/55 text-[#3f3f46]/70", className && "mt-auto")}>Refreshes once every 24 hours</div>
+    </div>
+  )
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        {mobileHomeNavItems.map(item => {
-          const Icon = item.icon
-          const isActive = (item.key === "overview" && section === "overview") || (item.key !== "overview" && item.key !== "workspaces" && section === item.key)
-          return (
-            <button
-              key={item.key}
-              onClick={item.action}
-              className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3.5 py-2.5 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}
-            >
-              <Icon className="h-4.5 w-4.5 shrink-0" />
-              <span className="truncate">{item.label}</span>
+  const renderMobileOverviewHero = () => (
+    <div className={cx("relative overflow-hidden rounded-[30px] border p-5 shadow-[0_18px_40px_rgba(15,23,42,0.10)]", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#e8eef5] bg-white")}>
+      <div className={cx("pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full blur-3xl", isDarkMode ? "bg-sky-500/20" : "bg-sky-200/70")} />
+      <div className={cx("pointer-events-none absolute -left-8 bottom-0 h-24 w-24 rounded-full blur-3xl", isDarkMode ? "bg-amber-400/10" : "bg-amber-100/90")} />
+
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={cx("inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-[#f3f7fb] text-[#607085]")}>Home Hub</div>
+            <div className={cx("mt-3 text-[1.9rem] font-semibold leading-tight tracking-[-0.04em]", ui.textPrimary)}>{getGreeting(currentUser?.name)}</div>
+            <p className={cx("mt-2 max-w-[28rem] text-sm leading-6", ui.textMuted)}>Stay up to date with your team, files, and conversations.</p>
+          </div>
+
+          <button onClick={onOpenProfile} className={cx("flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border shadow-sm", isDarkMode ? "border-white/10 bg-white/[0.05]" : "border-[#e6edf4] bg-[#f8fbff]")} title="Open profile">
+            {currentUser ? renderAvatar(currentUser, 40) : null}
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <div className="relative">
+            <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
+            <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-12 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <div className={cx("inline-flex min-w-0 flex-1 rounded-[22px] border p-1", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-[#f8fbff]")}>
+            <button onClick={() => onThemeChange(false)} className={cx("inline-flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition", !isDarkMode ? "bg-[#111827] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]" : ui.textSecondary)}>
+              <Sun className="h-4 w-4" />
+              Light
             </button>
-          )
-        })}
+            <button onClick={() => onThemeChange(true)} className={cx("inline-flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition", isDarkMode ? "bg-white text-slate-900 shadow-[0_12px_24px_rgba(15,23,42,0.18)]" : ui.textSecondary)}>
+              <Moon className="h-4 w-4" />
+              Dark
+            </button>
+          </div>
+
+          <button onClick={onOpenNotifications} className={cx("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition", ui.iconButton)} title="Notifications">
+            <Bell className="h-4.5 w-4.5" />
+          </button>
+          <button onClick={onOpenProfile} className={cx("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition", ui.iconButton)} title="Profile settings">
+            <Settings className="h-4.5 w-4.5" />
+          </button>
+        </div>
       </div>
+    </div>
+  )
 
-      {section === "overview" && friends.length > 0 && (
-        <div className={cx("mt-3 rounded-[22px] border p-3.5", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
-            <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {friends.slice(0, 6).map(friend => (
-              <button
-                key={friend.id}
-                onClick={() => onOpenDM(friend.id)}
-                className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition", isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-white")}
-              >
-                <div className="relative">
-                  <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
-                  <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className={cx("truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</div>
-                  <div className={cx("mt-0.5 truncate text-xs", ui.textMuted)}>{friend.status === "online" ? "Online now" : "Open chat"}</div>
-                </div>
-              </button>
-            ))}
-          </div>
+  const renderMobileHomeNav = () => (
+    <div className="grid grid-cols-2 gap-3">
+      {mobileHomeNavItems.map(item => {
+        const Icon = item.icon
+        const isActive = (item.key === "overview" && section === "overview") || (item.key !== "overview" && item.key !== "workspaces" && section === item.key)
+        return (
+          <button
+            key={item.key}
+            onClick={item.action}
+            className={cx(
+              "group rounded-[24px] border p-4 text-left transition",
+              isActive
+                ? isDarkMode
+                  ? "border-white/10 bg-white text-slate-900 shadow-[0_16px_30px_rgba(15,23,42,0.20)]"
+                  : "border-[#111827] bg-[#111827] text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)]"
+                : isDarkMode
+                  ? "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]"
+                  : "border-[#e7edf4] bg-white shadow-[0_10px_26px_rgba(15,23,42,0.06)] hover:border-[#dbe5ef] hover:bg-[#fcfdff]"
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className={cx("flex h-11 w-11 items-center justify-center rounded-2xl", isActive ? (isDarkMode ? "bg-slate-900 text-white" : "bg-white/12 text-white") : (isDarkMode ? "bg-white/[0.08] text-slate-100" : "bg-[#f4f7fb] text-[#334155]"))}>
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className={cx("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold", isActive ? (isDarkMode ? "bg-slate-900/10 text-slate-700" : "bg-white/12 text-white/85") : ui.badge)}>
+                {item.badge}
+              </span>
+            </div>
+
+            <div className={cx("mt-5 text-[15px] font-semibold", isActive ? (isDarkMode ? "text-slate-900" : "text-white") : ui.textPrimary)}>{item.label}</div>
+            <div className={cx("mt-1 text-xs leading-5", isActive ? (isDarkMode ? "text-slate-600" : "text-white/72") : ui.textMuted)}>{item.description}</div>
+            <div className={cx("mt-4 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em]", isActive ? (isDarkMode ? "text-slate-500" : "text-white/70") : ui.textSoft)}>
+              Open
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  const renderMobileThoughtsCard = () => (
+    <div className={cx("relative flex-1 overflow-hidden rounded-[30px] border p-5 shadow-[0_18px_40px_rgba(15,23,42,0.10)]", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#e8eef5] bg-white")}>
+      <div className={cx("pointer-events-none absolute inset-0", isDarkMode ? "bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.16),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.12),transparent_35%)]" : "bg-[linear-gradient(155deg,rgba(255,244,230,0.9)_0%,rgba(236,248,255,0.92)_48%,rgba(228,245,238,0.95)_100%)]")} />
+      <div className={cx("pointer-events-none absolute -right-10 bottom-[-20%] h-44 w-44 rounded-full", isDarkMode ? "bg-sky-500/10 blur-3xl" : "bg-sky-200/60 blur-2xl")} />
+
+      <div className="relative flex min-h-[280px] flex-col">
+        <div className={cx("inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/70 text-[#607085]")}>Thought Of The Day</div>
+        <h3 className={cx("mt-5 max-w-[12ch] text-[2rem] font-semibold leading-[1.05] tracking-[-0.05em]", ui.textPrimary)}>{thought.title}</h3>
+        <p className={cx("mt-4 max-w-[28ch] text-[15px] leading-7", isDarkMode ? "text-slate-300" : "text-[#334155]")}>{thought.body}</p>
+
+        <div className={cx("mt-auto inline-flex w-fit rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/75 text-[#64748b] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]")}>
+          Refreshes Once Every 24 Hours
         </div>
-      )}
+      </div>
     </div>
   )
 
@@ -381,7 +483,15 @@ export default function HomeHub({
   )
 
   const renderOverview = () => (
-    <div className="space-y-4">
+    <div className={cx("space-y-4", isMobile && "flex min-h-full flex-col")}>
+      {isMobile ? (
+        <>
+          {renderMobileOverviewHero()}
+          {renderMobileHomeNav()}
+          {renderMobileThoughtsCard()}
+        </>
+      ) : (
+        <>
       <ShellCard className={cx("p-4", overviewWidgetClass)}>
         <div className="flex items-center gap-3 overflow-x-auto pb-1.5 pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
@@ -460,12 +570,7 @@ export default function HomeHub({
         </div>
 
         <div className="space-y-4 xl:col-span-4">
-          <div className={cx("rounded-[24px] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : cx("bg-gradient-to-br text-[#111827]", thought.accent))}>
-            <div className={cx("text-xs font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-[#3f3f46]/65")}>Thoughts</div>
-            <h3 className="mt-3 text-[1.8rem] font-semibold leading-tight">{thought.title}</h3>
-            <p className={cx("mt-3 text-sm leading-7", isDarkMode ? "text-slate-300" : "text-[#27272a]/78")}>{thought.body}</p>
-            <div className={cx("mt-6 rounded-[18px] px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/55 text-[#3f3f46]/70")}>Refreshes once every 24 hours</div>
-          </div>
+          {renderThoughtsCard()}
 
           <ShellCard className={overviewWidgetClass}>
             <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -521,6 +626,8 @@ export default function HomeHub({
           </ShellCard>
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 
@@ -959,7 +1066,6 @@ export default function HomeHub({
 
         <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#0d0001]" : "bg-[#f6f8fc]")}>
           <div className="flex min-h-0 flex-1 flex-col">
-            {isMobile && section === "overview" && renderMobileHomeNav()}
             {isMobile && section !== "overview" && section !== "dm" && renderMobileSectionNav()}
             {isMobile && section === "dm" && (
               <div className={cx("border-b px-4 py-2.5 sm:px-5", ui.border)}>
@@ -988,70 +1094,72 @@ export default function HomeHub({
                 </div>
               </div>
             )}
-            <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-6 lg:py-4", ui.border)}>
-              <div className={cx("flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between", section === "dm" && "mx-auto w-full max-w-[1400px]")}>
-                <div className="min-w-0">
-                  <div className={cx("text-[24px] font-semibold tracking-[-0.03em] sm:text-[28px]", ui.textPrimary)}>
-                    {section === "overview" ? getGreeting(currentUser?.name) : sectionTitles[section] || "Home"}
-                  </div>
-                  <div className={cx("mt-1 text-sm sm:text-base", ui.textMuted)}>
-                    {section === "overview"
-                      ? "Stay up to date with your team, files, and conversations."
-                      : section === "dm"
-                        ? "Reply without leaving your Home dashboard."
-                        : "Everything here stays connected to the existing workspace experience."}
-                  </div>
-                </div>
-
-                <div
-                  className={cx(
-                    "flex w-full flex-col gap-3",
-                    section === "dm" ? "lg:max-w-[520px] xl:w-full xl:max-w-[520px]" : "lg:max-w-[680px] xl:w-auto xl:min-w-[540px]"
-                  )}
-                >
-                  <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-end">
-                    <div className={cx("relative w-full", section === "dm" ? "md:max-w-[260px]" : "md:max-w-[300px]")}>
-                      <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
-                      <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-10 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
+            {!(isMobile && section === "overview") && (
+              <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-6 lg:py-4", ui.border)}>
+                <div className={cx("flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between", section === "dm" && "mx-auto w-full max-w-[1400px]")}>
+                  <div className="min-w-0">
+                    <div className={cx("text-[24px] font-semibold tracking-[-0.03em] sm:text-[28px]", ui.textPrimary)}>
+                      {section === "overview" ? getGreeting(currentUser?.name) : sectionTitles[section] || "Home"}
                     </div>
+                    <div className={cx("mt-1 text-sm sm:text-base", ui.textMuted)}>
+                      {section === "overview"
+                        ? "Stay up to date with your team, files, and conversations."
+                        : section === "dm"
+                          ? "Reply without leaving your Home dashboard."
+                          : "Everything here stays connected to the existing workspace experience."}
+                    </div>
+                  </div>
 
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:flex-nowrap">
-                      <div className={cx("inline-flex w-full justify-center rounded-full border p-1 sm:w-auto", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")}>
-                        <button onClick={() => onThemeChange(false)} className={cx("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition", !isDarkMode ? "bg-[#111827] text-white" : ui.textSecondary)}>
-                          <Sun className="h-4 w-4" />
-                          Light
-                        </button>
-                        <button onClick={() => onThemeChange(true)} className={cx("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition", isDarkMode ? "bg-white text-slate-900" : ui.textSecondary)}>
-                          <Moon className="h-4 w-4" />
-                          Dark
-                        </button>
+                  <div
+                    className={cx(
+                      "flex w-full flex-col gap-3",
+                      section === "dm" ? "lg:max-w-[520px] xl:w-full xl:max-w-[520px]" : "lg:max-w-[680px] xl:w-auto xl:min-w-[540px]"
+                    )}
+                  >
+                    <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-end">
+                      <div className={cx("relative w-full", section === "dm" ? "md:max-w-[260px]" : "md:max-w-[300px]")}>
+                        <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
+                        <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-10 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
                       </div>
 
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={onOpenNotifications} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Notifications">
-                          <Bell className="h-4.5 w-4.5" />
-                        </button>
-                        <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Profile settings">
-                          <Settings className="h-4.5 w-4.5" />
-                        </button>
-                        <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")} title="Open profile">
-                          {currentUser ? renderAvatar(currentUser, 36) : null}
-                        </button>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:flex-nowrap">
+                        <div className={cx("inline-flex w-full justify-center rounded-full border p-1 sm:w-auto", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")}>
+                          <button onClick={() => onThemeChange(false)} className={cx("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition", !isDarkMode ? "bg-[#111827] text-white" : ui.textSecondary)}>
+                            <Sun className="h-4 w-4" />
+                            Light
+                          </button>
+                          <button onClick={() => onThemeChange(true)} className={cx("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition", isDarkMode ? "bg-white text-slate-900" : ui.textSecondary)}>
+                            <Moon className="h-4 w-4" />
+                            Dark
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={onOpenNotifications} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Notifications">
+                            <Bell className="h-4.5 w-4.5" />
+                          </button>
+                          <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Profile settings">
+                            <Settings className="h-4.5 w-4.5" />
+                          </button>
+                          <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")} title="Open profile">
+                            {currentUser ? renderAvatar(currentUser, 36) : null}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
             <div
               className={cx(
                 "flex-1 min-w-0 px-4 py-3.5 sm:px-5 lg:px-6",
-                isMobile ? "pb-28" : "",
+                isMobile ? "pb-24" : "",
                 section === "dm"
                   ? "flex min-h-0 lg:overflow-hidden"
                   : section === "overview"
-                    ? "pb-6 lg:py-5 lg:overflow-y-auto"
+                    ? "flex pt-4 lg:py-5 lg:overflow-y-auto"
                   : "pb-6 lg:py-5 lg:overflow-y-auto"
               )}
             >
