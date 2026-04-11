@@ -7990,7 +7990,7 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          isMobile ? "" : sidebarCollapsed ? "w-20" : "w-80"
+          isMobile ? "" : sidebarCollapsed ? "w-20" : "w-72"
         } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
@@ -7998,7 +7998,7 @@ export default function CollaborationApp() {
           <div className="swipe-indicator mt-2" />
         )}
         {/* ... (Sidebar Content) ... */}
-        <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
+        <div className={`px-5 ${isMobile ? 'pt-4 pb-4 h-[72px]' : 'py-4 h-[72px]'} flex items-center justify-between border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           {(!sidebarCollapsed || isMobile) && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -8112,15 +8112,15 @@ export default function CollaborationApp() {
         </div>
 
         {(!sidebarCollapsed || isMobile) && (
-          <div className="px-5 pt-6 pb-2 animate-fade-in">
+          <div className="px-4 pt-4 pb-2 animate-fade-in">
             <div className="relative group">
-              <Search className="absolute left-4 top-3.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
+              <Search className="absolute left-3.5 top-3 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
               <input
                 type="text"
                 placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
+                className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
                   isDarkMode
                     ? 'bg-slate-800/60 border border-slate-700/50 focus:bg-slate-800 focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500/50 text-slate-200 hover:bg-slate-800/80 placeholder:text-slate-500'
                     : 'bg-slate-100/60 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/25 focus:border-sky-300 text-slate-700 hover:bg-slate-100/80 hover:border-slate-200 placeholder:text-slate-400 shadow-sm'
@@ -8130,12 +8130,12 @@ export default function CollaborationApp() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-6">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3.5 space-y-5">
           {(!sidebarCollapsed || isMobile) ? (
             <div className="animate-fade-in">
               {/* Conditional Rendering: Show Search Results or Standard Tree */}
               {debouncedSearchQuery.trim().length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div className="px-2 mb-1 flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       Search Results
@@ -8145,7 +8145,7 @@ export default function CollaborationApp() {
                     </span>
                   </div>
                   {spaceSearchResults.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500 text-xs font-medium">
+                    <div className="text-center py-6 text-slate-500 text-xs font-medium">
                       No results found
                     </div>
                   ) : (
@@ -8202,7 +8202,7 @@ export default function CollaborationApp() {
                             setActiveSpace(result.spaceId)
                           }
                         }}
-                        className="p-3 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
+                        className="p-2.5 rounded-xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
                       >
                         <div className="flex items-center gap-3 mb-1">
                           <span
@@ -8235,7 +8235,7 @@ export default function CollaborationApp() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   <button
                     onClick={() => {
                       if (!googleCalendarToken) {
@@ -8245,7 +8245,7 @@ export default function CollaborationApp() {
                         setActiveSpace(null)
                       }
                     }}
-                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-300 mb-4 group hover-lift ${
                       activeView === "calendar"
                         ? (isDarkMode
                             ? "bg-transparent border border-transparent text-slate-200"
@@ -8256,7 +8256,7 @@ export default function CollaborationApp() {
                     }`}
                   >
                     <div
-                      className={`p-2.5 rounded-xl transition-all duration-300 ${
+                        className={`p-2.5 rounded-xl transition-all duration-300 ${
                         activeView === "calendar"
                           ? (isDarkMode
                               ? "bg-[#2C2C2C] text-slate-200"
@@ -8273,7 +8273,7 @@ export default function CollaborationApp() {
                     </span>
                   </button>
 
-                  <div className="px-2 mb-3 flex items-center justify-between">
+                  <div className="px-2 mb-2 flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       Your Spaces
                     </span>
@@ -8283,9 +8283,9 @@ export default function CollaborationApp() {
                   </div>
 
                   {spaces.map(space => (
-                    <div key={space.id} className="mb-2">
+                    <div key={space.id} className="mb-1.5">
                       <div
-                        className={`flex items-center gap-2 p-3 rounded-[10px] cursor-pointer transition-colors duration-200 group ${
+                        className={`flex items-center gap-2 p-2.5 rounded-[10px] cursor-pointer transition-colors duration-200 group ${
                             activeView === "channel" && activeSpace === space.id
                               ? (isDarkMode
                                   ? "bg-[#2C2C2C] border border-slate-700/70 text-white"
@@ -8301,7 +8301,7 @@ export default function CollaborationApp() {
                         }}
                       >
                         <span
-                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
                             activeSpace === space.id
                               ? (isDarkMode ? "bg-[#3A3A3A] text-white" : "bg-white text-slate-700")
                               : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
@@ -8354,7 +8354,7 @@ export default function CollaborationApp() {
                       </div>
 
                       {space.expanded && (
-                        <div className="ml-6 pl-4 border-l-2 mt-2 space-y-1 border-slate-100">
+                        <div className="ml-5 pl-3 border-l-2 mt-1.5 space-y-0.5 border-slate-100">
                           {(space.channels || []).filter(channel => {
                             const chMembers = channel?.members || []
                             if (chMembers && chMembers.length > 0) {
@@ -8377,7 +8377,7 @@ export default function CollaborationApp() {
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
+                                className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
                                     ? (isDarkMode
@@ -8443,7 +8443,7 @@ export default function CollaborationApp() {
                                 setActiveSpace(space.id)
                                 setShowChannelModal(true)
                               }}
-                              className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-[13px] transition-all group mt-1 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
+                              className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-xl text-[13px] transition-all group mt-1 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
                             >
                               <Plus className="w-4 h-4" />
                               <span>Add channel</span>
@@ -8957,16 +8957,16 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header - Desktop with Liquid Glass */}
-            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3`}>
+            <div className={`liquid-glass-navbar h-[78px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-3 sm:px-5 md:px-6 lg:px-8 mx-0 w-full mt-2`}>
               {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className={`liquid-glass-header flex items-center gap-5 cursor-pointer group py-3 px-5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
+                className={`liquid-glass-header flex items-center gap-4 cursor-pointer group py-2.5 px-4 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
-                  <div className="flex items-center gap-5 relative z-10">
+                  <div className="flex items-center gap-4 relative z-10">
                     <div className="relative">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
                         {renderAvatar(getUser(activeDMUser), 48)}
                       </div>
                       <span
@@ -8978,7 +8978,7 @@ export default function CollaborationApp() {
                       ></span>
                     </div>
                     <div>
-                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                      <h2 className={`font-bold text-[1.65rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                         {getActiveViewName()}
                       </h2>
                       <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : isDarkMode ? 'text-slate-500' : "text-slate-400"}`}>
@@ -8988,12 +8988,12 @@ export default function CollaborationApp() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-5 relative z-10">
-                    <div className={`w-12 h-12 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
-                      <Hash className="w-6 h-6" />
+                  <div className="flex items-center gap-4 relative z-10">
+                    <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
+                      <Hash className="w-5 h-5" />
                     </div>
                     <div>
-                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2.5`}>
+                      <h2 className={`font-bold text-[1.65rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2`}>
                         {/* Header Breadcrumb Context */}
                         <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
                           {currentSpace?.name}
@@ -9018,12 +9018,12 @@ export default function CollaborationApp() {
               </div>
 
               {/* Action Buttons with Liquid Glass */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
                     onClick={handleDocsClick}
-                    className={`liquid-glass-nav-item p-3.5 transition-all relative group`}
+                    className={`liquid-glass-nav-item p-3 transition-all relative group`}
                     title="Documents"
                   >
                     <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
@@ -9037,7 +9037,7 @@ export default function CollaborationApp() {
                 <div className="relative">
                   <button
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
-                    className={`liquid-glass-nav-item p-3.5 transition-all group`}
+                    className={`liquid-glass-nav-item p-3 transition-all group`}
                     title="Google Apps"
                   >
                     <Grid3x3 className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
@@ -9103,7 +9103,7 @@ export default function CollaborationApp() {
                           setShowVideoModal(true)
                         }
                       }}
-                      className={`liquid-glass-nav-item p-3.5 transition-all group`}
+                      className={`liquid-glass-nav-item p-3 transition-all group`}
                       title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
                       <Video className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
@@ -9129,7 +9129,7 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(true)
                       }}
                       disabled={!canInvite}
-                      className={`hidden md:flex liquid-glass-nav-item p-3.5 transition-all group ${
+                      className={`hidden md:flex liquid-glass-nav-item p-3 transition-all group ${
                         canInvite ? '' : 'opacity-60 cursor-not-allowed'
                       }`}
                     >
@@ -9140,7 +9140,7 @@ export default function CollaborationApp() {
                   )
                 })()}
 
-                <div className={`h-10 w-px mx-2 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
+                <div className={`h-9 w-px mx-1.5 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
 
                 {/* Theme Toggle Button */}
                 <button
@@ -9164,7 +9164,7 @@ export default function CollaborationApp() {
                 <div className="relative z-50">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className={`liquid-glass-header flex items-center gap-4 pl-4 pr-3 py-2.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
+                    className={`liquid-glass-header flex items-center gap-3 pl-3.5 pr-3 py-2 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
                   >
                     {/* Only show name if at least one sidebar is collapsed */}
                     {!(sidebarCollapsed === false && friendsSidebarCollapsed === false) && (
@@ -9178,7 +9178,7 @@ export default function CollaborationApp() {
                       </div>
                     )}
                     <div className="relative z-10">
-                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
+                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
                         {renderAvatar(currentUser, 44)}
                       </div>
                       {currentUser?.notifications?.length ? (
@@ -9567,7 +9567,7 @@ export default function CollaborationApp() {
                 {/* day label computed above via `messageDateLabel` */}
 
                 {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
-                  <div className="flex-1 overflow-y-auto py-2 pb-6">
+                  <div className="flex-1 overflow-y-auto py-1 pb-5">
                     {activeChannelTab === "contexts" && (
                       <ContextsTabView
                         contexts={currentChannelContexts}
@@ -9630,7 +9630,7 @@ export default function CollaborationApp() {
                       }
                     } catch (e) {}
                   }}
-                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
+                  className={`flex-1 overflow-y-auto p-4 sm:px-6 sm:py-5 space-y-6 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
                       {currentMessages.length === 0 ? (
@@ -9658,7 +9658,7 @@ export default function CollaborationApp() {
                   ) : (
                     <>
                       {pinnedMessageId && (
-                        <div className={`sticky top-0 z-20 mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-cyan-600/30' : 'bg-white/90 border-slate-100'}`}>
+                      <div className={`sticky top-0 z-20 mb-3 flex items-center justify-between gap-4 rounded-xl px-3.5 py-2.5 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-cyan-600/30' : 'bg-white/90 border-slate-100'}`}>
                           <div className="flex items-center gap-3">
                             <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : ''}`}>Pinned Search Result</div>
                             <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Reviewing highlighted message</div>
@@ -9687,8 +9687,8 @@ export default function CollaborationApp() {
                         </div>
                       )}
 
-                      <div className="sticky top-0 z-10 flex justify-center mb-6 pointer-events-none">
-                        <span className="text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
+                      <div className="sticky top-0 z-10 flex justify-center mb-4 pointer-events-none">
+                        <span className="text-[10px] font-black px-3.5 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
                           {visibleDateLabel || messageDateLabel || 'Today'}
                         </span>
                       </div>
@@ -9748,7 +9748,7 @@ export default function CollaborationApp() {
                         return (
                           <React.Fragment key={msg.id}>
                             {showDateSeparator && (
-                              <div className="w-full flex justify-center mb-4">
+                              <div className="w-full flex justify-center mb-3">
                                 <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
                                   isDarkMode 
                                     ? 'bg-slate-800/90 border-slate-700 text-slate-400' 
@@ -9761,19 +9761,19 @@ export default function CollaborationApp() {
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`relative flex gap-4 ${
+                              className={`relative flex gap-3 ${
                                 isMe ? "flex-row-reverse" : ""
                               } ${
-                                isSequence ? "mt-1" : "mt-6"
+                                isSequence ? "mt-0.5" : "mt-4"
                               } ${
                                 isActionMenuOpen || isContextPickerOpen || isEditingThisMessage ? "z-40" : "z-0"
                               } group animate-fade-in`}
                             >
                             {/* Avatar only for first in sequence */}
-                            <div className="flex-shrink-0 w-10 flex flex-col items-center">
+                            <div className="flex-shrink-0 w-9 flex flex-col items-center">
                               {!isSequence ? (
                                 <div
-                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
+                                  className={`w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
                                     isMe
                                       ? isDarkMode 
                                         ? "bg-gradient-to-br from-sky-500/30 to-cyan-500/30 border-sky-500/50 ring-slate-800/50" 
@@ -9786,18 +9786,18 @@ export default function CollaborationApp() {
                                   {renderAvatar(user, 36)}
                                 </div>
                               ) : (
-                                <div className="w-10" />
+                                <div className="w-9" />
                               )}
                             </div>
 
                             <div
-                              className={`flex flex-col max-w-[70%] ${
+                              className={`flex flex-col max-w-[66%] ${
                                 isMe ? "items-end" : "items-start"
                               }`}
                             >
                               {/* Name only for first in sequence */}
                               {!isSequence && !isMe && (
-                                <div className="ml-1 mb-1.5 flex items-baseline gap-2">
+                                <div className="ml-1 mb-1 flex items-baseline gap-1.5">
                                   <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                     {user?.name}
                                   </span>
@@ -9823,7 +9823,7 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative overflow-visible px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 ${
+                              className={`relative overflow-visible px-3 py-2 text-[13px] leading-[1.45] break-words transition-all duration-200 ${
                                   isMe
                                     ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
                                     : isDarkMode 
@@ -10194,7 +10194,7 @@ export default function CollaborationApp() {
                               
                                 {/* Timestamp for Me inside bubble, slightly cleaner */}
                                 {isMe && (
-                                  <div className="text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-2 text-sky-100 flex-wrap">
+                                  <div className="text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-1.5 text-sky-100 flex-wrap">
                                     <span>
                                       {msg.timestamp
                                         ? formatTime(msg.timestamp)
@@ -10231,10 +10231,10 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
+                <div ref={messageInputRef} className={`px-4 pb-4 pt-1.5 sm:px-6 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`rounded-[2rem] p-2 relative transition-all duration-300 ${
+                    className={`rounded-[1.75rem] p-1.5 relative transition-all duration-300 ${
                       isDarkMode
                         ? 'bg-[#191b1f] border border-slate-700/50'
                         : 'bg-[#e9eef6]'
@@ -10242,7 +10242,7 @@ export default function CollaborationApp() {
                   >
                     {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
-                      <div className={`flex gap-3 p-3 mb-2 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
+                      <div className={`flex gap-3 p-2.5 mb-1.5 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
                         {selectedFiles.map(file => (
                           <div
                             key={file.id}
@@ -10278,7 +10278,7 @@ export default function CollaborationApp() {
                     )}
 
                     {selectedComposerContext && (
-                      <div className={`flex items-center gap-2 px-3 pt-3 pb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <div className={`flex items-center gap-2 px-3 pt-2.5 pb-0.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                         <span className={`text-[10px] font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                           Context
                         </span>
@@ -10295,7 +10295,7 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
-                    <div className="flex items-end gap-2 px-2 pb-1 relative">
+                    <div className="flex items-end gap-1.5 px-1.5 pb-0.5 relative">
                       <div className="relative">
                         <button
                           onClick={e => {
@@ -10305,7 +10305,7 @@ export default function CollaborationApp() {
                             setMessageActionMenu(null)
                             setMessageContextPicker(null)
                           }}
-                          className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                          className={`p-2.5 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                         >
                           <Paperclip className="w-5 h-5" />
                         </button>
@@ -10413,15 +10413,15 @@ export default function CollaborationApp() {
                             sendMessage()
                           }
                         }}
-                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
-                        style={{ minHeight: "48px" }}
+                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-2.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
+                        style={{ minHeight: "44px" }}
                       />
 
                       {(activeView === "channel" || activeView === "dm") && (
                         <button
                           onClick={saveWorkspaceDraft}
                           disabled={!messageInput.trim()}
-                          className={`mb-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition-all duration-300 ${
+                          className={`mb-1 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-all duration-300 ${
                             isDarkMode
                               ? 'border-slate-700 text-slate-300 hover:bg-slate-800 disabled:text-slate-500'
                               : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:text-slate-400'
@@ -10437,7 +10437,7 @@ export default function CollaborationApp() {
                           (!messageInput.trim() && selectedFiles.length === 0) ||
                           isUploading
                         }
-                        className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
+                        className={`p-3 mb-1 rounded-xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
                           isDarkMode
                             ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
                             : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
@@ -10447,7 +10447,7 @@ export default function CollaborationApp() {
                       </button>
                     </div>
                   </div>
-                  <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <div className={`text-center mt-2 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                     Press <strong>Enter</strong> to send
                   </div>
                 </div>
@@ -10496,7 +10496,7 @@ export default function CollaborationApp() {
                   onClose={() => setOpenContextId(null)}
                   formatTime={formatContextTime}
                   panelStyle={{
-                    top: activeView === "channel" || activeView === "dm" ? 72 : 16,
+                    top: activeView === "channel" || activeView === "dm" ? 64 : 16,
                     right: 16,
                     bottom: activeChannelTab === "messages"
                       ? (messageInputRef.current?.offsetHeight || 120) + 16
@@ -10509,11 +10509,11 @@ export default function CollaborationApp() {
               <div
                 className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-cyan-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
-                    ? "w-96 translate-x-0 opacity-100"
-                      : "w-96 translate-x-full opacity-0 pointer-events-none"
+                    ? "w-[22rem] translate-x-0 opacity-100"
+                      : "w-[22rem] translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
-                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
+                <div className={`h-[72px] flex items-center justify-between px-5 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
                   <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
@@ -10523,9 +10523,9 @@ export default function CollaborationApp() {
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
-                  <div className="text-center mb-10">
-                    <div className="inline-block relative mb-5">
+                <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
+                  <div className="text-center mb-8">
+                    <div className="inline-block relative mb-4">
                       {activeView === "dm" ? (
                         <div className="drop-shadow-2xl filter">
                           {renderAvatar(getUser(activeDMUser), 96)}
@@ -10547,7 +10547,7 @@ export default function CollaborationApp() {
                   </div>
 
                   {activeView === "channel" && (
-                    <div className="mb-8">
+                    <div className="mb-6">
                       <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                         Topic
                       </h4>
@@ -10569,7 +10569,7 @@ export default function CollaborationApp() {
                         {activeMembers.length}
                       </span>
                     </h4>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {activeMembers.map(member => {
                         const isMe = member.id === currentUser?.id
                         const isFriend = Array.isArray(currentUser?.friends)
@@ -10735,12 +10735,12 @@ export default function CollaborationApp() {
         )}
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${isMobile ? "" : friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} liquid-glass-sidebar-right`}>
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${isMobile ? "" : friendsSidebarCollapsed ? "w-20" : "w-72"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "friends" && (
           <div className="swipe-indicator mt-2" />
         )}
-        <div className={`p-6 ${isMobile ? 'pt-4' : ''} h-[80px] border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-cyan-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-sky-50/30'}`}>
+        <div className={`px-5 ${isMobile ? 'pt-4 pb-4 h-[72px]' : 'py-4 h-[72px]'} border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-cyan-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-sky-50/30'}`}>
           {isMobile && (
             <button
               onClick={() => setMobileView("chat")}
@@ -10789,21 +10789,21 @@ export default function CollaborationApp() {
         </div>
 
         {(!friendsSidebarCollapsed || isMobile) && (
-          <div className="px-5 pt-6 pb-2 animate-fade-in">
+          <div className="px-4 pt-4 pb-2 animate-fade-in">
             <div className="relative group">
-              <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-cyan-400' : 'text-slate-400 group-focus-within:text-sky-500'}`} />
+              <Search className={`absolute left-3.5 top-3 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-cyan-400' : 'text-slate-400 group-focus-within:text-sky-500'}`} />
               <input
                 type="text"
                 placeholder="Filter friends..."
                 value={dmSearchQuery}
                 onChange={e => setDmSearchQuery(e.target.value)}
-                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
+                className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
               />
             </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3.5 space-y-2">
           {(!friendsSidebarCollapsed || isMobile) ? (
             <>
               {dmSearchResults.length > 0 ? (
@@ -10828,7 +10828,7 @@ export default function CollaborationApp() {
                         }
                       }
                     }}
-                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all border ${
+                    className={`flex items-center gap-3 p-2.5 rounded-[10px] cursor-pointer transition-all border ${
                       activeView === "dm" && activeDMUser === result.userId
                         ? isDarkMode ? "bg-transparent border-transparent text-slate-200" : "bg-[#eeedec] border-transparent text-slate-700 shadow-sm"
                         : isDarkMode ? "bg-transparent border-transparent hover:bg-[#2C2C2C]" : "bg-white/60 border-transparent hover:bg-[#f1f0ef] hover:shadow-sm"
@@ -10890,7 +10890,7 @@ export default function CollaborationApp() {
                       justSwitchedThreadRef.current = true
                       if (isMobile) setMobileView("chat")
                     }}
-                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
+                    className={`flex items-center gap-3 p-2.5 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
                       activeView === "dm" && activeDMUser === friend.id
                         ? isDarkMode 
                           ? "bg-transparent border-transparent"

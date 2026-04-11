@@ -219,8 +219,8 @@ export default function HomeHub({
     page: isDarkMode ? "bg-[#0d0001] text-slate-100" : "bg-[#f6f8fc] text-slate-900",
     sidebar: isDarkMode ? "border-white/10 bg-[#0d0001]" : "border-[#e7edf4] bg-white/92",
     shellCard: isDarkMode
-      ? "rounded-[26px] border border-white/10 bg-[#0f1724]/90 p-5 shadow-[0_16px_38px_rgba(2,6,23,0.4)]"
-      : "rounded-[26px] border border-[#edf1f5] bg-white p-5 shadow-[0_10px_28px_rgba(15,23,42,0.04)]",
+      ? "rounded-[24px] border border-white/10 bg-[#0f1724]/90 p-4 shadow-[0_14px_32px_rgba(2,6,23,0.36)]"
+      : "rounded-[24px] border border-[#edf1f5] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]",
     softCard: isDarkMode
       ? "border-white/10 bg-white/[0.04] hover:border-sky-400/20 hover:bg-white/[0.06]"
       : "border-[#eef2f6] bg-[#fbfdff] hover:border-[#dce5ee]",
@@ -305,18 +305,18 @@ export default function HomeHub({
   ]
 
   const renderMobileHomeNav = () => (
-    <div className={cx("border-b px-4 py-4 sm:px-6", ui.border)}>
+    <div className={cx("border-b px-4 py-3 sm:px-5", ui.border)}>
       <button onClick={() => onSectionChange("overview")} className="flex w-full min-w-0 items-center gap-3 text-left">
-        <div className={cx("flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-[0_12px_24px_rgba(17,24,39,0.14)]", isDarkMode ? "bg-gradient-to-br from-sky-500 to-cyan-500" : "bg-[#111827]")}>
+        <div className={cx("flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-[0_10px_20px_rgba(17,24,39,0.14)]", isDarkMode ? "bg-gradient-to-br from-sky-500 to-cyan-500" : "bg-[#111827]")}>
           <BriefcaseBusiness className="h-5 w-5" />
         </div>
         <div>
-          <div className={cx("text-lg font-semibold", ui.textPrimary)}>Spacess</div>
+          <div className={cx("text-[17px] font-semibold", ui.textPrimary)}>Spacess</div>
           <div className={cx("text-sm", ui.textMuted)}>Home</div>
         </div>
       </button>
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
+      <div className="mt-3 grid grid-cols-2 gap-2">
         {mobileHomeNavItems.map(item => {
           const Icon = item.icon
           const isActive = (item.key === "overview" && section === "overview") || (item.key !== "overview" && item.key !== "workspaces" && section === item.key)
@@ -324,7 +324,7 @@ export default function HomeHub({
             <button
               key={item.key}
               onClick={item.action}
-              className={cx("flex min-w-0 items-center gap-3 rounded-[18px] px-4 py-3 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}
+              className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3.5 py-2.5 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}
             >
               <Icon className="h-4.5 w-4.5 shrink-0" />
               <span className="truncate">{item.label}</span>
@@ -334,8 +334,8 @@ export default function HomeHub({
       </div>
 
       {section === "overview" && friends.length > 0 && (
-        <div className={cx("mt-4 rounded-[24px] border p-4", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <div className={cx("mt-3 rounded-[22px] border p-3.5", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
             <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
               <Plus className="h-4 w-4" />
@@ -346,10 +346,10 @@ export default function HomeHub({
               <button
                 key={friend.id}
                 onClick={() => onOpenDM(friend.id)}
-                className={cx("flex min-w-0 items-center gap-3 rounded-[18px] px-3 py-3 text-left transition", isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-white")}
+                className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition", isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-white")}
               >
                 <div className="relative">
-                  <div className={cx("h-10 w-10 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 40)}</div>
+                  <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
                   <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -365,15 +365,15 @@ export default function HomeHub({
   )
 
   const renderMobileSectionNav = () => (
-    <div className={cx("border-b px-4 py-3 sm:px-6", ui.border)}>
+    <div className={cx("border-b px-4 py-2.5 sm:px-5", ui.border)}>
       <div className="flex items-center gap-2">
         <button
           onClick={() => onSectionChange("overview")}
-          className={cx("rounded-full border px-4 py-2 text-sm font-semibold transition", ui.secondaryButton)}
+          className={cx("rounded-full border px-3.5 py-1.5 text-sm font-semibold transition", ui.secondaryButton)}
         >
           Back home
         </button>
-        <span className={cx("min-w-0 truncate rounded-full px-3 py-2 text-sm font-medium", ui.badge)}>
+        <span className={cx("min-w-0 truncate rounded-full px-3 py-1.5 text-sm font-medium", ui.badge)}>
           {sectionTitles[section] || "Home"}
         </span>
       </div>
@@ -381,43 +381,43 @@ export default function HomeHub({
   )
 
   const renderOverview = () => (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <ShellCard className={cx("p-4", overviewWidgetClass)}>
-        <div className="flex items-center gap-3 overflow-x-auto pb-2 pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <button onClick={onOpenAddConnection} className="flex min-w-[84px] shrink-0 flex-col items-center gap-2.5 rounded-[22px] px-1 py-2">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
+        <div className="flex items-center gap-3 overflow-x-auto pb-1.5 pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
               <Plus className="h-5 w-5" />
             </span>
             <span className={cx("text-sm font-medium", ui.textPrimary)}>Add yours</span>
           </button>
           {filteredFriends.map(friend => (
-            <button key={friend.id} onClick={() => onOpenDM(friend.id)} className="flex min-w-[84px] shrink-0 flex-col items-center gap-2.5 rounded-[22px] px-1 py-2">
-              <span className={cx("flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
-                {renderAvatar(friend, 56)}
+            <button key={friend.id} onClick={() => onOpenDM(friend.id)} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
+              <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
+                {renderAvatar(friend, 48)}
               </span>
-              <span className={cx("max-w-[84px] truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</span>
+              <span className={cx("max-w-[78px] truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</span>
             </button>
           ))}
         </div>
       </ShellCard>
 
-      <div className="grid gap-5 xl:grid-cols-12">
-        <div className="space-y-5 xl:col-span-5">
+      <div className="grid gap-4 xl:grid-cols-12">
+        <div className="space-y-4 xl:col-span-5">
           <ShellCard className={overviewWidgetClass}>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Tasks</h3>
                 <p className={cx("mt-1 text-sm", ui.textMuted)}>Upcoming work surfaced from the current task system.</p>
               </div>
               <button onClick={() => onSectionChange("tasks")} className={cx("w-full justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:w-auto", ui.secondaryButton)}>View all</button>
             </div>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {filteredTasks.slice(0, 4).length === 0 ? (
-                <div className={cx("rounded-[20px] border border-dashed p-5 text-sm", overviewEmptyClass)}>No tasks assigned yet.</div>
+                <div className={cx("rounded-[18px] border border-dashed p-4 text-sm", overviewEmptyClass)}>No tasks assigned yet.</div>
               ) : (
                 filteredTasks.slice(0, 4).map(task => (
-                  <button key={task.id} onClick={() => onOpenTask(task)} className={cx("flex w-full items-start gap-3 rounded-[22px] border p-3.5 text-left transition", overviewItemClass)}>
-                    <span className={cx("mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl", task.status === "completed" ? (isDarkMode ? "bg-emerald-500/12 text-emerald-300" : "bg-emerald-50 text-emerald-600") : (isDarkMode ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-600"))}>
+                  <button key={task.id} onClick={() => onOpenTask(task)} className={cx("flex w-full items-start gap-3 rounded-[20px] border p-3 text-left transition", overviewItemClass)}>
+                    <span className={cx("mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl", task.status === "completed" ? (isDarkMode ? "bg-emerald-500/12 text-emerald-300" : "bg-emerald-50 text-emerald-600") : (isDarkMode ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-600"))}>
                       {task.status === "completed" ? <CheckCircle2 className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -431,20 +431,20 @@ export default function HomeHub({
           </ShellCard>
 
           <ShellCard className={overviewWidgetClass}>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Files</h3>
                 <p className={cx("mt-1 text-sm", ui.textMuted)}>Recent shared files and connected documents.</p>
               </div>
               <button onClick={() => onSectionChange("files")} className={cx("w-full justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:w-auto", ui.secondaryButton)}>View all</button>
             </div>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {filteredFiles.slice(0, 5).length === 0 ? (
-                <div className={cx("rounded-[20px] border border-dashed p-5 text-sm", overviewEmptyClass)}>No recent files yet.</div>
+                <div className={cx("rounded-[18px] border border-dashed p-4 text-sm", overviewEmptyClass)}>No recent files yet.</div>
               ) : (
                 filteredFiles.slice(0, 5).map(file => (
-                  <button key={file.id} onClick={() => onOpenFile(file)} className={cx("flex w-full min-w-0 flex-col items-start gap-3 rounded-[22px] border p-3.5 text-left transition sm:flex-row sm:items-center", overviewItemClass)}>
-                    {renderFilePreview(file, "h-11 w-11", "rounded-2xl")}
+                  <button key={file.id} onClick={() => onOpenFile(file)} className={cx("flex w-full min-w-0 flex-col items-start gap-3 rounded-[20px] border p-3 text-left transition sm:flex-row sm:items-center", overviewItemClass)}>
+                    {renderFilePreview(file, "h-10 w-10", "rounded-xl")}
                     <span className="min-w-0 flex-1">
                       <span className={cx("block truncate text-sm font-semibold", ui.textPrimary)}>{file.name || "Untitled file"}</span>
                       <span className={cx("mt-1 block truncate text-xs", ui.textMuted)}>
@@ -459,28 +459,28 @@ export default function HomeHub({
           </ShellCard>
         </div>
 
-        <div className="space-y-5 xl:col-span-4">
-          <div className={cx("rounded-[28px] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : cx("bg-gradient-to-br text-[#111827]", thought.accent))}>
+        <div className="space-y-4 xl:col-span-4">
+          <div className={cx("rounded-[24px] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : cx("bg-gradient-to-br text-[#111827]", thought.accent))}>
             <div className={cx("text-xs font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-[#3f3f46]/65")}>Thoughts</div>
-            <h3 className="mt-3.5 text-[2rem] font-semibold leading-tight">{thought.title}</h3>
+            <h3 className="mt-3 text-[1.8rem] font-semibold leading-tight">{thought.title}</h3>
             <p className={cx("mt-3 text-sm leading-7", isDarkMode ? "text-slate-300" : "text-[#27272a]/78")}>{thought.body}</p>
-            <div className={cx("mt-8 rounded-[22px] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/55 text-[#3f3f46]/70")}>Refreshes once every 24 hours</div>
+            <div className={cx("mt-6 rounded-[18px] px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/55 text-[#3f3f46]/70")}>Refreshes once every 24 hours</div>
           </div>
 
           <ShellCard className={overviewWidgetClass}>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Drafts</h3>
                 <p className={cx("mt-1 text-sm", ui.textMuted)}>Pick up unfinished replies where you left them.</p>
               </div>
               <button onClick={() => onSectionChange("drafts")} className={cx("w-full justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:w-auto", ui.secondaryButton)}>View all</button>
             </div>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {filteredDrafts.slice(0, 3).length === 0 ? (
-                <div className={cx("rounded-[20px] border border-dashed p-5 text-sm", overviewEmptyClass)}>No drafts saved yet.</div>
+                <div className={cx("rounded-[18px] border border-dashed p-4 text-sm", overviewEmptyClass)}>No drafts saved yet.</div>
               ) : (
                 filteredDrafts.slice(0, 3).map(draft => (
-                  <button key={draft.id} onClick={() => onOpenDraft(draft)} className={cx("w-full rounded-[22px] border p-3.5 text-left transition", overviewItemClass)}>
+                  <button key={draft.id} onClick={() => onOpenDraft(draft)} className={cx("w-full rounded-[20px] border p-3 text-left transition", overviewItemClass)}>
                     <div className={cx("text-xs font-semibold uppercase tracking-[0.16em]", ui.textSoft)}>{draft.chatType === "channel" ? "Workspace" : "Direct message"}</div>
                     <div className={cx("mt-2 truncate text-sm font-semibold", ui.textPrimary)}>{draft.chatName || draft.recipientName || "Draft"}</div>
                     <div className={cx("mt-2 line-clamp-2 text-sm leading-6", ui.textMuted)}>{draft.text}</div>
@@ -493,18 +493,18 @@ export default function HomeHub({
 
         <div className="xl:col-span-3">
           <ShellCard className={overviewWidgetClass}>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Connect</h3>
                 <p className={cx("mt-1 text-sm", ui.textMuted)}>Jump back into the people you talk with most.</p>
               </div>
               <button onClick={() => onSectionChange("connect")} className={cx("w-full justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:w-auto", ui.secondaryButton)}>View all</button>
             </div>
-            <div className={cx("space-y-3", !isMobile && "max-h-[calc(100vh-23rem)] overflow-y-auto pr-1")}>
+            <div className={cx("space-y-2.5", !isMobile && "max-h-[calc(100vh-22rem)] overflow-y-auto pr-1")}>
               {filteredFriends.map(friend => (
-                <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex w-full items-center gap-3 rounded-[22px] border p-3.5 text-left transition", overviewItemClass)}>
+                <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex w-full items-center gap-3 rounded-[20px] border p-3 text-left transition", overviewItemClass)}>
                   <div className="relative">
-                    <div className={cx("h-10 w-10 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 40)}</div>
+                    <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
                     <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -513,7 +513,7 @@ export default function HomeHub({
                   </div>
                 </button>
               ))}
-              <button onClick={onOpenAddConnection} className={cx("flex w-full items-center justify-center gap-2 rounded-[22px] border border-dashed px-4 py-3.5 text-sm font-semibold transition", overviewEmptyClass, isDarkMode ? "hover:bg-[#111111]" : "hover:border-[#cfd9e3] hover:bg-white")}>
+              <button onClick={onOpenAddConnection} className={cx("flex w-full items-center justify-center gap-2 rounded-[20px] border border-dashed px-4 py-3 text-sm font-semibold transition", overviewEmptyClass, isDarkMode ? "hover:bg-[#111111]" : "hover:border-[#cfd9e3] hover:bg-white")}>
                 <UserPlus className="h-4 w-4" />
                 Connect new friend
               </button>
@@ -527,7 +527,7 @@ export default function HomeHub({
   const renderConnect = () => (
     <div className="space-y-6">
       <ShellCard>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Your connections</h3>
             <p className={cx("mt-1 text-sm", ui.textMuted)}>People you can message directly from Home.</p>
@@ -541,21 +541,21 @@ export default function HomeHub({
 
       {pendingRequests.length > 0 && (
         <ShellCard>
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className={cx("text-lg font-semibold", ui.textPrimary)}>Pending requests</h3>
               <p className={cx("mt-1 text-sm", ui.textMuted)}>Respond to new connection requests without leaving Home.</p>
             </div>
             <span className={cx("rounded-full px-3 py-1 text-xs font-semibold", ui.badge)}>{pendingRequests.length}</span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {pendingRequests.map(request => (
-              <div key={request.id} className={cx("flex flex-col gap-4 rounded-[24px] border p-4 sm:flex-row sm:items-center sm:justify-between", ui.softCard)}>
+              <div key={request.id} className={cx("flex flex-col gap-3.5 rounded-[20px] border p-3.5 sm:flex-row sm:items-center sm:justify-between", ui.softCard)}>
                 <div className="min-w-0">
                   <div className={cx("text-sm font-semibold", ui.textPrimary)}>{request.from || "New request"}</div>
                   <div className={cx("mt-1 text-sm", ui.textMuted)}>Wants to connect with you.</div>
                 </div>
-                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:items-center">
                   <button onClick={() => onRejectRequest(request.id)} className={cx("w-full rounded-full border px-4 py-2 text-sm font-semibold transition sm:w-auto", ui.secondaryTextButton)}>Ignore</button>
                   <button onClick={() => onAcceptRequest(request.id)} className={cx("w-full rounded-full px-4 py-2 text-sm font-semibold transition sm:w-auto", ui.primaryButton)}>Accept</button>
                 </div>
@@ -565,11 +565,11 @@ export default function HomeHub({
         </ShellCard>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3.5 lg:grid-cols-2">
         {filteredFriends.map(friend => (
-          <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex items-start gap-4 rounded-[28px] border p-5 text-left transition hover:-translate-y-[1px] sm:items-center", ui.shellCard, isDarkMode ? "hover:border-sky-400/20" : "hover:border-[#dce5ee]")}>
+          <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex items-start gap-4 rounded-[24px] border p-4 text-left transition hover:-translate-y-[1px] sm:items-center", ui.shellCard, isDarkMode ? "hover:border-sky-400/20" : "hover:border-[#dce5ee]")}>
             <div className="relative">
-              <div className={cx("h-14 w-14 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 56)}</div>
+              <div className={cx("h-12 w-12 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 48)}</div>
               <span className={cx("absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
             </div>
             <div className="min-w-0 flex-1">
@@ -586,11 +586,11 @@ export default function HomeHub({
   const renderDrafts = () => (
     <div className="space-y-4">
       {filteredDrafts.length === 0 ? (
-        <div className={cx("rounded-[28px] border border-dashed p-10 text-center text-sm", ui.dashedCard)}>No drafts saved yet.</div>
+        <div className={cx("rounded-[24px] border border-dashed p-8 text-center text-sm", ui.dashedCard)}>No drafts saved yet.</div>
       ) : (
         filteredDrafts.map(draft => (
           <ShellCard key={draft.id}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-col gap-3.5 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cx("rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", ui.badge)}>
@@ -598,10 +598,10 @@ export default function HomeHub({
                   </span>
                   <span className={cx("text-xs", ui.textSoft)}>{formatWhen(draft.updatedAt)}</span>
                 </div>
-                <h3 className={cx("mt-4 text-lg font-semibold", ui.textPrimary)}>{draft.chatName || draft.recipientName || "Draft"}</h3>
+                <h3 className={cx("mt-3 text-lg font-semibold", ui.textPrimary)}>{draft.chatName || draft.recipientName || "Draft"}</h3>
                 <p className={cx("mt-2 text-sm leading-6", ui.textMuted)}>{draft.text}</p>
               </div>
-              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:items-center">
                 <button onClick={() => onDeleteDraft(draft.id)} className={cx("rounded-full border p-2.5 transition self-start sm:self-auto", ui.secondaryTextButton)} title="Delete draft">
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -615,7 +615,7 @@ export default function HomeHub({
   )
 
   const renderFiles = () => (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-4">
         {[
           { label: "All files", value: files.length },
@@ -623,15 +623,15 @@ export default function HomeHub({
           { label: "Drive", value: files.filter(file => file.source === "drive").length },
           { label: "Gmail", value: files.filter(file => file.source === "gmail").length },
         ].map(item => (
-          <ShellCard key={item.label} className="p-5">
+          <ShellCard key={item.label} className="p-4">
             <div className={cx("text-xs font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>{item.label}</div>
-            <div className={cx("mt-3 text-3xl font-semibold", ui.textPrimary)}>{item.value}</div>
+            <div className={cx("mt-2.5 text-[1.8rem] font-semibold", ui.textPrimary)}>{item.value}</div>
           </ShellCard>
         ))}
       </div>
 
       <ShellCard>
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>All files</h3>
             <p className={cx("mt-1 text-sm", ui.textMuted)}>Recent shared files, Drive assets, and Gmail attachments in one place.</p>
@@ -641,13 +641,13 @@ export default function HomeHub({
             <ArrowUpRight className="h-4 w-4" />
           </button>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {filteredFiles.length === 0 ? (
-            <div className={cx("rounded-[24px] border border-dashed p-8 text-center text-sm", ui.dashedCard)}>No files available yet.</div>
+            <div className={cx("rounded-[20px] border border-dashed p-7 text-center text-sm", ui.dashedCard)}>No files available yet.</div>
           ) : (
             filteredFiles.map(file => (
-              <button key={file.id} onClick={() => onOpenFile(file)} className={cx("flex w-full min-w-0 flex-col items-start gap-4 rounded-[24px] border p-4 text-left transition sm:flex-row sm:items-center", ui.softCard)}>
-                {renderFilePreview(file, "h-14 w-14", "rounded-2xl")}
+              <button key={file.id} onClick={() => onOpenFile(file)} className={cx("flex w-full min-w-0 flex-col items-start gap-3.5 rounded-[20px] border p-3.5 text-left transition sm:flex-row sm:items-center", ui.softCard)}>
+                {renderFilePreview(file, "h-12 w-12", "rounded-xl")}
                 <div className="min-w-0 flex-1">
                   <div className={cx("truncate text-sm font-semibold", ui.textPrimary)}>{file.name || "Untitled file"}</div>
                   <div className={cx("mt-1 text-xs", ui.textMuted)}>{getFileMetaLabel(file)}</div>
@@ -665,29 +665,29 @@ export default function HomeHub({
   const renderTasks = () => {
     const completed = filteredTasks.filter(task => task.status === "completed").length
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-3">
-          <ShellCard className="p-5">
+          <ShellCard className="p-4">
             <div className={cx("text-xs font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Assigned or created</div>
-            <div className={cx("mt-3 text-3xl font-semibold", ui.textPrimary)}>{filteredTasks.length}</div>
+            <div className={cx("mt-2.5 text-[1.8rem] font-semibold", ui.textPrimary)}>{filteredTasks.length}</div>
           </ShellCard>
-          <ShellCard className="p-5">
+          <ShellCard className="p-4">
             <div className={cx("text-xs font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Completed</div>
-            <div className={cx("mt-3 text-3xl font-semibold", ui.textPrimary)}>{completed}</div>
+            <div className={cx("mt-2.5 text-[1.8rem] font-semibold", ui.textPrimary)}>{completed}</div>
           </ShellCard>
-          <ShellCard className="p-5">
+          <ShellCard className="p-4">
             <div className={cx("text-xs font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Pending</div>
-            <div className={cx("mt-3 text-3xl font-semibold", ui.textPrimary)}>{filteredTasks.length - completed}</div>
+            <div className={cx("mt-2.5 text-[1.8rem] font-semibold", ui.textPrimary)}>{filteredTasks.length - completed}</div>
           </ShellCard>
         </div>
 
         <div className="space-y-4">
           {filteredTasks.length === 0 ? (
-            <div className={cx("rounded-[28px] border border-dashed p-10 text-center text-sm", ui.dashedCard)}>No tasks available yet.</div>
+            <div className={cx("rounded-[24px] border border-dashed p-8 text-center text-sm", ui.dashedCard)}>No tasks available yet.</div>
           ) : (
             filteredTasks.map(task => (
-              <button key={task.id} onClick={() => onOpenTask(task)} className={cx("flex w-full min-w-0 flex-col items-start gap-4 rounded-[28px] border p-5 text-left transition hover:-translate-y-[1px] sm:flex-row sm:items-center", ui.shellCard, isDarkMode ? "hover:border-sky-400/20" : "hover:border-[#dce5ee]")}>
-                <div className={cx("flex h-12 w-12 items-center justify-center rounded-2xl", isDarkMode ? "bg-white/[0.04] text-white" : "bg-[#f3f6fa] text-[#111827]")}>
+              <button key={task.id} onClick={() => onOpenTask(task)} className={cx("flex w-full min-w-0 flex-col items-start gap-3.5 rounded-[24px] border p-4 text-left transition hover:-translate-y-[1px] sm:flex-row sm:items-center", ui.shellCard, isDarkMode ? "hover:border-sky-400/20" : "hover:border-[#dce5ee]")}>
+                <div className={cx("flex h-11 w-11 items-center justify-center rounded-xl", isDarkMode ? "bg-white/[0.04] text-white" : "bg-[#f3f6fa] text-[#111827]")}>
                   {task.status === "completed" ? <CheckCircle2 className="h-5 w-5" /> : <Clock3 className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -708,18 +708,18 @@ export default function HomeHub({
   const renderDM = () => (
     <div
       className={cx(
-        "flex w-full min-w-0 flex-col overflow-hidden rounded-[32px] border shadow-[0_18px_42px_rgba(15,23,42,0.05)]",
+        "flex w-full min-w-0 flex-col overflow-hidden rounded-[28px] border shadow-[0_16px_36px_rgba(15,23,42,0.05)]",
         isMobile ? "min-h-[calc(100dvh-16rem)]" : "lg:flex-1 lg:min-h-0 lg:h-full",
         isDarkMode ? "border-white/10 bg-[#0c1624]" : "border-[#edf1f5] bg-white"
       )}
     >
-      <div className={cx("flex min-w-0 items-start gap-4 border-b px-4 py-4 sm:items-center sm:px-6", ui.border)}>
+      <div className={cx("flex min-w-0 items-start gap-3.5 border-b px-4 py-3.5 sm:items-center sm:px-5", ui.border)}>
         <div className="relative">
-          <div className={cx("h-12 w-12 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{activeFriend ? renderAvatar(activeFriend, 48) : null}</div>
+          <div className={cx("h-11 w-11 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{activeFriend ? renderAvatar(activeFriend, 44) : null}</div>
           <span className={cx("absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2", isDarkMode ? "border-[#0c1624]" : "border-white", activeFriend?.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
         </div>
         <div className="min-w-0">
-          <div className={cx("truncate text-lg font-semibold", ui.textPrimary)}>{activeFriend?.name || "Select a conversation"}</div>
+          <div className={cx("truncate text-[17px] font-semibold", ui.textPrimary)}>{activeFriend?.name || "Select a conversation"}</div>
           <div className={cx("mt-1 text-sm", ui.textMuted)}>{activeFriend?.status === "online" ? "Online now" : "Messages stay synced with your workspace chats"}</div>
         </div>
       </div>
@@ -733,11 +733,11 @@ export default function HomeHub({
           const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
           setIsDMAtBottom(atBottom)
         }}
-        className={cx("flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:space-y-4 sm:px-6 sm:py-5", isDarkMode ? "bg-[#08111d]" : "bg-[#fbfdff]")}
+        className={cx("flex-1 space-y-2.5 overflow-y-auto px-4 py-3.5 sm:space-y-3 sm:px-5 sm:py-4", isDarkMode ? "bg-[#08111d]" : "bg-[#fbfdff]")}
       >
         {dmMessages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
-            <div className={cx("max-w-sm rounded-[28px] border border-dashed px-6 py-8 text-center sm:px-8 sm:py-10", ui.dashedCard)}>
+            <div className={cx("max-w-sm rounded-[24px] border border-dashed px-6 py-7 text-center sm:px-8 sm:py-8", ui.dashedCard)}>
               <MessageCircle className={cx("mx-auto h-10 w-10", ui.textSoft)} />
               <div className={cx("mt-4 text-lg font-semibold", ui.textPrimary)}>Start the conversation</div>
               <p className={cx("mt-2 text-sm leading-6", ui.textMuted)}>Messages you send here stay in the same direct message thread as the workspace chat.</p>
@@ -750,7 +750,7 @@ export default function HomeHub({
               <div key={message.id} className={cx("flex", isMe ? "justify-end" : "justify-start")}>
                 <div
                   className={cx(
-                    "max-w-[92%] rounded-[24px] border px-4 py-3 sm:max-w-[75%]",
+                    "max-w-[88%] rounded-[18px] border px-2.5 py-2 sm:max-w-[70%]",
                     isMe
                       ? isDarkMode
                         ? "border-[#1d4ed8] bg-[#1e3a8a] text-[#eff6ff]"
@@ -760,9 +760,9 @@ export default function HomeHub({
                         : "border-[#d6deea] bg-[#f2f2f2] text-[#0f172a]"
                   )}
                 >
-                  {message.text && <div className="text-sm leading-6">{message.text}</div>}
+                  {message.text && <div className="text-[13px] leading-[1.35rem]">{message.text}</div>}
                   {Array.isArray(message.attachments) && message.attachments.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-2.5 flex flex-wrap gap-2">
                       {message.attachments.map(attachment => {
                         const previewSrc = getFilePreviewSrc(attachment)
                         const isImageAttachment = isImageFile(attachment) && Boolean(previewSrc)
@@ -787,10 +787,10 @@ export default function HomeHub({
                                 src={previewSrc}
                                 alt={attachment.name || "Image attachment"}
                                 apiBase={apiBase}
-                                className="h-36 w-36 object-cover sm:h-44 sm:w-44"
+                                className="h-32 w-32 object-cover sm:h-40 sm:w-40"
                                 onResolveError={resolveProtectedFileUrl ? () => resolveProtectedFileUrl(attachment) : undefined}
                                 fallback={
-                                  <span className={cx("flex h-36 w-36 items-center justify-center sm:h-44 sm:w-44", isDarkMode ? "bg-white/[0.04] text-white" : "bg-white text-[#111827]")}>
+                                  <span className={cx("flex h-32 w-32 items-center justify-center sm:h-40 sm:w-40", isDarkMode ? "bg-white/[0.04] text-white" : "bg-white text-[#111827]")}>
                                     <FileText className="h-5 w-5" />
                                   </span>
                                 }
@@ -845,10 +845,10 @@ export default function HomeHub({
         )}
       </div>
 
-      <div className={cx("border-t px-4 py-4 sm:px-6 sm:py-5", ui.border)}>
-        <div className={cx("rounded-[28px] border p-3", isDarkMode ? "border-white/10 bg-white/[0.03]" : "border-[#e8eef5] bg-[#fbfdff]")}>
+      <div className={cx("border-t px-4 py-3.5 sm:px-5 sm:py-4", ui.border)}>
+        <div className={cx("rounded-[24px] border p-2.5", isDarkMode ? "border-white/10 bg-white/[0.03]" : "border-[#e8eef5] bg-[#fbfdff]")}>
           <textarea
-            rows={isMobile ? 2 : 3}
+            rows={2}
             value={dmInput}
             onChange={event => setDmInput(event.target.value)}
             onKeyDown={event => {
@@ -860,9 +860,9 @@ export default function HomeHub({
             placeholder={`Message ${activeFriend?.name || "your contact"}`}
             className={cx("w-full resize-none border-none bg-transparent px-1 py-1 text-sm leading-6 outline-none", isDarkMode ? "text-slate-100 placeholder:text-slate-500" : "text-[#111827] placeholder:text-[#9aa7b5]")}
           />
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-2.5 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div className={cx("text-xs", ui.textSoft)}>Press Enter to send, or save it as a draft.</div>
-            <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
               <button onClick={onSaveDraft} disabled={!dmInput.trim()} className={cx("w-full rounded-full border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto", ui.secondaryTextButton)}>Save draft</button>
               <button onClick={onSendDM} disabled={!dmInput.trim() || dmSending} className={cx("inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto", ui.primaryButton)}>
                 <Send className="h-4 w-4" />
@@ -890,27 +890,27 @@ export default function HomeHub({
     <div className={cx("min-h-[100dvh] w-full overflow-x-hidden transition-colors", ui.page)}>
       <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
         {showSidebar && (
-        <aside className={cx("border-b lg:flex lg:min-h-0 lg:w-[288px] lg:min-w-[288px] lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar)}>
-          <div className={cx("border-b px-4 py-4 sm:px-6 lg:px-6 lg:py-5", ui.border)}>
+        <aside className={cx("border-b lg:flex lg:min-h-0 lg:w-[272px] lg:min-w-[272px] lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar)}>
+          <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
             <button onClick={() => onSectionChange("overview")} className="flex w-full items-center gap-3 text-left">
               <div className={cx("flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-[0_10px_20px_rgba(17,24,39,0.14)]", isDarkMode ? "bg-gradient-to-br from-sky-500 to-cyan-500" : "bg-[#111827]")}>
                 <BriefcaseBusiness className="h-5 w-5" />
               </div>
               <div>
-                <div className={cx("text-lg font-semibold", ui.textPrimary)}>Spacess</div>
+                <div className={cx("text-[17px] font-semibold", ui.textPrimary)}>Spacess</div>
                 <div className={cx("text-sm", ui.textMuted)}>Home</div>
               </div>
             </button>
           </div>
 
-          <div className="space-y-3 px-4 py-4 sm:px-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-5">
-            <div className="space-y-3">
+          <div className="space-y-3 px-4 py-3.5 sm:px-5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-4">
+            <div className="space-y-2.5">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
                 {navItems.map(item => {
                   const Icon = item.icon
                   const isActive = item.key !== "workspaces" && section === item.key
                   return (
-                    <button key={item.key} onClick={item.action} className={cx("flex min-w-0 items-center gap-3 rounded-[18px] px-4 py-2.5 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}>
+                    <button key={item.key} onClick={item.action} className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3.5 py-2.5 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}>
                       <Icon className="h-4.5 w-4.5 shrink-0" />
                       <span className="truncate">{item.label}</span>
                     </button>
@@ -919,8 +919,8 @@ export default function HomeHub({
               </div>
             </div>
 
-            <div className={cx("rounded-[22px] border p-4 lg:mt-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
-              <div className="mb-3.5 flex items-center justify-between gap-3">
+            <div className={cx("rounded-[20px] border p-3.5 lg:mt-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
                 <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
                   <Plus className="h-4 w-4" />
@@ -932,8 +932,8 @@ export default function HomeHub({
                     key={friend.id}
                     onClick={() => onOpenDM(friend.id)}
                     className={cx(
-                      "flex min-w-0 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left transition",
-                      !isMobile && "min-w-[220px] lg:min-w-0",
+                      "flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2 text-left transition",
+                      !isMobile && "min-w-[208px] lg:min-w-0",
                       section === "dm" && String(activeDMUser) === String(friend.id)
                         ? (isDarkMode ? "bg-white/[0.07]" : "bg-[#f4f7fb]")
                         : isDarkMode
@@ -962,11 +962,11 @@ export default function HomeHub({
             {isMobile && section === "overview" && renderMobileHomeNav()}
             {isMobile && section !== "overview" && section !== "dm" && renderMobileSectionNav()}
             {isMobile && section === "dm" && (
-              <div className={cx("border-b px-4 py-3 sm:px-6", ui.border)}>
+              <div className={cx("border-b px-4 py-2.5 sm:px-5", ui.border)}>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   <button
                     onClick={() => onSectionChange("overview")}
-                    className={cx("rounded-full border px-4 py-2 text-sm font-semibold transition", ui.secondaryButton)}
+                    className={cx("rounded-full border px-3.5 py-1.5 text-sm font-semibold transition", ui.secondaryButton)}
                   >
                     Back home
                   </button>
@@ -975,7 +975,7 @@ export default function HomeHub({
                       key={friend.id}
                       onClick={() => onOpenDM(friend.id)}
                       className={cx(
-                        "inline-flex max-w-[75vw] shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition sm:max-w-none",
+                        "inline-flex max-w-[75vw] shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition sm:max-w-none",
                         String(activeDMUser) === String(friend.id) ? ui.navActive : ui.secondaryButton
                       )}
                     >
@@ -988,10 +988,10 @@ export default function HomeHub({
                 </div>
               </div>
             )}
-            <div className={cx("border-b px-4 py-4 sm:px-6 lg:px-7 lg:py-[18px]", ui.border)}>
-              <div className={cx("flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between", section === "dm" && "mx-auto w-full max-w-[1480px]")}>
+            <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-6 lg:py-4", ui.border)}>
+              <div className={cx("flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between", section === "dm" && "mx-auto w-full max-w-[1400px]")}>
                 <div className="min-w-0">
-                  <div className={cx("text-[26px] font-semibold tracking-[-0.03em] sm:text-[30px]", ui.textPrimary)}>
+                  <div className={cx("text-[24px] font-semibold tracking-[-0.03em] sm:text-[28px]", ui.textPrimary)}>
                     {section === "overview" ? getGreeting(currentUser?.name) : sectionTitles[section] || "Home"}
                   </div>
                   <div className={cx("mt-1 text-sm sm:text-base", ui.textMuted)}>
@@ -1006,13 +1006,13 @@ export default function HomeHub({
                 <div
                   className={cx(
                     "flex w-full flex-col gap-3",
-                    section === "dm" ? "lg:max-w-[560px] xl:w-full xl:max-w-[560px]" : "lg:max-w-[720px] xl:w-auto xl:min-w-[580px]"
+                    section === "dm" ? "lg:max-w-[520px] xl:w-full xl:max-w-[520px]" : "lg:max-w-[680px] xl:w-auto xl:min-w-[540px]"
                   )}
                 >
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
-                    <div className={cx("relative w-full", section === "dm" ? "md:max-w-[280px]" : "md:max-w-[320px]")}>
+                  <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-end">
+                    <div className={cx("relative w-full", section === "dm" ? "md:max-w-[260px]" : "md:max-w-[300px]")}>
                       <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
-                      <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-11 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
+                      <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-10 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
                     </div>
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:flex-nowrap">
@@ -1028,14 +1028,14 @@ export default function HomeHub({
                       </div>
 
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={onOpenNotifications} className={cx("flex h-11 w-11 items-center justify-center rounded-full border transition", ui.iconButton)} title="Notifications">
+                        <button onClick={onOpenNotifications} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Notifications">
                           <Bell className="h-4.5 w-4.5" />
                         </button>
-                        <button onClick={onOpenProfile} className={cx("flex h-11 w-11 items-center justify-center rounded-full border transition", ui.iconButton)} title="Profile settings">
+                        <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Profile settings">
                           <Settings className="h-4.5 w-4.5" />
                         </button>
-                        <button onClick={onOpenProfile} className={cx("flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")} title="Open profile">
-                          {currentUser ? renderAvatar(currentUser, 40) : null}
+                        <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")} title="Open profile">
+                          {currentUser ? renderAvatar(currentUser, 36) : null}
                         </button>
                       </div>
                     </div>
@@ -1046,13 +1046,13 @@ export default function HomeHub({
 
             <div
               className={cx(
-                "flex-1 min-w-0 px-4 py-4 sm:px-6 lg:px-7",
+                "flex-1 min-w-0 px-4 py-3.5 sm:px-5 lg:px-6",
                 isMobile ? "pb-28" : "",
                 section === "dm"
                   ? "flex min-h-0 lg:overflow-hidden"
                   : section === "overview"
-                    ? "pb-6 lg:py-6 lg:overflow-y-auto"
-                  : "pb-6 lg:py-6 lg:overflow-y-auto"
+                    ? "pb-6 lg:py-5 lg:overflow-y-auto"
+                  : "pb-6 lg:py-5 lg:overflow-y-auto"
               )}
             >
               {renderBody()}

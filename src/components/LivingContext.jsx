@@ -142,7 +142,7 @@ function FilePreview({ file, isDarkMode }) {
 export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
   return (
     <div
-      className={`mx-4 sm:mx-8 mb-3 rounded-2xl border px-3 py-2 flex items-center justify-between gap-3 ${
+      className={`mx-4 sm:mx-6 mb-2.5 rounded-xl border px-2.5 py-1.5 flex items-center justify-between gap-2 ${
         isDarkMode ? "border-slate-800 bg-[#16181c]" : "border-white/70 bg-white/70 shadow-sm"
       }`}
     >
@@ -153,7 +153,7 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TA
             <button
               key={tab}
               onClick={() => onChange(tab)}
-              className={`px-3 py-1.5 rounded-xl text-sm font-semibold capitalize transition-colors ${
+              className={`px-2.5 py-1.5 rounded-lg text-[13px] font-semibold capitalize transition-colors ${
                 active
                   ? isDarkMode
                     ? "bg-slate-800 text-white"
@@ -238,8 +238,8 @@ export function ContextBadge({ contexts = [], isDarkMode, onOpen }) {
 export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, formatUpdatedTime }) {
   if (!contexts.length) {
     return (
-      <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
-        <div className={`mx-auto mb-4 w-16 h-16 rounded-3xl flex items-center justify-center ${isDarkMode ? "bg-slate-800 text-sky-300" : "bg-sky-50 text-sky-600"}`}>
+      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+        <div className={`mx-auto mb-4 w-14 h-14 rounded-3xl flex items-center justify-center ${isDarkMode ? "bg-slate-800 text-sky-300" : "bg-sky-50 text-sky-600"}`}>
           <FolderOpen className="w-8 h-8" />
         </div>
         <div className={`text-lg font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>No living context yet</div>
@@ -249,30 +249,30 @@ export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, for
   }
 
   return (
-    <div className="mx-4 sm:mx-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="mx-4 sm:mx-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {contexts.map(context => {
         const statusMeta = CONTEXT_STATUS_META[context.status] || CONTEXT_STATUS_META.active
         return (
           <button
             key={context.id}
             onClick={() => onOpen(context.id)}
-            className={`text-left rounded-[1.75rem] border p-5 transition-all hover:-translate-y-0.5 ${
+            className={`text-left rounded-[1.5rem] border p-4 transition-all hover:-translate-y-0.5 ${
               isDarkMode ? "bg-[#16181c] border-slate-800 hover:border-slate-700" : "bg-white/80 border-white hover:shadow-lg"
             }`}
           >
-            <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-start justify-between gap-3 mb-3">
               <div>
-                <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
+                <div className={`text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
                 <div className={`text-sm mt-1 line-clamp-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{context.summary}</div>
               </div>
               <span className={`px-2.5 py-1 rounded-full text-xs border ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
             </div>
 
-            <div className={`grid grid-cols-2 gap-2 text-xs mb-4 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              <div className="rounded-xl px-3 py-2 border border-transparent bg-black/5">Messages {context.linkedMessageIds.length}</div>
-              <div className="rounded-xl px-3 py-2 border border-transparent bg-black/5">Files {context.linkedFileIds.length}</div>
-              <div className="rounded-xl px-3 py-2 border border-transparent bg-black/5">Contributors {context.contributorIds.length}</div>
-              <div className="rounded-xl px-3 py-2 border border-transparent bg-black/5">Tasks {context.taskIds.length}</div>
+            <div className={`grid grid-cols-2 gap-1.5 text-xs mb-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Messages {context.linkedMessageIds.length}</div>
+              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Files {context.linkedFileIds.length}</div>
+              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Contributors {context.contributorIds.length}</div>
+              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Tasks {context.taskIds.length}</div>
             </div>
 
             <div className="flex items-center justify-between text-xs">
@@ -359,7 +359,7 @@ export function CreateContextModal({
 
 export function AddToContextPopover({ isDarkMode, contexts = [], onClose, onSelect }) {
   return (
-    <div className={`rounded-2xl border p-2.5 w-72 shadow-2xl ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-white border-slate-200"}`}>
+    <div className={`rounded-2xl border p-2 w-72 shadow-2xl ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-white border-slate-200"}`}>
       <div className={`px-2 py-1.5 text-xs font-semibold uppercase tracking-wider ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>Add to context</div>
       <div className="max-h-64 overflow-y-auto space-y-1">
         {contexts.length === 0 && (
@@ -369,7 +369,7 @@ export function AddToContextPopover({ isDarkMode, contexts = [], onClose, onSele
           <button
             key={context.id}
             onClick={() => onSelect(context.id)}
-            className={`w-full text-left px-4 py-3 rounded-xl transition-colors ${isDarkMode ? "hover:bg-slate-800 text-slate-200" : "hover:bg-slate-100 text-slate-700"}`}
+            className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors ${isDarkMode ? "hover:bg-slate-800 text-slate-200" : "hover:bg-slate-100 text-slate-700"}`}
           >
             <div className="font-medium">{context.title}</div>
             <div className={`text-xs mt-0.5 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{context.summary}</div>
@@ -384,8 +384,8 @@ export function AddToContextPopover({ isDarkMode, contexts = [], onClose, onSele
 function Section({ title, count, icon, isDarkMode, children }) {
   const SectionIcon = icon
   return (
-    <section className={`rounded-[1.5rem] border p-4 ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-slate-50/80 border-slate-200/80"}`}>
-      <div className="flex items-center justify-between mb-3">
+    <section className={`rounded-[1.35rem] border p-3.5 ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-slate-50/80 border-slate-200/80"}`}>
+      <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
           <SectionIcon className={`w-4 h-4 ${isDarkMode ? "text-sky-300" : "text-sky-600"}`} />
           <h4 className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{title}</h4>
@@ -426,11 +426,11 @@ export function LivingContextPanel({
         style={panelStyle}
         onClick={e => e.stopPropagation()}
       >
-        <div className={`px-6 py-5 border-b ${isDarkMode ? "border-slate-800" : "border-slate-200"}`}>
+        <div className={`px-5 py-4 border-b ${isDarkMode ? "border-slate-800" : "border-slate-200"}`}>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className={`text-2xl font-semibold truncate ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</h3>
+                <h3 className={`text-[1.4rem] font-semibold truncate ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</h3>
                 <span className={`px-2.5 py-1 rounded-full text-xs border ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
               </div>
               <div className={`mt-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
@@ -442,7 +442,7 @@ export function LivingContextPanel({
             </button>
           </div>
           {contributorNames.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               {contributorNames.slice(0, 5).map(name => (
                 <span key={name} className={`px-2.5 py-1 rounded-full text-xs ${isDarkMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"}`}>{name}</span>
               ))}
@@ -450,12 +450,12 @@ export function LivingContextPanel({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 p-5 overflow-y-auto">
+        <div className="flex-1 min-h-0 p-4 overflow-y-auto">
           <Section title="Linked Messages" count={linkedMessages.length} icon={MessageSquare} isDarkMode={isDarkMode}>
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {linkedMessages.length === 0 && <div className={`text-sm ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>No linked messages yet.</div>}
               {linkedMessages.map(message => (
-                <div key={message.id} className={`rounded-2xl p-3.5 ${isDarkMode ? "bg-slate-900/80" : "bg-white border border-slate-200/80"}`}>
+                <div key={message.id} className={`rounded-2xl p-3 ${isDarkMode ? "bg-slate-900/80" : "bg-white border border-slate-200/80"}`}>
                   <div className={`text-xs mb-1 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{message.author} · {formatTime(message.timestamp)}</div>
                   <div className={`text-sm ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>{message.text || "Attachment or task update"}</div>
                 </div>
@@ -464,7 +464,7 @@ export function LivingContextPanel({
           </Section>
         </div>
 
-        <div className={`shrink-0 px-5 py-4 border-t flex items-center gap-3 justify-between ${isDarkMode ? "border-slate-800 bg-[#15171b]" : "border-slate-200 bg-white"}`}>
+        <div className={`shrink-0 px-4 py-3 border-t flex items-center gap-3 justify-between ${isDarkMode ? "border-slate-800 bg-[#15171b]" : "border-slate-200 bg-white"}`}>
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={onAddSelectedMessage}
@@ -492,19 +492,19 @@ export function LivingContextPanel({
 export function DecisionList({ decisions, isDarkMode, onOpenMessage, formatTime }) {
   if (!decisions.length) {
     return (
-      <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
         No decisions marked yet.
       </div>
     )
   }
 
   return (
-    <div className="mx-4 sm:mx-8 space-y-3">
+    <div className="mx-4 sm:mx-6 space-y-2.5">
       {decisions.map(decision => (
         <button
           key={decision.id}
           onClick={() => onOpenMessage(decision.messageId)}
-          className={`w-full text-left rounded-[1.5rem] border p-4 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}
+          className={`w-full text-left rounded-[1.35rem] border p-3.5 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}
         >
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -522,23 +522,23 @@ export function DecisionList({ decisions, isDarkMode, onOpenMessage, formatTime 
 export function FilesList({ files, isDarkMode }) {
   if (!files.length) {
     return (
-      <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
         No files linked in this channel yet.
       </div>
     )
   }
 
   return (
-    <div className="mx-4 sm:mx-8 space-y-4">
-      <div className={`rounded-[1.5rem] border px-5 py-4 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
+    <div className="mx-4 sm:mx-6 space-y-3">
+      <div className={`rounded-[1.35rem] border px-4 py-3.5 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
         <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>Channel Files</div>
         <div className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
           {files.length} file{files.length === 1 ? "" : "s"} shared in this channel
         </div>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
       {files.map(file => (
-        <div key={file.id} className={`rounded-[1.5rem] border p-4 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
+        <div key={file.id} className={`rounded-[1.35rem] border p-3.5 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{file.name}</div>
@@ -562,22 +562,22 @@ export function FilesList({ files, isDarkMode }) {
 export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloadFile }) {
   if (!files.length) {
     return (
-      <div className={`mx-4 sm:mx-8 rounded-[2rem] border p-10 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
         No files linked in this channel yet.
       </div>
     )
   }
 
   return (
-    <div className="mx-4 sm:mx-8 space-y-4">
-      <div className={`rounded-[1.75rem] border px-5 py-4 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
+    <div className="mx-4 sm:mx-6 space-y-3">
+      <div className={`rounded-[1.5rem] border px-4 py-3.5 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
         <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>Channel Files</div>
         <div className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
           {files.length} file{files.length === 1 ? "" : "s"} shared in this channel
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-2 sm:gap-3.5 xl:grid-cols-3 2xl:grid-cols-4">
         {files.map(file => {
           const kind = getFileKind(file)
           const kindConfig = getPreviewConfig(kind, isDarkMode)
