@@ -221,7 +221,6 @@ export default function CollaborationApp() {
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
-  const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -591,11 +590,36 @@ export default function CollaborationApp() {
   const previousActiveChatIdRef = useRef(null)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
+  const skipNextAutoScrollRef = useRef(false)
+  const messageCountsRef = useRef({})
+  const initializedChannelCountsRef = useRef(new Set())
   const contextSaveTimeoutRef = useRef(null)
   const activeContextStateRef = useRef({ chatId: null, loaded: false })
   const collapsedSpaceMenuRef = useRef(null)
   const protectedFileUrlCacheRef = useRef(new Map())
   const protectedFileInflightRef = useRef(new Map())
+
+  const hasUnreadChannel = channelId =>
+    unreadChannels.some(id => String(id) === String(channelId))
+
+  const rememberChannelMessageCount = (channelId, count) => {
+    if (channelId === undefined || channelId === null || !Number.isFinite(count)) return
+    const key = String(channelId)
+    messageCountsRef.current[key] = count
+    initializedChannelCountsRef.current.add(key)
+  }
+
+  const clearChannelUnread = channelId => {
+    const key = String(channelId)
+    setUnreadChannels(prev => prev.filter(id => String(id) !== key))
+  }
+
+  const saveMessageScrollPosition = chatId => {
+    if (!chatId) return
+    const container = messagesContainerRef.current
+    if (!container) return
+    messageScrollPositionsRef.current[String(chatId)] = container.scrollTop
+  }
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
@@ -1084,10 +1108,8 @@ export default function CollaborationApp() {
             }
           }
 
-          const maxChannelsPerPoll = 5
-          const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
           const channelCounts = await Promise.all(
-            channelsThisCycle.map(async ch => {
+            channelsToCheck.map(async ch => {
               try {
                 const count = await Storage.getMessageCount(ch.id)
                 return { channelId: ch.id, count }
@@ -1099,14 +1121,21 @@ export default function CollaborationApp() {
 
           for (const { channelId, count } of channelCounts) {
             if (!Number.isFinite(count)) continue
-            const prevCount = messageCounts[channelId] || 0
-            if (count > prevCount && !unreadChannels.includes(channelId)) {
-              setUnreadChannels(prev => [...prev, channelId])
+            const channelKey = String(channelId)
+            const previousCount = messageCountsRef.current[channelKey]
+            const hasBaseline = initializedChannelCountsRef.current.has(channelKey)
+
+            rememberChannelMessageCount(channelId, count)
+
+            if (
+              hasBaseline &&
+              count > (Number.isFinite(previousCount) ? previousCount : 0) &&
+              !(activeView === "channel" && String(activeChannel) === channelKey)
+            ) {
+              setUnreadChannels(prev =>
+                prev.some(id => String(id) === channelKey) ? prev : [...prev, channelId]
+              )
             }
-            messageCounts[channelId] = count
-          }
-          if (channelCounts.length > 0) {
-            setMessageCounts({ ...messageCounts })
           }
         }
 
@@ -1170,8 +1199,7 @@ export default function CollaborationApp() {
     activeCallId,
     activeSpace,
     spaces,
-    activeChannel,
-    unreadChannels
+    activeChannel
   ])
 
   // Ensure any incoming timeout is cleared when incomingCall is removed elsewhere
@@ -1184,24 +1212,21 @@ export default function CollaborationApp() {
   useEffect(() => {
     // Clear unread when entering a channel
     if (activeView === "channel" && activeChannel && currentUser) {
-      setUnreadChannels(prev => prev.filter(id => id !== activeChannel))
+      clearChannelUnread(activeChannel)
       const inMemory = messages[activeChannel]
       if (Array.isArray(inMemory)) {
-        messageCounts[activeChannel] = inMemory.length
-        setMessageCounts({ ...messageCounts })
+        rememberChannelMessageCount(activeChannel, inMemory.length)
         return
       }
       // Update current count reference
       ;(async () => {
         try {
           const count = await Storage.getMessageCount(activeChannel, { forceRefresh: true })
-          messageCounts[activeChannel] = count
-          setMessageCounts({ ...messageCounts })
+          rememberChannelMessageCount(activeChannel, count)
         } catch (e) {
           if (e && e.status === 403) {
             // restricted channel — skip silently
-            messageCounts[activeChannel] = 0
-            setMessageCounts({ ...messageCounts })
+            rememberChannelMessageCount(activeChannel, 0)
           }
           // Silently ignore other errors during initial load
         }
@@ -1674,7 +1699,7 @@ export default function CollaborationApp() {
             [chatId]: [...normalized, ...optimisticOnly]
           }
         })
-        setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
+        rememberChannelMessageCount(chatId, normalized.length)
       } catch (e) {
         if (e && e.status === 403) {
           // Only show access denied modal if user has spaces loaded (not initial load)
@@ -1876,6 +1901,14 @@ export default function CollaborationApp() {
 
     // 3.5) When restoring from Contexts/Files/Decisions back to Messages, don't auto-jump.
     if (restoreMessageScrollRef.current || pendingTabScrollRestoreRef.current) {
+      return
+    }
+
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false
+      if (messagesContainerRef.current) {
+        prevScrollHeightRef.current = messagesContainerRef.current.scrollHeight
+      }
       return
     }
 
@@ -5042,10 +5075,7 @@ export default function CollaborationApp() {
     const activeChatId = getActiveChatId()
     if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
-        const container = messagesContainerRef.current
-        if (container) {
-          messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
-        }
+        saveMessageScrollPosition(activeChatId)
       }
 
       if (activeChannelTab !== "messages" && nextTab === "messages") {
@@ -5064,13 +5094,6 @@ export default function CollaborationApp() {
     if (!activeChatId) return
 
     const previousTab = previousChannelTabRef.current
-    if (previousTab === "messages" && activeChannelTab !== "messages") {
-      const container = messagesContainerRef.current
-      if (container) {
-        messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
-      }
-    }
-
     if (previousTab !== "messages" && activeChannelTab === "messages") {
       restoreMessageScrollRef.current = true
     }
@@ -5090,16 +5113,36 @@ export default function CollaborationApp() {
       pendingTabScrollRestoreRef.current === String(activeChatId)
     if (!shouldRestore) return
 
-    const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
-    if (typeof savedScrollTop === "number") {
-      container.scrollTop = savedScrollTop
-      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
-      setIsAtBottom(atBottom)
-      prevScrollHeightRef.current = container.scrollHeight
+    let firstFrame = null
+    let secondFrame = null
+
+    const restoreScrollPosition = () => {
+      const latestContainer = messagesContainerRef.current
+      if (!latestContainer) return
+
+      const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
+      if (typeof savedScrollTop === "number") {
+        latestContainer.scrollTop = savedScrollTop
+        const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+        const atBottom =
+          latestContainer.scrollHeight - latestContainer.scrollTop - latestContainer.clientHeight < threshold
+        skipNextAutoScrollRef.current = true
+        setIsAtBottom(atBottom)
+        prevScrollHeightRef.current = latestContainer.scrollHeight
+      }
+
+      restoreMessageScrollRef.current = false
+      pendingTabScrollRestoreRef.current = null
     }
-    restoreMessageScrollRef.current = false
-    pendingTabScrollRestoreRef.current = null
+
+    firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(restoreScrollPosition)
+    })
+
+    return () => {
+      if (firstFrame) cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
   }, [activeChannelTab, activeChannel, activeDMUser, messages])
 
   // --- Actions ---
@@ -8688,7 +8731,7 @@ export default function CollaborationApp() {
                                 </span>
 
                                 {/* Unread Indicator */}
-                                {unreadChannels.includes(channel.id) &&
+                                {hasUnreadChannel(channel.id) &&
                                   activeChannel !== channel.id && (
                                     <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
                                   )}
@@ -11007,7 +11050,7 @@ export default function CollaborationApp() {
                   >
                     <Hash className="w-4 h-4 flex-shrink-0" />
                     <span className="truncate flex-1 text-left">{channel.name}</span>
-                    {unreadChannels.includes(channel.id) && activeChannel !== channel.id && (
+                    {hasUnreadChannel(channel.id) && activeChannel !== channel.id && (
                       <span className="collapsed-space-channel-dot" />
                     )}
                   </button>

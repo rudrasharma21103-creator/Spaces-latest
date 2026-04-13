@@ -6535,7 +6535,7 @@ body.dark .liquid-glass-navbar {
 /* Light theme sidebars */
 html:not(.dark) .liquid-glass-sidebar,
 body:not(.dark) .liquid-glass-sidebar {
-  background: #f6f8fc !important;
+  background: #ffffff !important;
 }
 
 html:not(.dark) .liquid-glass-navbar::before,

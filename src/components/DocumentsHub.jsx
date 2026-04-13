@@ -1,5 +1,6 @@
 import React, { useMemo } from "react"
 import {
+  ArrowLeft,
   ArrowUpRight,
   FileText,
   FolderOpen,
@@ -139,6 +140,7 @@ export default function DocumentsHub(props) {
     gmailAttachments = [],
     formatDocsDate,
     formatDocsSize,
+    onBackHome,
     onConnectGoogle,
     onReconnectGoogle,
     onRefresh,
@@ -318,6 +320,22 @@ export default function DocumentsHub(props) {
       <div className="relative isolate min-h-[100dvh]">
         <div className="relative px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
           <div className="flex flex-col gap-6">
+            {typeof onBackHome === "function" && (
+              <div className="flex items-center">
+                <button
+                  onClick={onBackHome}
+                  className={cx(
+                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition",
+                    isDarkMode
+                      ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      : "border-slate-200/80 bg-white/90 text-slate-700 hover:border-slate-300 hover:bg-white"
+                  )}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </button>
+              </div>
+            )}
             {!googleAccessToken ? (
               <SurfaceCard isDarkMode={isDarkMode}>
                 <div className="px-6 py-12 text-center sm:px-8">
