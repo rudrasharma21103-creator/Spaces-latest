@@ -239,7 +239,6 @@ export default function CollaborationApp() {
   const [highlightTerm, setHighlightTerm] = useState("")
   const [targetMessageId, setTargetMessageId] = useState(null)
   const [pinnedMessageId, setPinnedMessageId] = useState(null)
-  const [hoveredMessageId, setHoveredMessageId] = useState(null)
   const [showEmojiPickerFor, setShowEmojiPickerFor] = useState(null)
   const [activeChannelTab, setActiveChannelTab] = useState("messages")
   const [selectedMessageIds, setSelectedMessageIds] = useState([])
@@ -591,6 +590,7 @@ export default function CollaborationApp() {
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
   const skipNextAutoScrollRef = useRef(false)
+  const scrollMetricsFrameRef = useRef(null)
   const messageCountsRef = useRef({})
   const initializedChannelCountsRef = useRef(new Set())
   const contextSaveTimeoutRef = useRef(null)
@@ -623,8 +623,60 @@ export default function CollaborationApp() {
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
+  const updateIsAtBottom = nextValue => {
+    setIsAtBottom(prev => (prev === nextValue ? prev : nextValue))
+  }
+
+  const updateVisibleDateLabel = nextValue => {
+    if (!nextValue) return
+    setVisibleDateLabel(prev => (prev === nextValue ? prev : nextValue))
+  }
+
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current
+    if (!el) return
+
+    if (activeChatId) {
+      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
+    }
+
+    prevScrollHeightRef.current = el.scrollHeight
+
+    if (scrollMetricsFrameRef.current) return
+
+    scrollMetricsFrameRef.current = requestAnimationFrame(() => {
+      scrollMetricsFrameRef.current = null
+      const latest = messagesContainerRef.current
+      if (!latest) return
+
+      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+      const atBottom = latest.scrollHeight - latest.scrollTop - latest.clientHeight < threshold
+      updateIsAtBottom(atBottom)
+
+      try {
+        const mid = latest.scrollTop + latest.clientHeight / 2
+        const nodes = latest.querySelectorAll('[id^="msg-"]')
+        let foundTs = null
+        for (let i = 0; i < nodes.length; i++) {
+          const node = nodes[i]
+          if (node.offsetTop <= mid) {
+            foundTs = node.dataset.timestamp || null
+          } else {
+            break
+          }
+        }
+        if (foundTs) {
+          updateVisibleDateLabel(formatDateLabel(foundTs, timeTicker))
+        }
+      } catch (e) {}
+    })
+  }
+
   useEffect(() => {
     return () => {
+      if (scrollMetricsFrameRef.current) {
+        cancelAnimationFrame(scrollMetricsFrameRef.current)
+      }
       for (const objectUrl of protectedFileUrlCacheRef.current.values()) {
         URL.revokeObjectURL(objectUrl)
       }
@@ -1716,7 +1768,7 @@ export default function CollaborationApp() {
     }
     loadMessages(true)
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
-    const interval = setInterval(() => loadMessages(true), 15000)
+    const interval = setInterval(() => loadMessages(true), 45000)
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
 
@@ -1894,7 +1946,7 @@ export default function CollaborationApp() {
     // 3) When the user manually switches a thread (channel/DM), do an instant jump to latest
     if (justSwitchedThreadRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
-      setIsAtBottom(true)
+      updateIsAtBottom(true)
       justSwitchedThreadRef.current = false
       return
     }
@@ -1919,10 +1971,10 @@ export default function CollaborationApp() {
 
     if (isAtBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      setIsAtBottom(true)
+      updateIsAtBottom(true)
       // record current height so future incoming messages can preserve scroll position
       try { prevScrollHeightRef.current = el.scrollHeight } catch (e) {}
-      try { setVisibleDateLabel(messageDateLabel || "Today") } catch (e) {}
+      try { updateVisibleDateLabel(messageDateLabel || "Today") } catch (e) {}
     } else {
       // Preserve scroll position: adjust scrollTop by the increase in scrollHeight
       try {
@@ -4127,8 +4179,8 @@ export default function CollaborationApp() {
       pendingTabScrollRestoreRef.current = null
       previousChannelTabRef.current = "messages"
       prevScrollHeightRef.current = 0
-      setIsAtBottom(true)
-      setVisibleDateLabel("Today")
+      updateIsAtBottom(true)
+      updateVisibleDateLabel("Today")
       setTargetMessageId(null)
       setPinnedMessageId(null)
       if (activeChannelTab !== "messages") {
@@ -5127,7 +5179,7 @@ export default function CollaborationApp() {
         const atBottom =
           latestContainer.scrollHeight - latestContainer.scrollTop - latestContainer.clientHeight < threshold
         skipNextAutoScrollRef.current = true
-        setIsAtBottom(atBottom)
+        updateIsAtBottom(atBottom)
         prevScrollHeightRef.current = latestContainer.scrollHeight
       }
 
@@ -9933,34 +9985,7 @@ export default function CollaborationApp() {
                 <div className={`${(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
                 <div
                   ref={messagesContainerRef}
-                  onScroll={() => {
-                    const el = messagesContainerRef.current
-                    if (!el) return
-                    if (activeChatId) {
-                      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
-                    }
-                    const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-                    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
-                    setIsAtBottom(atBottom)
-                    // keep track of latest scrollHeight for preserving position when new messages arrive
-                    prevScrollHeightRef.current = el.scrollHeight
-                    // Update the visible date label based on the message near the vertical center
-                    try {
-                      const mid = el.scrollTop + el.clientHeight / 2
-                      const nodes = el.querySelectorAll('[id^="msg-"]')
-                      let foundTs = null
-                      for (let i = 0; i < nodes.length; i++) {
-                        const n = nodes[i]
-                        if (n.offsetTop <= mid) {
-                          foundTs = n.dataset.timestamp || null
-                        } else break
-                      }
-                      if (foundTs) {
-                        const label = formatDateLabel(foundTs, timeTicker)
-                        setVisibleDateLabel(label)
-                      }
-                    } catch (e) {}
-                  }}
+                  onScroll={handleMessagesScroll}
                   className={`flex-1 overflow-y-auto p-4 sm:px-6 sm:py-5 space-y-6 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
@@ -10146,8 +10171,6 @@ export default function CollaborationApp() {
                               )}
 
                               <div
-                              onMouseEnter={() => setHoveredMessageId(msg.id)}
-                              onMouseLeave={() => setHoveredMessageId(null)}
                               onTouchStart={() => {
                                 longPressTimerRef.current = setTimeout(() => setShowEmojiPickerFor(msg.id), 600)
                               }}
@@ -10548,7 +10571,7 @@ export default function CollaborationApp() {
                     <button
                       onClick={() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-                        setIsAtBottom(true)
+                        updateIsAtBottom(true)
                         setPinnedMessageId(null)
                         setHighlightTerm("")
                       }}
