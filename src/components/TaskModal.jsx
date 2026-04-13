@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react'
 import * as TasksService from '../services/tasks'
 
+const getEntityId = value => {
+  if (value === undefined || value === null) return null
+  if (typeof value === "string" || typeof value === "number") return String(value)
+  if (typeof value === "object") {
+    if (value.$oid) return String(value.$oid)
+    if (value.id !== undefined && value.id !== null) return String(value.id)
+    if (value.userId !== undefined && value.userId !== null) return String(value.userId)
+    if (value._id !== undefined && value._id !== null) return getEntityId(value._id)
+  }
+  return String(value)
+}
+
 export default function TaskModal({
   visible,
   onClose,
@@ -30,9 +42,10 @@ export default function TaskModal({
 
   const submit = async () => {
     if (!text.trim() || selected.length === 0) return
+    const creatorId = getEntityId(currentUser?.id || currentUser?._id || currentUser?.userId)
     const payload = {
       id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      created_by: currentUser?.id,
+      created_by: creatorId,
       assigned_to: selected,
       message: text,
       space_id: spaceId,

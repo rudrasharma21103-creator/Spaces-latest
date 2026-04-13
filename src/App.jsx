@@ -63,6 +63,7 @@ import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
 import DocumentsHub from "./components/DocumentsHub"
+import TasksHub from "./components/TasksHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -136,6 +137,18 @@ function getAttachmentCacheKey(att) {
     att.webViewLink ||
     null
   )
+}
+
+function getEntityId(value) {
+  if (value === undefined || value === null) return null
+  if (typeof value === "string" || typeof value === "number") return String(value)
+  if (typeof value === "object") {
+    if (value.$oid) return String(value.$oid)
+    if (value.id !== undefined && value.id !== null) return String(value.id)
+    if (value.userId !== undefined && value.userId !== null) return String(value.userId)
+    if (value._id !== undefined && value._id !== null) return getEntityId(value._id)
+  }
+  return String(value)
 }
 
 // Custom hook to detect window size for responsive design
@@ -272,6 +285,7 @@ export default function CollaborationApp() {
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
   const [tasksList, setTasksList] = useState([])
+  const [completingTaskId, setCompletingTaskId] = useState(null)
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -293,6 +307,7 @@ export default function CollaborationApp() {
   const [setPasswordError, setSetPasswordError] = useState("")
   const [setPasswordLoading, setSetPasswordLoading] = useState(false)
   const [pendingAdminUserId, setPendingAdminUserId] = useState(null)
+  const currentUserTaskId = getEntityId(currentUser?.id || currentUser?._id || currentUser?.userId)
 
   const handleSetPasswordSubmit = async () => {
     setSetPasswordError("")
@@ -1321,9 +1336,11 @@ export default function CollaborationApp() {
         Storage.getEvents()
           .then(evts => setEvents(evts || []))
           .catch(() => {})
-        TasksService.getTasksForUser(currentUser.id)
-          .then(t => setTasksList(Array.isArray(t) ? t : []))
-          .catch(e => console.warn('Failed to load tasks', e))
+        if (currentUserTaskId) {
+          TasksService.getTasksForUser(currentUserTaskId)
+            .then(t => setTasksList(Array.isArray(t) ? t : []))
+            .catch(e => console.warn('Failed to load tasks', e))
+        }
 
         return enrichedSpaces
       }
@@ -2834,6 +2851,37 @@ export default function CollaborationApp() {
     setActiveSpace(null)
   }
 
+  const handleCompleteTask = async task => {
+    if (!task || task.status === "completed") return
+
+    const taskId = task.id || task.timestamp
+    if (!taskId) return
+
+    setCompletingTaskId(String(taskId))
+    setTasksList(prev =>
+      prev.map(item =>
+        String(item.id || item.timestamp) === String(taskId)
+          ? { ...item, status: "completed" }
+          : item
+      )
+    )
+
+    try {
+      await TasksService.updateTask(taskId, { status: "completed" })
+    } catch (error) {
+      console.warn("task update failed", error)
+      setTasksList(prev =>
+        prev.map(item =>
+          String(item.id || item.timestamp) === String(taskId)
+            ? { ...item, status: task.status || "pending" }
+            : item
+        )
+      )
+    } finally {
+      setCompletingTaskId(currentId => (currentId === String(taskId) ? null : currentId))
+    }
+  }
+
   // Connect Google Calendar
   const handleConnectGoogleCalendar = () => {
     GoogleService.requestGoogleCalendarAccess(
@@ -3751,6 +3799,11 @@ export default function CollaborationApp() {
   const currentChannels = useMemo(
     () => currentSpace?.channels || [],
     [currentSpace]
+  )
+
+  const workspaceChannels = useMemo(
+    () => spaces.flatMap(space => space?.channels || []),
+    [spaces]
   )
 
   const getCurrentSpace = () => currentSpace
@@ -7930,7 +7983,7 @@ export default function CollaborationApp() {
               const chatId = getActiveChatId()
               const newMsg = {
                 id: `tmp-task-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-                userId: currentUser?.id,
+                userId: currentUserTaskId || currentUser?.id,
                 text: payload.message,
                 timestamp: payload.timestamp || new Date().toISOString(),
                 type: 'task',
@@ -7964,7 +8017,7 @@ export default function CollaborationApp() {
                           ...appendContextActivity(context, {
                             id: `activity-task-${payload.id}-${Date.now()}`,
                             type: "task_added",
-                            userId: currentUser.id,
+                            userId: currentUserTaskId || currentUser?.id,
                             taskId: taskId || payload.id,
                             timestamp: payload.timestamp || new Date().toISOString(),
                           }),
@@ -8341,6 +8394,20 @@ export default function CollaborationApp() {
           onSelectFilter={handleSelectDocumentsFilter}
           onOpenAttachment={openAttachment}
           onAddDocument={addDocumentAsAttachment}
+        />
+      ) : activeView === "tasks" ? (
+        <TasksHub
+          isDarkMode={isDarkMode}
+          tasks={tasksList}
+          messages={messages}
+          currentUser={currentUser}
+          channels={workspaceChannels}
+          completingTaskId={completingTaskId}
+          onBackHome={() => {
+            setActiveView("home")
+            setHomeSection("tasks")
+          }}
+          onMarkTaskComplete={handleCompleteTask}
         />
       ) : (
         <>
