@@ -62,6 +62,7 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
+import DocumentsHub from "./components/DocumentsHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -2229,6 +2230,15 @@ export default function CollaborationApp() {
     )
   }
 
+  const handleReconnectGoogleDocs = () => {
+    GoogleService.removeGoogleAccessToken()
+    setGoogleAccessToken(null)
+    setDocsError(null)
+    setGoogleDocs([])
+    setGmailAttachments([])
+    handleConnectGoogleDocs()
+  }
+
   const handleConnectSpecificApp = (appType) => {
     if (!googleAccessToken) {
       handleConnectGoogleDocs()
@@ -2317,25 +2327,38 @@ export default function CollaborationApp() {
     })
   }
 
-  const handleDocsClick = () => {
-    setShowDocsModal(true)
-    
-    if (googleAccessToken) {
+  const handleSelectDocumentsFilter = nextFilter => {
+    setSelectedAppFilter(nextFilter)
+    if (!googleAccessToken) return
+    if (nextFilter === "all" || nextFilter === "shared") {
       loadGoogleDocs(googleAccessToken)
+      return
     }
-    // Populate shared chat docs from currently loaded messages
+    loadGoogleDocs(googleAccessToken, nextFilter)
+  }
+
+  const handleDocsClick = (nextFilter = "all") => {
+    setActiveView("documents")
+    setActiveSpace(null)
+    setSelectedAppFilter(nextFilter)
+    if (isMobile) setMobileView("chat")
+
+    if (googleAccessToken) {
+      if (nextFilter === "all" || nextFilter === "shared") loadGoogleDocs(googleAccessToken)
+      else loadGoogleDocs(googleAccessToken, nextFilter)
+    }
     setSharedChatDocs(extractSharedChatDocs(messages))
   }
 
-  // Keep shared chat docs up-to-date while the modal is open
+  // Keep shared chat docs up-to-date while Documents Hub is active
   useEffect(() => {
-    if (!showDocsModal) return
+    if (activeView !== "documents") return
     setSharedChatDocs(extractSharedChatDocs(messages))
-  }, [showDocsModal, messages])
+  }, [activeView, messages])
 
   // Real-time Gmail sync - periodically check for new attachments
   useEffect(() => {
-    if (!googleAccessToken || !showDocsModal) return
+    if (!googleAccessToken || activeView !== "documents") return
     
     const checkNewGmail = async () => {
       try {
@@ -2366,7 +2389,7 @@ export default function CollaborationApp() {
     const interval = setInterval(checkNewGmail, 30000)
     
     return () => clearInterval(interval)
-  }, [googleAccessToken, showDocsModal, gmailLastCheckTime])
+  }, [activeView, googleAccessToken, gmailLastCheckTime])
 
   // Add document as attachment to message input
   const addDocumentAsAttachment = (doc) => {
@@ -2453,6 +2476,225 @@ export default function CollaborationApp() {
       shared: sharedChatDocs.length,
     }
   }, [googleDocs, gmailAttachments, sharedChatDocs])
+
+  const formatDocsDate = value => {
+    if (!value) return "No recent activity"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "No recent activity"
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  }
+
+  const formatDocsSize = value => {
+    const size = Number(value)
+    if (!Number.isFinite(size) || size <= 0) return "Unknown size"
+    if (size >= 1073741824) return `${(size / 1073741824).toFixed(1)} GB`
+    if (size >= 1048576) return `${(size / 1048576).toFixed(1)} MB`
+    if (size >= 1024) return `${Math.max(1, Math.round(size / 1024))} KB`
+    return `${size} B`
+  }
+
+  const docsCollectionSummary = {
+    all: {
+      label: "All sources",
+      detail: "Everything from Drive, shared chats, and Gmail in one command center.",
+      count: docsOverview.total,
+    },
+    drive: {
+      label: "Drive files",
+      detail: "Recent Google Drive files ready to open or drop into a conversation.",
+      count: sortedGoogleDocs.length,
+    },
+    docs: {
+      label: "Docs",
+      detail: "Collaborative documents pulled into a tighter review flow.",
+      count: sortedGoogleDocs.length,
+    },
+    sheets: {
+      label: "Sheets",
+      detail: "Spreadsheets surfaced for quick handoff and reuse.",
+      count: sortedGoogleDocs.length,
+    },
+    slides: {
+      label: "Slides",
+      detail: "Decks and presentation files ready for fast sharing.",
+      count: sortedGoogleDocs.length,
+    },
+    shared: {
+      label: "Shared in chats",
+      detail: "Files already moving through your workspace conversations.",
+      count: sharedChatDocs.length,
+    },
+    gmail: {
+      label: "Gmail attachments",
+      detail: "Inbox files staged for download or instant attachment.",
+      count: gmailAttachments.length,
+    },
+  }[selectedAppFilter] || {
+    label: "Library",
+    detail: "Everything synced into one place.",
+    count: docsOverview.total,
+  }
+
+  const docsOverviewCards = [
+    {
+      label: 'Total assets',
+      value: docsOverview.total,
+      note: 'Everything accessible right now',
+      tone: isDarkMode ? 'border-white/10 bg-white/[0.05] text-white' : 'border-white/70 bg-white/90 text-slate-900',
+    },
+    {
+      label: 'Drive files',
+      value: docsOverview.drive,
+      note: 'Fresh from your Google workspace',
+      tone: isDarkMode ? 'border-cyan-400/15 bg-cyan-400/10 text-cyan-100' : 'border-sky-100 bg-gradient-to-br from-sky-50 to-cyan-50 text-sky-800',
+    },
+    {
+      label: 'Shared docs',
+      value: docsOverview.shared,
+      note: 'Already circulating in team chats',
+      tone: isDarkMode ? 'border-emerald-400/15 bg-emerald-400/10 text-emerald-100' : 'border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 text-emerald-800',
+    },
+    {
+      label: 'Gmail files',
+      value: docsOverview.gmail,
+      note: 'Inbox attachments ready to drop in',
+      tone: isDarkMode ? 'border-rose-400/15 bg-rose-400/10 text-rose-100' : 'border-rose-100 bg-gradient-to-br from-rose-50 to-orange-50 text-rose-800',
+    },
+  ]
+
+  const docsViewportMessage = isMobile
+    ? 'Your files lead on mobile now. Scan, open, and attach from one focused browser.'
+    : windowWidth < 1280
+      ? 'The library takes the lead while controls and context stay tucked to the side.'
+      : 'The browser is the primary stage. Scan, open, and attach without the controls eating the viewport.'
+
+  const docsFilterButtons = (
+    <>
+      <button
+        onClick={() => {
+          setSelectedAppFilter('all')
+          loadGoogleDocs(googleAccessToken)
+        }}
+        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+          selectedAppFilter === 'all'
+            ? 'border-sky-600 bg-sky-600 text-white shadow-[0_12px_30px_rgba(2,132,199,0.28)]'
+            : isDarkMode
+              ? 'border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]'
+              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+        }`}
+      >
+        <Grid3x3 className="h-4 w-4" />
+        All
+      </button>
+      <button
+        onClick={() => {
+          setSelectedAppFilter('drive')
+          loadGoogleDocs(googleAccessToken, 'drive')
+        }}
+        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+          selectedAppFilter === 'drive'
+            ? isDarkMode
+              ? 'border-cyan-300/30 bg-cyan-300/90 text-slate-950 shadow-[0_12px_30px_rgba(34,211,238,0.2)]'
+              : 'border-slate-900 bg-slate-900 text-white'
+            : isDarkMode
+              ? 'border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]'
+              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+        }`}
+      >
+        <SmartImage src="/google-drive.png" alt="Drive" className="h-4 w-4" />
+        Drive
+      </button>
+      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
+        <button
+          onClick={() => {
+            setSelectedAppFilter('docs')
+            loadGoogleDocs(googleAccessToken, 'docs')
+          }}
+          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+            selectedAppFilter === 'docs'
+              ? 'border-blue-600 bg-blue-600 text-white'
+              : isDarkMode
+                ? 'border-blue-400/20 bg-blue-400/10 text-blue-200 hover:bg-blue-400/15'
+                : 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100'
+          }`}
+        >
+          <SmartImage src="/google-docs.png" alt="Docs" className="h-4 w-4" />
+          Docs
+        </button>
+      )}
+      <button
+        onClick={() => {
+          setSelectedAppFilter('shared')
+        }}
+        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+          selectedAppFilter === 'shared'
+            ? isDarkMode
+              ? 'border-emerald-300/30 bg-emerald-300/90 text-slate-950'
+              : 'border-emerald-500 bg-emerald-500 text-white'
+            : isDarkMode
+              ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/15'
+              : 'border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+        }`}
+      >
+        <SmartImage src="/shared.png.png" alt="Shared" className="h-4 w-4" />
+        Shared
+      </button>
+      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
+        <button
+          onClick={() => {
+            setSelectedAppFilter('sheets')
+            loadGoogleDocs(googleAccessToken, 'sheets')
+          }}
+          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+            selectedAppFilter === 'sheets'
+              ? 'border-green-600 bg-green-600 text-white'
+              : isDarkMode
+                ? 'border-green-400/20 bg-green-400/10 text-green-200 hover:bg-green-400/15'
+                : 'border-green-100 bg-green-50 text-green-700 hover:bg-green-100'
+          }`}
+        >
+          <SmartImage src="/google-sheets.png" alt="Sheets" className="h-4 w-4" />
+          Sheets
+        </button>
+      )}
+      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
+        <button
+          onClick={() => {
+            setSelectedAppFilter('slides')
+            loadGoogleDocs(googleAccessToken, 'slides')
+          }}
+          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+            selectedAppFilter === 'slides'
+              ? 'border-amber-500 bg-amber-500 text-white'
+              : isDarkMode
+                ? 'border-amber-400/20 bg-amber-400/10 text-amber-200 hover:bg-amber-400/15'
+                : 'border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100'
+          }`}
+        >
+          <SmartImage src="/slides.png" alt="Slides" className="h-4 w-4" />
+          Slides
+        </button>
+      )}
+      {gmailAttachments.length > 0 && (
+        <button
+          onClick={() => {
+            setSelectedAppFilter('gmail')
+            loadGoogleDocs(googleAccessToken, 'gmail')
+          }}
+          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+            selectedAppFilter === 'gmail'
+              ? 'border-rose-600 bg-rose-600 text-white'
+              : isDarkMode
+                ? 'border-rose-400/20 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15'
+                : 'border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100'
+          }`}
+        >
+          <SmartImage src="/gmail.png" alt="Gmail" className="h-4 w-4" />
+          Gmail
+        </button>
+      )}
+    </>
+  )
 
   const homeFiles = useMemo(() => {
     const sharedFiles = extractSharedChatDocs(messages).map(file => ({
@@ -4119,6 +4361,7 @@ export default function CollaborationApp() {
       const user = getUser(activeDMUser)
       return user ? user.name : "Unknown User"
     } else if (activeView === "calendar") return "Calendar"
+    else if (activeView === "documents") return "Documents Hub"
     else if (activeView === "meeting") return "Meeting"
     return ""
   }
@@ -7977,6 +8220,33 @@ export default function CollaborationApp() {
           resolveProtectedFileUrl={fetchProtectedUrlAndCreateObjectURL}
           onThemeChange={setIsDarkMode}
         />
+      ) : activeView === "documents" ? (
+        <DocumentsHub
+          isDarkMode={isDarkMode}
+          googleAccessToken={googleAccessToken}
+          loadingDocs={loadingDocs}
+          docsError={docsError}
+          selectedAppFilter={selectedAppFilter}
+          docsOverview={docsOverview}
+          docsCollectionSummary={docsCollectionSummary}
+          googleDocs={googleDocs}
+          sortedGoogleDocs={sortedGoogleDocs}
+          sharedChatDocs={sharedChatDocs}
+          gmailAttachments={gmailAttachments}
+          gmailLastCheckTime={gmailLastCheckTime}
+          formatDocsDate={formatDocsDate}
+          formatDocsSize={formatDocsSize}
+          onBackHome={() => {
+            setActiveView("home")
+            setHomeSection("files")
+          }}
+          onConnectGoogle={handleConnectGoogleDocs}
+          onReconnectGoogle={handleReconnectGoogleDocs}
+          onRefresh={() => handleSelectDocumentsFilter(selectedAppFilter)}
+          onSelectFilter={handleSelectDocumentsFilter}
+          onOpenAttachment={openAttachment}
+          onAddDocument={addDocumentAsAttachment}
+        />
       ) : (
         <>
       {/* Mobile Sidebar Overlay */}
@@ -8041,6 +8311,15 @@ export default function CollaborationApp() {
             )}
             {isMobile && (
               <button
+                onClick={() => handleDocsClick()}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                title="Documents Hub"
+              >
+                <FileText className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+              </button>
+            )}
+            {isMobile && (
+              <button
                 onClick={() => setShowCreateSpaceModal(true)}
                 className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Create Space"
@@ -8080,6 +8359,15 @@ export default function CollaborationApp() {
                 title="Tasks"
               >
                 <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+              </button>
+            )}
+            {!sidebarCollapsed && !isMobile && (
+              <button
+                onClick={() => handleDocsClick()}
+                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                title="Documents Hub"
+              >
+                <FileText className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {/* Admin dashboard access - visible to org admins of verified org */}
@@ -12172,306 +12460,309 @@ export default function CollaborationApp() {
 
       {/* Docs Modal */}
       {showDocsModal && (
-        <div className={`fixed inset-0 z-50 animate-fade-in ${
-          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'
+        <div className={`fixed inset-0 z-50 p-2 sm:p-5 lg:p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/75 backdrop-blur-xl' : 'bg-slate-950/45 backdrop-blur-xl'
         }`}>
-          <div className={`h-full w-full p-4 sm:p-6 md:p-8 flex flex-col ${
-            isDarkMode 
-              ? 'bg-slate-900/95' 
-              : 'bg-slate-50/95'
+          <div className={`mx-auto flex h-full w-full max-w-[1700px] flex-col overflow-hidden rounded-[24px] border shadow-[0_28px_90px_rgba(15,23,42,0.28)] sm:rounded-[30px] ${
+            isDarkMode ? 'border-white/10 bg-[#07111f]/95 text-white' : 'border-white/70 bg-[#f7fbff]/95 text-slate-900'
           }`}>
-            <div className={`mb-4 sm:mb-6 border-b pb-4 sm:pb-6 ${
-              isDarkMode
-                ? 'border-slate-800'
-                : 'border-slate-200'
-            }`}>
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 shadow-cyan-500/20' 
-                        : 'bg-gradient-to-r from-sky-500 to-sky-600 shadow-sky-300/40'
-                    }`}>
-                      <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
-                        isDarkMode 
-                          ? 'bg-gradient-to-r from-white to-sky-400' 
-                          : 'bg-gradient-to-r from-slate-800 to-sky-700'
+            <div className="relative flex h-full flex-col overflow-hidden">
+              <div className={`pointer-events-none absolute -left-24 top-0 h-64 w-64 rounded-full blur-3xl ${
+                isDarkMode ? 'bg-cyan-500/18' : 'bg-sky-200/70'
+              }`} />
+              <div className={`pointer-events-none absolute right-0 top-20 h-72 w-72 rounded-full blur-3xl ${
+                isDarkMode ? 'bg-fuchsia-500/10' : 'bg-cyan-100/90'
+              }`} />
+
+              <div className={`relative border-b px-4 py-2.5 sm:px-6 sm:py-3 lg:px-8 ${
+                isDarkMode ? 'border-white/10' : 'border-slate-200/80'
+              }`}>
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-3">
+                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] shadow-[0_14px_28px_rgba(14,165,233,0.22)] sm:h-12 sm:w-12 sm:rounded-[18px] ${
+                        isDarkMode ? 'bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-600' : 'bg-gradient-to-br from-sky-500 via-cyan-500 to-blue-600'
                       }`}>
-                        Documents Hub
-                      </h3>
-                      <p className={`text-xs sm:text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Browse Drive files, shared workspace docs, and Gmail attachments in one place.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 sm:gap-3">
-                  {googleAccessToken && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('drive')
-                          loadGoogleDocs(googleAccessToken, 'drive')
-                        }}
-                        className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200 border-slate-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
-                        title="Show Drive Files"
-                      >
-                        <SmartImage src="/google-drive.png" alt="Drive" className="w-5 h-5" />
-                        <span className="hidden sm:inline">Open Drive</span>
-                      </button>
-                      <button
-                        onClick={() => setShowConnectAppsModal(true)}
-                        className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
-                          isDarkMode 
-                            ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border-sky-500/30 hover:shadow-lg hover:shadow-sky-500/20' 
-                            : 'bg-gradient-to-r from-sky-50 to-cyan-50 text-sky-600 hover:from-sky-100 hover:to-cyan-100 border-sky-100 hover:shadow-lg hover:shadow-sky-100/50'
-                        }`}
-                      >
-                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        <span className="hidden sm:inline">Connect More Apps</span>
-                        <span className="sm:hidden">Connect</span>
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => setShowDocsModal(false)}
-                    className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
-                      isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
-                    }`}
-                  >
-                    <X className="w-5 h-5 sm:w-6 sm:h-6" />
-                  </button>
-                </div>
-              </div>
-
-              {googleAccessToken && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-                  {[
-                    { label: 'Total assets', value: docsOverview.total, tone: isDarkMode ? 'bg-slate-900/70 border-slate-700 text-white' : 'bg-white/80 border-slate-200 text-slate-900' },
-                    { label: 'Drive files', value: docsOverview.drive, tone: isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : 'bg-blue-50 border-blue-100 text-blue-700' },
-                    { label: 'Shared docs', value: docsOverview.shared, tone: isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-200' : 'bg-sky-50 border-sky-100 text-sky-700' },
-                    { label: 'Gmail files', value: docsOverview.gmail, tone: isDarkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 'bg-rose-50 border-rose-100 text-rose-700' },
-                  ].map(stat => (
-                    <div key={stat.label} className={`rounded-2xl border px-4 py-3 ${stat.tone}`}>
-                      <p className="text-[11px] uppercase tracking-[0.2em] opacity-70">{stat.label}</p>
-                      <p className="mt-2 text-2xl font-bold">{stat.value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {!googleAccessToken ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-16">
-                <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border-2 ${
-                  isDarkMode 
-                    ? 'bg-gradient-to-br from-sky-500/20 to-cyan-500/20 border-sky-500/30' 
-                    : 'bg-gradient-to-br from-sky-50 to-cyan-50 border-sky-100'
-                }`}>
-                  <FileText className={`w-12 h-12 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
-                </div>
-                <h4 className={`text-2xl font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Connect Your Google Account</h4>
-                <p className={`mb-6 text-center max-w-md ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Connect your Google account to access <strong>Gmail attachments</strong> and <strong>Google Drive files</strong> in one unified view.
-                </p>
-                <p className={`text-xs mb-4 text-center ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                  You'll be asked to grant permissions for Gmail and Drive access.
-                </p>
-                <button
-                  onClick={handleConnectGoogleDocs}
-                  className={`px-8 py-4 font-bold rounded-2xl transition-all flex items-center gap-3 text-white shadow-lg ${
-                    isDarkMode 
-                      ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-500/20' 
-                      : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
-                  }`}
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Connect Google Account
-                </button>
-              </div>
-            ) : (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {loadingDocs ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
-                        isDarkMode ? 'border-sky-500' : 'border-sky-600'
-                      }`}></div>
-                      <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
-                    </div>
-                  </div>
-                ) : docsError ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center px-4">
-                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                        isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
-                      }`}>
-                        <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
+                        <FileText className="h-5 w-5 text-white sm:h-6 sm:w-6" />
                       </div>
-                      <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
-                      <button
-                        onClick={() => {
-                          // If token expired, re-authenticate
-                          if (docsError.includes('expired') || docsError.includes('Invalid')) {
-                            setGoogleAccessToken(null)
-                            GoogleService.removeGoogleAccessToken()
-                            setDocsError(null)
-                            handleConnectGoogleDocs()
-                          } else {
-                            loadGoogleDocs(googleAccessToken)
-                          }
-                        }}
-                        className={`px-6 py-3 font-bold rounded-xl text-white ${
-                          isDarkMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-sky-600 hover:bg-sky-700'
-                        }`}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className={`mb-4 rounded-2xl border p-3 sm:p-4 ${
-                      isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'
-                    }`}>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                        <div>
-                          <p className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Collections</p>
-                          <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Switch between connected sources without leaving the workspace.
-                          </p>
-                        </div>
-                        <div className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          {docsOverview.total} items available
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('all')
-                          loadGoogleDocs(googleAccessToken)
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all ${
-                          selectedAppFilter === 'all'
-                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        All
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('drive')
-                          loadGoogleDocs(googleAccessToken, 'drive')
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                          selectedAppFilter === 'drive'
-                            ? isDarkMode ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        <SmartImage src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
-                      </button>
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('docs')
-                            loadGoogleDocs(googleAccessToken, 'docs')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'docs'
-                              ? 'bg-blue-600 text-white'
-                              : isDarkMode ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                          }`}
-                        >
-                          <SmartImage src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('shared')
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                          selectedAppFilter === 'shared'
-                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                        >
-                        <SmartImage src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
-                      </button>
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('sheets')
-                            loadGoogleDocs(googleAccessToken, 'sheets')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'sheets'
-                              ? 'bg-green-600 text-white'
-                              : isDarkMode ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-green-50 text-green-600 hover:bg-green-100'
-                          }`}
-                        >
-                          <SmartImage src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
-                        </button>
-                      )}
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('slides')
-                            loadGoogleDocs(googleAccessToken, 'slides')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'slides'
-                              ? 'bg-yellow-600 text-white'
-                              : isDarkMode ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
-                          }`}
-                          >
-                          <SmartImage src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
-                        </button>
-                      )}
-                      {gmailAttachments.length > 0 && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('gmail')
-                            loadGoogleDocs(googleAccessToken, 'gmail')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'gmail'
-                              ? 'bg-red-600 text-white'
-                              : isDarkMode ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
-                          }`}
-                        >
-                          <SmartImage src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
-                        </button>
-                      )}
-                      </div>
-                    </div>
-
-                    {/* Documents Grid */}
-                    <div className="flex-1 overflow-y-auto pr-2">
-                      {/* Shared Files View */}
-                      {selectedAppFilter === 'shared' && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                      <div className="min-w-0">
+                        <div className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                          isDarkMode ? 'bg-white/[0.06] text-slate-300' : 'bg-white/80 text-slate-600 shadow-sm'
                         }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared Files
-                            </h4>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                              {sharedChatDocs.length} items
+                          Workspace library
+                        </div>
+                        <h3 className={`mt-1.5 text-[1.2rem] font-semibold tracking-[-0.05em] sm:mt-2 sm:text-[1.9rem] ${
+                          isDarkMode ? 'text-white' : 'text-slate-900'
+                        }`}>
+                          Documents Hub
+                        </h3>
+                        <p className={`mt-1 max-w-[42rem] text-[12px] leading-5 sm:mt-1.5 sm:max-w-[48rem] sm:text-[13px] sm:leading-6 ${
+                          isDarkMode ? 'text-slate-300' : 'text-slate-600'
+                        }`}>
+                          {isMobile
+                            ? 'Open, scan, and attach Drive, shared workspace files, and Gmail attachments from one focused view.'
+                            : 'A sharper command center for Drive, workspace attachments, and Gmail files. Faster scanning, cleaner actions, and less visual noise.'}
+                        </p>
+                        {googleAccessToken && (
+                          <div className="mt-2 flex flex-wrap gap-2 sm:mt-3">
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
+                              isDarkMode ? 'bg-white/[0.05] text-slate-200' : 'bg-white text-slate-700 shadow-sm'
+                            }`}>
+                              {docsCollectionSummary.count} items in focus
+                            </span>
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
+                              isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'
+                            }`}>
+                              {docsCollectionSummary.label}
+                            </span>
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
+                              isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              Live sync {gmailLastCheckTime ? `updated ${formatDocsDate(gmailLastCheckTime)}` : 'ready'}
+                            </span>
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
+                              isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {docsOverview.total} assets in library
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    {googleAccessToken && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setSelectedAppFilter('drive')
+                            loadGoogleDocs(googleAccessToken, 'drive')
+                          }}
+                          className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
+                            isDarkMode
+                              ? 'border-white/12 bg-white/[0.06] text-slate-100 hover:border-cyan-400/35 hover:bg-white/[0.1]'
+                              : 'border-slate-200 bg-white/90 text-slate-700 hover:border-sky-200 hover:bg-white'
+                          }`}
+                          title="Show Drive Files"
+                        >
+                          <SmartImage src="/google-drive.png" alt="Drive" className="h-5 w-5" />
+                          <span>{isMobile ? 'Drive' : 'Open Drive'}</span>
+                        </button>
+                        <button
+                          onClick={() => setShowConnectAppsModal(true)}
+                          className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
+                            isDarkMode
+                              ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-400/15'
+                              : 'border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 text-sky-700 hover:from-cyan-100 hover:to-sky-100'
+                          }`}
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>{isMobile ? 'Connect apps' : 'Connect More Apps'}</span>
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => setShowDocsModal(false)}
+                      className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                        isDarkMode
+                          ? 'border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:bg-white/[0.08] hover:text-white'
+                          : 'border-slate-200 bg-white/90 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-700'
+                      }`}
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {!googleAccessToken ? (
+                <div className="relative flex flex-1 items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
+                  <div className={`w-full max-w-3xl rounded-[32px] border p-8 text-center shadow-[0_24px_70px_rgba(15,23,42,0.14)] sm:p-10 ${
+                    isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/92'
+                  }`}>
+                    <div className={`mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] border ${
+                      isDarkMode ? 'border-cyan-400/20 bg-gradient-to-br from-cyan-400/18 to-sky-500/18' : 'border-cyan-100 bg-gradient-to-br from-sky-50 to-cyan-50'
+                    }`}>
+                      <FileText className={`h-11 w-11 ${isDarkMode ? 'text-cyan-300' : 'text-sky-600'}`} />
+                    </div>
+                    <h4 className={`mt-6 text-3xl font-semibold tracking-[-0.04em] ${
+                      isDarkMode ? 'text-white' : 'text-slate-900'
+                    }`}>
+                      Connect your Google account
+                    </h4>
+                    <p className={`mx-auto mt-3 max-w-xl text-sm leading-7 sm:text-[15px] ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-600'
+                    }`}>
+                      Pull Gmail attachments and Google Drive files into one focused workspace view, then attach what you need directly into chats and channels.
+                    </p>
+                    <p className={`mt-3 text-xs ${
+                      isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                    }`}>
+                      You will be asked for Gmail and Drive permissions.
+                    </p>
+                    <button
+                      onClick={handleConnectGoogleDocs}
+                      className={`mx-auto mt-8 inline-flex items-center gap-3 rounded-full px-7 py-3.5 text-sm font-semibold text-white shadow-lg transition ${
+                        isDarkMode ? 'bg-cyan-500 hover:bg-cyan-400 shadow-cyan-500/20' : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
+                      }`}
+                    >
+                      <svg className="h-5 w-5" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                      </svg>
+                      Connect Google Account
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative flex flex-1 min-h-0 flex-col px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
+                  {loadingDocs ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
+                          isDarkMode ? 'border-sky-500' : 'border-sky-600'
+                        }`}></div>
+                        <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
+                      </div>
+                    </div>
+                  ) : docsError ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center px-4">
+                        <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                          isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
+                        }`}>
+                          <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
+                        </div>
+                        <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
+                        <button
+                          onClick={() => {
+                            if (docsError.includes('expired') || docsError.includes('Invalid')) {
+                              setGoogleAccessToken(null)
+                              GoogleService.removeGoogleAccessToken()
+                              setDocsError(null)
+                              handleConnectGoogleDocs()
+                            } else {
+                              loadGoogleDocs(googleAccessToken)
+                            }
+                          }}
+                          className={`px-6 py-3 font-bold rounded-xl text-white ${
+                            isDarkMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-sky-600 hover:bg-sky-700'
+                          }`}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_280px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
+                      <section className={`order-1 flex min-h-0 flex-col overflow-hidden rounded-[26px] border ${
+                        isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/88 shadow-[0_12px_34px_rgba(15,23,42,0.06)]'
+                      }`}>
+                        <div className={`border-b px-4 py-3 sm:px-5 sm:py-4 lg:px-6 ${
+                          isDarkMode ? 'border-white/10' : 'border-slate-200/80'
+                        }`}>
+                          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                            <div>
+                              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                                isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                              }`}>
+                                Main library
+                              </p>
+                              <h4 className={`mt-2 text-[1.35rem] font-semibold tracking-[-0.05em] sm:text-[1.55rem] ${
+                                isDarkMode ? 'text-white' : 'text-slate-900'
+                              }`}>
+                                {docsCollectionSummary.label}
+                              </h4>
+                              <p className={`mt-1.5 max-w-2xl text-[13px] leading-6 ${
+                                isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                              }`}>
+                                {docsViewportMessage}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                isDarkMode ? 'bg-white/[0.05] text-slate-300' : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {docsCollectionSummary.count} in focus
+                              </span>
+                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'
+                              }`}>
+                                {docsOverview.total} total
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className={`mt-4 rounded-[22px] border p-3 sm:p-4 ${
+                            isDarkMode ? 'border-white/10 bg-slate-950/35' : 'border-slate-200/80 bg-slate-50/90'
+                          }`}>
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                              <div className="min-w-0">
+                                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                                  isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                                }`}>
+                                  Source switcher
+                                </p>
+                                <p className={`mt-1 text-xs leading-5 sm:text-[13px] ${
+                                  isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                                }`}>
+                                  Jump between Drive, shared workspace files, Docs, Sheets, Slides, and Gmail without leaving the browser.
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                                <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                  isDarkMode ? 'bg-white/[0.05] text-slate-300' : 'bg-white text-slate-600 shadow-sm'
+                                }`}>
+                                  {docsCollectionSummary.label}
+                                </span>
+                                <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                  isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  Updated {gmailLastCheckTime ? formatDocsDate(gmailLastCheckTime) : 'now'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                              {docsFilterButtons}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-2 lg:hidden">
+                            {docsOverviewCards.map(stat => (
+                              <div key={stat.label} className={`relative overflow-hidden rounded-[18px] border px-3 py-2.5 ${stat.tone}`}>
+                                <div className="pointer-events-none absolute right-0 top-0 h-14 w-14 rounded-full bg-white/10 blur-2xl" />
+                                <p className="relative text-[10px] font-semibold uppercase tracking-[0.24em] opacity-70">{stat.label}</p>
+                                <div className="relative mt-1.5 flex items-end justify-between gap-2">
+                                  <p className="text-[1.35rem] font-semibold leading-none tracking-[-0.04em]">{stat.value}</p>
+                                  <div className="hidden max-w-[8rem] text-right text-[10px] leading-4 opacity-75 sm:block">{stat.note}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4 lg:px-6">
+                          <div className="space-y-4 pb-4">
+                        {/* Shared Files View */}
+                        {selectedAppFilter === 'shared' && (
+                          <div className={`rounded-[28px] border p-4 sm:p-5 ${
+                            isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+                          }`}>
+                            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                              <div>
+                                <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Shared files</h4>
+                                <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                  Workspace attachments already moving through conversations.
+                                </p>
+                              </div>
+                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+                                {sharedChatDocs.length} items
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                             {sharedChatDocs.map((attachment, idx) => {
                                     const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
                                     const attAppIcon = GoogleService.getAppIcon(attAppType)
@@ -12553,21 +12844,21 @@ export default function CollaborationApp() {
                       )}
 
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'drive' || selectedAppFilter === 'docs' || selectedAppFilter === 'sheets' || selectedAppFilter === 'slides') && googleDocs.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
+                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
                         }`}>
-                          <div className="flex items-center justify-between mb-3">
+                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                             <div>
-                              <h4 className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Google Workspace Files</h4>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                              <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Google Workspace files</h4>
+                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                 Recently updated files from Drive, Docs, Sheets, and Slides.
                               </p>
                             </div>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'}`}>
                               {googleDocs.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                           {sortedGoogleDocs.map((doc) => {
                             const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
                             const appIcon = GoogleService.getAppIcon(appType)
@@ -12616,18 +12907,23 @@ export default function CollaborationApp() {
 
                       {/* Shared Chat Documents */}
                       {selectedAppFilter === 'all' && sharedChatDocs.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
+                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
                         }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared in Chats
-                            </h4>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                Shared in chats
+                              </h4>
+                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                Files teammates already dropped into threads and channels.
+                              </p>
+                            </div>
+                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
                               {sharedChatDocs.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                             {sharedChatDocs.map((attachment, idx) => {
                               const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
                               const attAppIcon = GoogleService.getAppIcon(attAppType)
@@ -12682,23 +12978,23 @@ export default function CollaborationApp() {
 
                       {/* Gmail Attachments Grid */}
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
+                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
+                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
                         }`}>
-                          <div className="flex items-center justify-between mb-3">
+                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                             <div>
-                              <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                                <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
+                              <h4 className={`flex items-center gap-2 text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                <Mail className="h-5 w-5 text-rose-500" /> Gmail attachments
                               </h4>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                 Recent email files ready to add into chats and channels.
                               </p>
                             </div>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-rose-400/10 text-rose-200' : 'bg-rose-50 text-rose-700'}`}>
                               {gmailAttachments.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                             {gmailAttachments.map((attachment, idx) => {
                               const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
                               const gmailAppIcon = GoogleService.getAppIcon(gmailAppType)
@@ -12825,21 +13121,84 @@ export default function CollaborationApp() {
                       )}
 
                       {docsOverview.total === 0 && (
-                        <div className="flex-1 flex items-center justify-center py-16">
-                          <div className="text-center">
-                            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                              <FileText className={`w-8 h-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                        <div className={`flex items-center justify-center rounded-[28px] border px-6 py-16 text-center ${
+                          isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-white/70 bg-white/85'
+                        }`}>
+                          <div>
+                            <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] ${isDarkMode ? 'bg-white/[0.05]' : 'bg-slate-100'}`}>
+                              <FileText className={`h-8 w-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                             </div>
-                            <p className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>No documents found</p>
-                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Try connecting more apps or changing filters</p>
+                            <p className={`mt-5 text-lg font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>No documents found</p>
+                            <p className={`mt-2 text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Try connecting more apps or switching collections.</p>
                           </div>
                         </div>
                       )}
+                      </div>
                     </div>
-                  </>
+                  </section>
+
+                  <aside className={`order-2 hidden min-h-0 flex-col gap-3 lg:flex ${
+                    isDarkMode ? 'text-white' : 'text-slate-900'
+                  }`}>
+                    <div className={`rounded-[24px] border p-4 ${
+                      isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/82 shadow-[0_12px_32px_rgba(15,23,42,0.06)]'
+                    }`}>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                        isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                      }`}>
+                        Library overview
+                      </p>
+                      <div className="mt-3 grid gap-2">
+                        {docsOverviewCards.map(stat => (
+                          <div key={stat.label} className={`relative overflow-hidden rounded-[18px] border px-3.5 py-3 ${stat.tone}`}>
+                            <div className="pointer-events-none absolute right-0 top-0 h-14 w-14 rounded-full bg-white/10 blur-2xl" />
+                            <p className="relative text-[10px] font-semibold uppercase tracking-[0.24em] opacity-70">{stat.label}</p>
+                            <div className="relative mt-1.5 flex items-end justify-between gap-2">
+                              <p className="text-[1.6rem] font-semibold leading-none tracking-[-0.04em]">{stat.value}</p>
+                              <div className="max-w-[8rem] text-right text-[10px] leading-4 opacity-75">{stat.note}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`rounded-[24px] border p-4 ${
+                      isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/82 shadow-[0_12px_32px_rgba(15,23,42,0.06)]'
+                    }`}>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                        isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                      }`}>
+                        Active collection
+                      </p>
+                      <div className={`mt-2.5 text-[1.5rem] font-semibold tracking-[-0.04em] ${
+                        isDarkMode ? 'text-white' : 'text-slate-900'
+                      }`}>
+                        {docsCollectionSummary.label}
+                      </div>
+                      <p className={`mt-2 text-[13px] leading-6 ${
+                        isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                      }`}>
+                        {docsCollectionSummary.detail}
+                      </p>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className={`rounded-xl px-3 py-2.5 ${isDarkMode ? 'bg-white/[0.05]' : 'bg-white shadow-sm'}`}>
+                          <div className={`text-[11px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>In focus</div>
+                          <div className={`mt-1.5 text-[1.45rem] font-semibold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{docsCollectionSummary.count}</div>
+                        </div>
+                        <div className={`rounded-xl px-3 py-2.5 ${isDarkMode ? 'bg-white/[0.05]' : 'bg-white shadow-sm'}`}>
+                          <div className={`text-[11px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Live sync</div>
+                          <div className={`mt-1.5 text-sm font-semibold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                            {gmailLastCheckTime ? formatDocsDate(gmailLastCheckTime) : 'Ready'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
                 )}
               </div>
             )}
+            </div>
           </div>
         </div>
       )}

@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;500;700;900&display=swap");
+
 /* ============================================
    🎯 SQUIRCLE MASK FOR ACTIVE SIDEBAR ICON
    Premium Apple-style active indicator
@@ -5730,13 +5732,27 @@ button,
 input,
 textarea,
 select {
-  font-family: "Manrope", "Plus Jakarta Sans", "Segoe UI Variable", "Segoe UI", sans-serif !important;
-  letter-spacing: -0.01em;
+  font-family: "Lato", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif !important;
+  letter-spacing: normal;
+  font-feature-settings: normal;
 }
 
 body {
   background: var(--bg-primary) !important;
   color: var(--text-primary) !important;
+  line-height: 1.46668;
+  font-weight: 400;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+[role="heading"] {
+  font-family: "Lato", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif !important;
+  letter-spacing: -0.012em;
 }
 
 .liquid-glass-navbar,
