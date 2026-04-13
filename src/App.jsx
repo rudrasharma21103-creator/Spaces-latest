@@ -10122,7 +10122,7 @@ export default function CollaborationApp() {
                             </div>
 
                             <div
-                              className={`flex flex-col max-w-[66%] ${
+                              className={`chat-message-shell flex flex-col ${
                                 isMe ? "items-end" : "items-start"
                               }`}
                             >
@@ -10154,12 +10154,12 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative overflow-visible px-3 py-2 text-[13px] leading-[1.45] break-words transition-all duration-200 ${
+                              className={`relative overflow-visible break-words transition-all duration-200 ${
                                   isMe
-                                    ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
+                                    ? "liquid-glass-message-own text-white rounded-[18px] rounded-tr-[6px]" 
                                     : isDarkMode 
-                                      ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm" 
-                                      : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm"
+                                      ? "liquid-glass-message text-slate-100 rounded-[18px] rounded-tl-[6px]" 
+                                      : "liquid-glass-message text-slate-800 rounded-[18px] rounded-tl-[6px]"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-sky-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 <div
