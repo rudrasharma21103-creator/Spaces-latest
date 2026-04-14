@@ -1,4 +1,5 @@
 import React from "react"
+import { createPortal } from "react-dom"
 import {
   ArrowDown,
   Check,
@@ -15,6 +16,7 @@ import {
   Play,
   Presentation,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react"
 import { CHANNEL_TABS, CONTEXT_STATUS_META } from "./LivingContext.helpers"
@@ -53,6 +55,11 @@ function formatFileDate(timestamp) {
   } catch {
     return ""
   }
+}
+
+function clampValue(value, min, max) {
+  if (max < min) return min
+  return Math.min(Math.max(value, min), max)
 }
 
 function getPreviewConfig(kind, isDarkMode) {
@@ -173,35 +180,212 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TA
 }
 
 export function MessageActionsMenu({
+  anchorEl,
+  boundaryEl,
+  preferredAlign = "right",
   isDarkMode,
+  isSelected = false,
   emojis = [],
+  onClose,
   onReact,
   onEdit,
   onDelete,
+  onToggleSelection,
   onCreateContext,
   onAddToContext,
   onMarkDecision,
   onCreateTask,
 }) {
-  const itemClass = `w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
-    isDarkMode ? "text-slate-200 hover:bg-slate-800" : "text-slate-700 hover:bg-slate-100"
+  const menuRef = React.useRef(null)
+  const [position, setPosition] = React.useState({
+    left: 0,
+    top: 0,
+    ready: false,
+    openUpward: false,
+    align: preferredAlign,
+  })
+
+  const computePosition = React.useCallback(() => {
+    if (!anchorEl || !menuRef.current) return
+    if (!anchorEl.isConnected) {
+      onClose?.()
+      return
+    }
+
+    const anchorRect = anchorEl.getBoundingClientRect()
+    const menuRect = menuRef.current.getBoundingClientRect()
+    const boundaryRect = boundaryEl?.getBoundingClientRect?.() || {
+      top: 0,
+      left: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight,
+    }
+    const viewportPadding = 12
+    const boundaryPadding = 10
+    const gap = 8
+
+    const minLeft = Math.max(viewportPadding, boundaryRect.left + boundaryPadding)
+    const maxRight = Math.min(window.innerWidth - viewportPadding, boundaryRect.right - boundaryPadding)
+    const minTop = Math.max(viewportPadding, boundaryRect.top + boundaryPadding)
+    const maxBottom = Math.min(window.innerHeight - viewportPadding, boundaryRect.bottom - boundaryPadding)
+
+    const preferredLeft =
+      preferredAlign === "left"
+        ? anchorRect.left
+        : anchorRect.right - menuRect.width
+
+    let left = clampValue(
+      preferredLeft,
+      minLeft,
+      Math.max(minLeft, maxRight - menuRect.width)
+    )
+
+    left = clampValue(
+      left,
+      viewportPadding,
+      Math.max(viewportPadding, window.innerWidth - viewportPadding - menuRect.width)
+    )
+
+    let openUpward = false
+    let top = anchorRect.bottom + gap
+
+    if (top + menuRect.height > maxBottom) {
+      top = anchorRect.top - menuRect.height - gap
+      openUpward = true
+    }
+
+    if (top < minTop) {
+      const downTop = clampValue(
+        anchorRect.bottom + gap,
+        minTop,
+        Math.max(minTop, maxBottom - menuRect.height)
+      )
+      const upTop = clampValue(
+        anchorRect.top - menuRect.height - gap,
+        minTop,
+        Math.max(minTop, maxBottom - menuRect.height)
+      )
+      const spaceBelow = maxBottom - anchorRect.bottom
+      const spaceAbove = anchorRect.top - minTop
+      top = spaceBelow >= spaceAbove ? downTop : upTop
+      openUpward = spaceBelow < spaceAbove
+    }
+
+    const resolvedAlign =
+      left <= minLeft + 4 ? "left" : left + menuRect.width >= maxRight - 4 ? "right" : preferredAlign
+
+    setPosition({
+      left,
+      top,
+      ready: true,
+      openUpward,
+      align: resolvedAlign,
+    })
+  }, [anchorEl, boundaryEl, onClose, preferredAlign])
+
+  React.useLayoutEffect(() => {
+    computePosition()
+  }, [
+    computePosition,
+    emojis.length,
+    isSelected,
+    onEdit,
+    onDelete,
+    onToggleSelection,
+    onCreateContext,
+    onAddToContext,
+    onMarkDecision,
+    onCreateTask,
+  ])
+
+  React.useEffect(() => {
+    if (!anchorEl) return undefined
+
+    let frame = null
+    const updatePosition = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        computePosition()
+      })
+    }
+
+    window.addEventListener("resize", updatePosition)
+    window.addEventListener("scroll", updatePosition, true)
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener("resize", updatePosition)
+      window.removeEventListener("scroll", updatePosition, true)
+    }
+  }, [anchorEl, computePosition])
+
+  if (!anchorEl) return null
+
+  const reactionButtonClass = `flex h-9 w-9 items-center justify-center rounded-full text-[18px] transition-all duration-150 ${
+    isDarkMode
+      ? "bg-transparent text-slate-100 hover:bg-white/10 hover:scale-[1.06]"
+      : "bg-transparent text-slate-700 hover:bg-slate-100 hover:scale-[1.06]"
   }`
 
-  return (
-    <div className={`rounded-2xl border p-2.5 w-56 shadow-2xl ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-white border-slate-200"}`}>
+  const actionBaseClass = `group flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left text-[13px] font-medium transition-all duration-150`
+  const actionClass = `${actionBaseClass} ${
+    isDarkMode
+      ? "text-slate-200 hover:bg-white/8 hover:text-white"
+      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+  }`
+  const destructiveClass = `${actionBaseClass} ${
+    isDarkMode
+      ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
+      : "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+  }`
+
+  const primaryActions = [
+    onEdit ? { key: "edit", label: "Edit message", icon: FileText, onClick: onEdit } : null,
+    onToggleSelection
+      ? {
+          key: "select",
+          label: isSelected ? "Deselect message" : "Select message",
+          icon: Check,
+          onClick: onToggleSelection,
+        }
+      : null,
+    onCreateContext ? { key: "create-context", label: "Create context", icon: Sparkles, onClick: onCreateContext } : null,
+    onAddToContext ? { key: "add-context", label: "Add to context", icon: FolderOpen, onClick: onAddToContext } : null,
+    onMarkDecision ? { key: "decision", label: "Mark as decision", icon: Check, onClick: onMarkDecision } : null,
+    onCreateTask ? { key: "task", label: "Create task", icon: Plus, onClick: onCreateTask } : null,
+  ].filter(Boolean)
+
+  const menuNode = (
+    <div
+      ref={menuRef}
+      onClick={event => event.stopPropagation()}
+      className={`fixed z-[95] w-[238px] overflow-hidden rounded-[22px] border p-2 backdrop-blur-xl transition-[opacity,transform] duration-150 ${
+        position.ready ? "opacity-100 scale-100" : "opacity-0 scale-95"
+      } ${
+        isDarkMode
+          ? "bg-[#17191d]/96 border-white/8 shadow-[0_18px_48px_rgba(2,6,23,0.55)]"
+          : "bg-white/96 border-slate-200/80 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      }`}
+      style={{
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        visibility: position.ready ? "visible" : "hidden",
+        transformOrigin: `${position.openUpward ? "bottom" : "top"} ${position.align === "left" ? "left" : "right"}`,
+      }}
+    >
       {emojis.length > 0 && (
-        <div className={`mb-2 px-1 pb-2 border-b ${isDarkMode ? "border-slate-800" : "border-slate-100"}`}>
-          <div className={`px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-            React
-          </div>
-          <div className="flex flex-wrap gap-1.5">
+        <div
+          className={`mb-1.5 rounded-[18px] border px-2 py-1.5 ${
+            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-slate-200/80 bg-slate-50/90"
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-1">
             {emojis.map(emoji => (
               <button
                 key={emoji}
                 onClick={() => onReact?.(emoji)}
-                className={`h-10 w-10 rounded-xl text-lg transition-colors ${
-                  isDarkMode ? "hover:bg-slate-800" : "hover:bg-slate-100"
-                }`}
+                className={reactionButtonClass}
               >
                 {emoji}
               </button>
@@ -209,14 +393,48 @@ export function MessageActionsMenu({
           </div>
         </div>
       )}
-      {onEdit && <button onClick={onEdit} className={itemClass}>Edit Message</button>}
-      {onDelete && <button onClick={onDelete} className={itemClass}>Delete Message</button>}
-      <button onClick={onCreateContext} className={itemClass}>Create Context</button>
-      <button onClick={onAddToContext} className={itemClass}>Add to Context</button>
-      {onMarkDecision && <button onClick={onMarkDecision} className={itemClass}>Mark Decision</button>}
-      <button onClick={onCreateTask} className={itemClass}>Create Task</button>
+
+      <div className="space-y-1">
+        {primaryActions.map(action => {
+          const ActionIcon = action.icon
+          return (
+            <button key={action.key} onClick={action.onClick} className={actionClass}>
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                  isDarkMode
+                    ? "bg-white/[0.05] text-slate-300 group-hover:bg-white/[0.08]"
+                    : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                }`}
+              >
+                <ActionIcon className="h-4 w-4" />
+              </span>
+              <span className="flex-1 truncate">{action.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {onDelete && (
+        <>
+          <div className={`my-2 h-px ${isDarkMode ? "bg-white/8" : "bg-slate-200/80"}`} />
+          <button onClick={onDelete} className={destructiveClass}>
+            <span
+              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                isDarkMode
+                  ? "bg-rose-500/12 text-rose-300 group-hover:bg-rose-500/18"
+                  : "bg-rose-50 text-rose-500 group-hover:bg-white"
+              }`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </span>
+            <span className="flex-1 truncate">Delete message</span>
+          </button>
+        </>
+      )}
     </div>
   )
+
+  return createPortal(menuNode, document.body)
 }
 
 export function ContextBadge({ contexts = [], isDarkMode, onOpen }) {
@@ -692,11 +910,16 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
   )
 }
 
-export function MessageActionButton({ isDarkMode, onClick }) {
+export function MessageActionButton({ isDarkMode, onClick, buttonRef, isActive = false }) {
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
-      className={`opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-xl border shadow-md ${isDarkMode ? "bg-[#111317] border-slate-700 hover:bg-slate-800 text-slate-300" : "bg-white border-slate-200 hover:bg-slate-50 text-slate-600"}`}
+      className={`${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-all duration-150 p-2 rounded-full border shadow-sm hover:scale-[1.04] ${
+        isDarkMode
+          ? "bg-[#17191d]/95 border-white/10 hover:bg-[#202329] text-slate-300"
+          : "bg-white/96 border-slate-200/90 hover:bg-slate-50 text-slate-600"
+      }`}
     >
       <MoreVertical className="w-4 h-4" />
     </button>

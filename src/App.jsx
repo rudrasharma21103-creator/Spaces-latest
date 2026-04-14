@@ -594,6 +594,7 @@ export default function CollaborationApp() {
 
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
+  const messageActionButtonRefs = useRef(new Map())
   const prevScrollHeightRef = useRef(0)
   const messageScrollPositionsRef = useRef({})
   const pendingTabScrollRestoreRef = useRef(null)
@@ -635,6 +636,16 @@ export default function CollaborationApp() {
     if (!container) return
     messageScrollPositionsRef.current[String(chatId)] = container.scrollTop
   }
+
+  const setMessageActionButtonRef = (messageId, node) => {
+    const key = String(messageId)
+    if (node) {
+      messageActionButtonRefs.current.set(key, node)
+      return
+    }
+    messageActionButtonRefs.current.delete(key)
+  }
+
   const [isAtBottom, setIsAtBottom] = useState(true)
 
   const updateIsAtBottom = nextValue => {
@@ -4575,6 +4586,19 @@ export default function CollaborationApp() {
     document.addEventListener("keydown", handleEscape)
     return () => document.removeEventListener("keydown", handleEscape)
   }, [openContextId])
+
+  useEffect(() => {
+    if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen && !composerAttachMenuOpen) return undefined
+    const handleEscape = event => {
+      if (event.key !== "Escape") return
+      setMessageActionMenu(null)
+      setMessageContextPicker(null)
+      setComposerAttachMenuOpen(false)
+      setComposerContextPickerOpen(false)
+    }
+    document.addEventListener("keydown", handleEscape)
+    return () => document.removeEventListener("keydown", handleEscape)
+  }, [messageActionMenu, messageContextPicker, composerAttachMenuOpen, composerContextPickerOpen])
 
   useEffect(() => {
     if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen && !composerAttachMenuOpen) return undefined
@@ -10239,56 +10263,66 @@ export default function CollaborationApp() {
                                   onClick={e => e.stopPropagation()}
                                 >
                                   <MessageActionButton
+                                    buttonRef={node => setMessageActionButtonRef(msg.id, node)}
+                                    isActive={isActionMenuOpen}
                                     isDarkMode={isDarkMode}
                                     onClick={() =>
                                       setMessageActionMenu(prev =>
-                                        prev?.messageId === msg.id ? null : { messageId: msg.id }
+                                        prev?.messageId === msg.id
+                                          ? null
+                                          : {
+                                              messageId: msg.id,
+                                              preferredAlign: isMe ? "left" : "right",
+                                            }
                                       )
                                     }
                                   />
                                   {isActionMenuOpen && (
-                                    <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
-                                      <MessageActionsMenu
-                                        isDarkMode={isDarkMode}
-                                        isSelected={isMessageSelected}
-                                        emojis={EMOJIS}
-                                        onReact={emoji => {
-                                          toggleReaction(getActiveChatId(), msg.id, emoji)
-                                          setMessageActionMenu(null)
-                                        }}
-                                        onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
-                                        onDelete={() => {
-                                          const chatId = getActiveChatId()
-                                          if (!chatId) return
-                                          setShowDeleteConfirm({
-                                            type: "message",
-                                            id: msg.id,
-                                            chatId,
-                                            optimistic: Boolean(msg.optimistic),
-                                          })
-                                          setMessageActionMenu(null)
-                                        }}
-                                        onToggleSelection={() => {
-                                          toggleMessageSelection(msg.id)
-                                          setMessageActionMenu(null)
-                                        }}
-                                        onCreateContext={() => {
-                                          openCreateContextModal([msg.id])
-                                          setMessageActionMenu(null)
-                                        }}
-                                        onAddToContext={() => {
-                                          setMessageContextPicker({ messageId: msg.id })
-                                        }}
-                                        onMarkDecision={activeView === "channel" ? (() => {
-                                          markMessageDecision(msg)
-                                          setMessageActionMenu(null)
-                                        }) : undefined}
-                                        onCreateTask={() => {
-                                          openTaskFromMessage(msg)
-                                          setMessageActionMenu(null)
-                                        }}
-                                      />
-                                    </div>
+                                    <MessageActionsMenu
+                                      anchorEl={messageActionButtonRefs.current.get(String(msg.id))}
+                                      boundaryEl={messagesContainerRef.current}
+                                      preferredAlign={messageActionMenu?.preferredAlign || (isMe ? "left" : "right")}
+                                      isDarkMode={isDarkMode}
+                                      isSelected={isMessageSelected}
+                                      emojis={EMOJIS}
+                                      onClose={() => setMessageActionMenu(null)}
+                                      onReact={emoji => {
+                                        toggleReaction(getActiveChatId(), msg.id, emoji)
+                                        setMessageActionMenu(null)
+                                      }}
+                                      onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
+                                      onDelete={() => {
+                                        const chatId = getActiveChatId()
+                                        if (!chatId) return
+                                        setShowDeleteConfirm({
+                                          type: "message",
+                                          id: msg.id,
+                                          chatId,
+                                          optimistic: Boolean(msg.optimistic),
+                                        })
+                                        setMessageActionMenu(null)
+                                      }}
+                                      onToggleSelection={() => {
+                                        toggleMessageSelection(msg.id)
+                                        setMessageActionMenu(null)
+                                      }}
+                                      onCreateContext={() => {
+                                        openCreateContextModal([msg.id])
+                                        setMessageActionMenu(null)
+                                      }}
+                                      onAddToContext={() => {
+                                        setMessageActionMenu(null)
+                                        setMessageContextPicker({ messageId: msg.id })
+                                      }}
+                                      onMarkDecision={activeView === "channel" ? (() => {
+                                        markMessageDecision(msg)
+                                        setMessageActionMenu(null)
+                                      }) : undefined}
+                                      onCreateTask={() => {
+                                        openTaskFromMessage(msg)
+                                        setMessageActionMenu(null)
+                                      }}
+                                    />
                                   )}
                                   {isContextPickerOpen && (
                                     <div className={`absolute top-11 z-40 ${isMe ? 'left-[calc(100%+0.5rem)] max-sm:left-0' : 'right-[calc(100%+0.5rem)] max-sm:right-0'} max-sm:top-[calc(100%+0.5rem)]`}>
