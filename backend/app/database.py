@@ -9,7 +9,16 @@ load_dotenv(find_dotenv())
 
 client = MongoClient(
     os.getenv("MONGO_URI"),
-    serverSelectionTimeoutMS=5000  # ⬅️ important
+    serverSelectionTimeoutMS=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "10000")),
+    connectTimeoutMS=int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "10000")),
+    socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "45000")),
+    maxPoolSize=int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
+    minPoolSize=int(os.getenv("MONGO_MIN_POOL_SIZE", "5")),
+    retryWrites=True,
+    retryReads=True,
+    compressors="zstd,zlib,snappy",
+    appname="spaces-backend",
+    tz_aware=True,
 )
 db = client["spacesdb"]
 
@@ -19,37 +28,44 @@ messages_collection = db["messages"]
 notifications_collection = db["notifications"]
 tasks_collection = db["tasks"]
 contexts_collection = db["contexts"]
-# Events collection used by the frontend to fetch/save calendar events
 events_collection = db["events"]
-# Files metadata collection - store only metadata (no binaries)
 files_collection = db["files"]
 drafts_collection = db["drafts"]
-# Organizations collection for enterprise registrations
 organizations_collection = db["organizations"]
 
 # Create indexes for faster queries
 try:
-    # Index for user search by name (case-insensitive text search)
     users_collection.create_index("name")
     users_collection.create_index("email")
     users_collection.create_index("id", unique=True)
-    # Index for spaces
+
     spaces_collection.create_index("id", unique=True)
     spaces_collection.create_index("members")
-    # Index for messages
+    spaces_collection.create_index("channels.id")
+
     messages_collection.create_index("chatId")
     messages_collection.create_index([("chatId", 1), ("message.id", 1)])
     messages_collection.create_index([("chatId", 1), ("message.timestamp", 1)])
+
     contexts_collection.create_index("chatId", unique=True)
-    # Tasks collection - index by assigned users and space for quick lookup
+
     tasks_collection.create_index("assigned_to")
     tasks_collection.create_index("space_id")
+    tasks_collection.create_index("created_by")
+    tasks_collection.create_index([("created_by", 1), ("timestamp", -1)])
+    tasks_collection.create_index([("assigned_to", 1), ("timestamp", -1)])
+
     drafts_collection.create_index([("userId", 1), ("updatedAt", -1)])
     drafts_collection.create_index([("userId", 1), ("id", 1)], unique=True)
-    # Index for notifications
+
     notifications_collection.create_index("userId")
-    # Index for organizations
+    notifications_collection.create_index("email")
+    notifications_collection.create_index([("email", 1), ("timestamp", -1)])
+
+    events_collection.create_index("domain")
+    events_collection.create_index([("domain", 1), ("timestamp", -1)])
+
     organizations_collection.create_index("domain", unique=True)
     organizations_collection.create_index("adminEmail")
 except Exception:
-    pass  # Indexes may already exist
+    pass

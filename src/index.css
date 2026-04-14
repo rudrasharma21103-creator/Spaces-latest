@@ -199,15 +199,15 @@
   
   /* Animation Timing */
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-bounce: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-bounce: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-elastic: cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   
   /* Transition Durations */
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;
-  --duration-slow: 400ms;
-  --duration-slower: 600ms;
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 420ms;
 }
 
 /* ============================================
@@ -2090,16 +2090,16 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 }
 
 /* Animation utility classes */
-.animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
-.animate-fade-in-up { animation: fade-in-up 0.6s ease-out forwards; }
-.animate-fade-in-down { animation: fade-in-down 0.6s ease-out forwards; }
-.animate-fade-in-scale { animation: fade-in-scale 0.4s ease-out forwards; }
-.animate-slide-in-right { animation: slide-in-right 0.5s ease-out forwards; }
-.animate-slide-in-left { animation: slide-in-left 0.5s ease-out forwards; }
-.animate-slide-in-up { animation: slide-in-up 0.4s ease-out forwards; }
-.animate-slide-in-down { animation: slide-in-down 0.4s ease-out forwards; }
-.animate-scale-in { animation: scale-in 0.3s ease-out forwards; }
-.animate-bounce-in { animation: bounce-in 0.7s ease-out forwards; }
+.animate-fade-in { animation: fade-in 0.28s ease-out forwards; }
+.animate-fade-in-up { animation: fade-in-up 0.32s ease-out forwards; }
+.animate-fade-in-down { animation: fade-in-down 0.32s ease-out forwards; }
+.animate-fade-in-scale { animation: fade-in-scale 0.24s ease-out forwards; }
+.animate-slide-in-right { animation: slide-in-right 0.28s ease-out forwards; }
+.animate-slide-in-left { animation: slide-in-left 0.28s ease-out forwards; }
+.animate-slide-in-up { animation: slide-in-up 0.24s ease-out forwards; }
+.animate-slide-in-down { animation: slide-in-down 0.24s ease-out forwards; }
+.animate-scale-in { animation: scale-in 0.2s ease-out forwards; }
+.animate-bounce-in { animation: bounce-in 0.42s ease-out forwards; }
 .animate-bounce-soft { animation: bounce-soft 2s ease-in-out infinite; }
 .animate-float { animation: float 4s ease-in-out infinite; }
 .animate-float-slow { animation: float-slow 6s ease-in-out infinite; }
@@ -2121,8 +2121,8 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
 .animate-wiggle { animation: wiggle 0.5s ease-in-out; }
 .animate-shake { animation: shake 0.5s ease-in-out; }
 .animate-typing { animation: typing 1.5s ease-in-out infinite; }
-.animate-message-sent { animation: message-sent 0.4s ease-out forwards; }
-.animate-notification-pop { animation: notification-pop 0.4s ease-out forwards; }
+.animate-message-sent { animation: message-sent 0.24s ease-out forwards; }
+.animate-notification-pop { animation: notification-pop 0.24s ease-out forwards; }
 .animate-morph { animation: morph 8s ease-in-out infinite; }
 
 /* Staggered animations */
@@ -3382,7 +3382,7 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   .animate-fade-in-up,
   .animate-slide-in-right,
   .animate-slide-in-left {
-    animation-duration: 0.25s;
+    animation-duration: 0.18s;
   }
   
   /* Touch-friendly sizing */
@@ -3470,6 +3470,55 @@ body:has(.dm-chat-background-dark) [class*="bg-[#f4f6fb]"] {
   * {
     scrollbar-width: none;
   }
+}
+
+/* ============================================
+   Motion Tuning
+   Faster, smoother defaults across the app
+   ============================================ */
+
+.transition,
+.transition-all,
+.transition-colors,
+.transition-opacity,
+.transition-shadow,
+.transition-transform {
+  transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1) !important;
+}
+
+.duration-100 { transition-duration: 90ms !important; }
+.duration-150 { transition-duration: 110ms !important; }
+.duration-200 { transition-duration: 140ms !important; }
+.duration-300 { transition-duration: 180ms !important; }
+.duration-500 { transition-duration: 240ms !important; }
+.duration-700 { transition-duration: 320ms !important; }
+.duration-1000 { transition-duration: 420ms !important; }
+
+.animate-fade-in,
+.animate-fade-in-up,
+.animate-fade-in-down,
+.animate-fade-in-scale,
+.animate-slide-in-right,
+.animate-slide-in-left,
+.animate-slide-in-up,
+.animate-slide-in-down,
+.animate-scale-in,
+.animate-bounce-in,
+.animate-message-sent,
+.animate-notification-pop,
+.animate-fadeIn,
+.animate-fadeInUp,
+.animate-fadeInDown,
+.animate-fadeInScale,
+.animate-slideInRight,
+.animate-slideInLeft,
+.animate-bounceIn,
+.liquid-glass-message,
+.liquid-glass-message-own,
+.hover-lift,
+.touch-active {
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 /* Small mobile devices */

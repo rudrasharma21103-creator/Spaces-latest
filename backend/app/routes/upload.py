@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from bson.binary import Binary
 import io
+import logging
+from pymongo.errors import PyMongoError
 
 router = APIRouter(prefix="/upload")
+logger = logging.getLogger("app.routes.upload")
 
 # Helper to add CORS headers to any response for this router
 def _cors_headers():
@@ -112,7 +115,15 @@ def get_file_metadata(file_id: str):
         oid = ObjectId(file_id)
     except Exception:
         return JSONResponse({"error": "invalid id"}, headers=_cors_headers())
-    doc = files_collection.find_one({"_id": oid}, {"_id": 0, "data": 0})
+    try:
+        doc = files_collection.find_one({"_id": oid}, {"_id": 0, "data": 0})
+    except PyMongoError as exc:
+        logger.error("Failed to fetch metadata for file %s: %s", file_id, exc)
+        return JSONResponse(
+            {"error": "database temporarily unavailable"},
+            status_code=503,
+            headers=_cors_headers(),
+        )
     if not doc:
         return JSONResponse({"error": "not found"}, headers=_cors_headers())
     # Normalize URL fields expected by the frontend (`url` / `public_url` / `previewUrl`)
@@ -139,7 +150,18 @@ def download_file(file_id: str):
     except Exception:
         return JSONResponse({"error": "invalid id"}, status_code=400, headers=_cors_headers())
 
-    doc = files_collection.find_one({"_id": oid})
+    try:
+        doc = files_collection.find_one(
+            {"_id": oid},
+            {"filename": 1, "mimetype": 1, "data": 1},
+        )
+    except PyMongoError as exc:
+        logger.error("Failed to download file %s: %s", file_id, exc)
+        return JSONResponse(
+            {"error": "database temporarily unavailable"},
+            status_code=503,
+            headers=_cors_headers(),
+        )
     if not doc:
         return JSONResponse({"error": "not found"}, status_code=404, headers=_cors_headers())
 

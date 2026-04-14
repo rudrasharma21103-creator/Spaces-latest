@@ -1,11 +1,91 @@
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from starlette import status
-from app.database import tasks_collection
+from app.database import tasks_collection, messages_collection, spaces_collection
 from app.ws_manager import manager
-from app.routes.messages import _get_user_id_from_request, _check_channel_access
+from app.routes.messages import _get_user_id_from_request
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/tasks")
+
+
+def _insert_task_document(task_doc: dict):
+    res = tasks_collection.insert_one(task_doc)
+    return str(res.inserted_id)
+
+
+def _insert_task_messages(space_id, created_by, message, timestamp, assigned_to, status_field, task_id):
+    if not space_id:
+        return []
+
+    payload = {
+        "id": task_id,
+        "userId": created_by,
+        "text": message,
+        "timestamp": timestamp,
+        "type": "task",
+        "assigned_to": assigned_to,
+        "status": status_field,
+        "optimistic": False,
+    }
+
+    messages_collection.insert_one({"chatId": str(space_id), "message": payload})
+
+    space = spaces_collection.find_one({"id": space_id}, {"channels.id": 1})
+    channel_ids = []
+    channels = (space.get("channels") or []) if space else []
+    for ch in channels:
+        ch_id = ch.get("id") if isinstance(ch, dict) else ch
+        if ch_id is None:
+            continue
+        messages_collection.insert_one({"chatId": str(ch_id), "message": payload})
+        channel_ids.append(str(ch_id))
+    return channel_ids
+
+
+def _update_task_status(task_id: str, new_status: str):
+    oid = None
+    res = None
+    try:
+        from bson.objectid import ObjectId
+        oid = ObjectId(task_id)
+        res = tasks_collection.update_one({"_id": oid}, {"$set": {"status": new_status}})
+    except Exception:
+        oid = None
+        res = None
+
+    if not res or res.matched_count == 0:
+        try:
+            res = tasks_collection.update_one({"id": task_id}, {"$set": {"status": new_status}})
+        except Exception:
+            res = None
+
+    if not res or res.matched_count == 0:
+        try:
+            res = tasks_collection.update_one({"id": int(task_id)}, {"$set": {"status": new_status}})
+        except Exception:
+            res = None
+
+    try:
+        messages_collection.update_many({"message.id": task_id}, {"$set": {"message.status": new_status}})
+        if oid:
+            messages_collection.update_many({"message.id": oid}, {"$set": {"message.status": new_status}})
+    except Exception:
+        pass
+
+    updated = None
+    try:
+        updated = tasks_collection.find_one({"id": task_id})
+    except Exception:
+        updated = None
+
+    if not updated and oid:
+        try:
+            updated = tasks_collection.find_one({"_id": oid})
+        except Exception:
+            updated = None
+
+    return updated
 
 
 @router.post("")
@@ -37,9 +117,7 @@ async def create_task(request: Request, payload: dict):
 
     # Persist (if DB is unavailable, fallback to in-memory id so request doesn't fail)
     try:
-        res = tasks_collection.insert_one(task_doc)
-        # Expose id for clients
-        task_doc["id"] = str(res.inserted_id)
+        task_doc["id"] = await run_in_threadpool(_insert_task_document, task_doc)
         if "_id" in task_doc:
             del task_doc["_id"]
     except Exception as e:
@@ -53,64 +131,20 @@ async def create_task(request: Request, payload: dict):
         except Exception:
             pass
 
-
+    channel_ids = []
     # Save a chat message for the task in the messages collection so it appears in the channel and persists after refresh
     try:
-        from app.database import messages_collection
         if space_id:
-            # Insert into the space-level chat (legacy) so it appears somewhere
-            msg_doc = {
-                "chatId": str(space_id),
-                "message": {
-                    "id": task_doc["id"],
-                    "userId": created_by,
-                    "text": message,
-                    "timestamp": timestamp,
-                    "type": "task",
-                    "assigned_to": assigned_to,
-                    "status": status_field,
-                    "optimistic": False
-                }
-            }
-            try:
-                messages_collection.insert_one(msg_doc)
-            except Exception:
-                pass
-
-            # Also try to find the space's channels and insert/broadcast to each channel so channel viewers receive it
-            try:
-                from app.database import spaces_collection
-                space = spaces_collection.find_one({"id": space_id})
-                channels = (space.get("channels") or []) if space else []
-                for ch in channels:
-                    try:
-                        ch_id = ch.get("id") if isinstance(ch, dict) else ch
-                        chat_msg = {
-                            "chatId": str(ch_id),
-                            "message": {
-                                "id": task_doc["id"],
-                                "userId": created_by,
-                                "text": message,
-                                "timestamp": timestamp,
-                                "type": "task",
-                                "assigned_to": assigned_to,
-                                "status": status_field,
-                                "optimistic": False
-                            }
-                        }
-                        try:
-                            messages_collection.insert_one(chat_msg)
-                        except Exception:
-                            pass
-                        # Broadcast to each channel's connected clients
-                        try:
-                            await manager.broadcast(str(ch_id), {"type": "task", "task": task_doc})
-                        except Exception:
-                            pass
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+            channel_ids = await run_in_threadpool(
+                _insert_task_messages,
+                space_id,
+                created_by,
+                message,
+                timestamp,
+                assigned_to,
+                status_field,
+                task_doc["id"],
+            )
     except Exception as e:
         try:
             import traceback
@@ -133,6 +167,8 @@ async def create_task(request: Request, payload: dict):
     try:
         if space_id:
             await manager.broadcast(str(space_id), {"type": "task", "task": task_doc})
+            for channel_id in channel_ids:
+                await manager.broadcast(channel_id, {"type": "task", "task": task_doc})
     except Exception:
         pass
 
@@ -151,58 +187,7 @@ async def update_task(request: Request, task_id: str, payload: dict):
     if not new_status:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status required")
 
-    # Robust update: try matching by ObjectId, by id field, and by numeric id
-    res = None
-    oid = None
-    try:
-        from bson.objectid import ObjectId
-        try:
-            oid = ObjectId(task_id)
-            res = tasks_collection.update_one({"_id": oid}, {"$set": {"status": new_status}})
-        except Exception:
-            res = None
-    except Exception:
-        oid = None
-
-    if not res or res.matched_count == 0:
-        try:
-            res = tasks_collection.update_one({"id": task_id}, {"$set": {"status": new_status}})
-        except Exception:
-            res = None
-
-    if (not res or res.matched_count == 0):
-        try:
-            res = tasks_collection.update_one({"id": int(task_id)}, {"$set": {"status": new_status}})
-        except Exception:
-            pass
-
-    # Also update any chat messages that reference this task id so message box reflects completion
-    try:
-        from app.database import messages_collection
-        try:
-            messages_collection.update_many({"message.id": task_id}, {"$set": {"message.status": new_status}})
-        except Exception:
-            pass
-        if oid:
-            try:
-                messages_collection.update_many({"message.id": oid}, {"$set": {"message.status": new_status}})
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # Fetch updated doc and notify
-    updated = None
-    try:
-        updated = tasks_collection.find_one({"id": task_id})
-    except Exception:
-        updated = None
-
-    if not updated and oid:
-        try:
-            updated = tasks_collection.find_one({"_id": oid})
-        except Exception:
-            updated = None
+    updated = await run_in_threadpool(_update_task_status, task_id, new_status)
 
     if updated:
         # Convert _id to id if present

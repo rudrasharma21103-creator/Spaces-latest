@@ -1,5 +1,11 @@
-from fastapi import FastAPI
+import logging
+import os
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from pymongo.errors import PyMongoError
 
 from app.database import client
 from app.routes.users import router as users_router
@@ -15,9 +21,7 @@ from app.routes.admin import router as admin_router
 from app.routes.tasks import router as tasks_router
 from app.routes.contexts import router as contexts_router
 from app.routes.drafts import router as drafts_router
-import logging
 from app.core import drive as drive_core
-import os
 from googleapiclient.errors import HttpError
 # Load environment variables from backend/.env if present
 try:
@@ -28,6 +32,7 @@ except Exception:
     pass
 
 app = FastAPI()
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 # Allow both Vercel deployments and localhost for development
 app.add_middleware(
@@ -61,11 +66,21 @@ app.include_router(admin_router)
 app.include_router(contexts_router)
 app.include_router(drafts_router)
 
+logger = logging.getLogger("app.main")
+
+
+@app.exception_handler(PyMongoError)
+async def pymongo_exception_handler(request: Request, exc: PyMongoError):
+    logger.error("MongoDB request failed on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database is temporarily unavailable. Please retry."},
+    )
+
 
 @app.on_event("startup")
 def startup_checks():
     # Confirm Drive credentials file loads at startup to fail fast and log status
-    logger = logging.getLogger("app.main")
     try:
         svc = drive_core.build_drive_service()
         logger.info("Google Drive client initialized successfully")

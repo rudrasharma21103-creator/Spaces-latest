@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
+from pymongo.errors import PyMongoError
 from starlette import status
 
 from app.database import contexts_collection
@@ -48,7 +49,10 @@ def get_context_state(request: Request, chat_id: str):
     if user_id is None or not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    doc = contexts_collection.find_one({"chatId": chat_id}, {"_id": 0})
+    try:
+        doc = contexts_collection.find_one({"chatId": chat_id}, {"_id": 0})
+    except PyMongoError:
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     if not doc:
         return {"chatId": chat_id, "contexts": [], "decisions": [], "tasks": []}
 
@@ -68,5 +72,8 @@ def save_context_state(request: Request, chat_id: str, payload: dict):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     doc = _normalize_channel_state(chat_id, payload or {})
-    contexts_collection.update_one({"chatId": chat_id}, {"$set": doc}, upsert=True)
+    try:
+        contexts_collection.update_one({"chatId": chat_id}, {"$set": doc}, upsert=True)
+    except PyMongoError:
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     return doc

@@ -5,7 +5,11 @@ from app.ws_manager import manager
 import time
 import re
 from bson import ObjectId
+import logging
+from pymongo.errors import PyMongoError
 
+logger = logging.getLogger("app.routes.users")
+USER_LIST_PROJECTION = {"_id": 0, "password": 0, "notifications": 0}
 
 def sanitize(obj):
     if isinstance(obj, ObjectId):
@@ -48,7 +52,11 @@ def get_users(request: Request):
                 except Exception:
                     requester = None
 
-    users_raw = list(users_collection.find({}, {"_id": 0, "password": 0}))
+    try:
+        users_raw = list(users_collection.find({}, USER_LIST_PROJECTION))
+    except PyMongoError as exc:
+        logger.error("Failed to load users list: %s", exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     users = [sanitize(u) for u in users_raw]
     for u in users:
         u.pop("password", None)
@@ -176,10 +184,14 @@ def login(data: dict):
 @router.get("/by-email/{email}")
 def find_user_by_email(email: str):
     print(f"[users.find_user_by_email] called with: {email}")
-    user = users_collection.find_one(
-        {"email": {"$regex": f"^{email}$", "$options": "i"}},
-        {"_id": 0}
-    )
+    try:
+        user = users_collection.find_one(
+            {"email": {"$regex": f"^{email}$", "$options": "i"}},
+            {"_id": 0, "password": 0, "notifications": 0},
+        )
+    except PyMongoError as exc:
+        logger.error("Failed to look up user by email %s: %s", email, exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     if user:
         print(f"[users.find_user_by_email] found user: {user.get('email')}")
         user.pop("password", None)
@@ -190,12 +202,16 @@ def find_user_by_email(email: str):
 
 @router.get("/search/{query}")
 def search_users(query: str, request: Request):
-    users = list(
-        users_collection.find(
-            {"name": {"$regex": query, "$options": "i"}},
-            {"_id": 0, "password": 0}
+    try:
+        users = list(
+            users_collection.find(
+                {"name": {"$regex": query, "$options": "i"}},
+                USER_LIST_PROJECTION,
+            )
         )
-    )
+    except PyMongoError as exc:
+        logger.error("Failed to search users for query %s: %s", query, exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     for u in users:
         u.pop("password", None)
     users = [sanitize(u) for u in users]
@@ -246,7 +262,11 @@ def search_users(query: str, request: Request):
 def users_by_domain(domain: str):
     # Return users whose email domain matches the requested domain
     q = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
-    users = list(users_collection.find(q, {"_id": 0, "password": 0}))
+    try:
+        users = list(users_collection.find(q, USER_LIST_PROJECTION))
+    except PyMongoError as exc:
+        logger.error("Failed to list users for domain %s: %s", domain, exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
     for u in users:
         u.pop("password", None)
     users = [sanitize(u) for u in users]

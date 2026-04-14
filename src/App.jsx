@@ -4619,6 +4619,27 @@ export default function CollaborationApp() {
     return contextItems.filter(context => String(context.channelId) === String(chatId))
   }, [activeView, activeChannel, activeDMUser, currentUser, contextItems])
 
+  const saveChannelContextStateImmediately = async (
+    chatId,
+    nextContextItems = contextItems,
+    nextContextDecisions = contextDecisions,
+    nextContextTasks = contextTasks
+  ) => {
+    if (!chatId) return null
+    const normalizedChatId = String(chatId)
+
+    if (contextSaveTimeoutRef.current) {
+      clearTimeout(contextSaveTimeoutRef.current)
+      contextSaveTimeoutRef.current = null
+    }
+
+    return Storage.saveContextState(normalizedChatId, {
+      contexts: nextContextItems.filter(context => String(context.channelId) === normalizedChatId),
+      decisions: nextContextDecisions.filter(item => String(item.channelId) === normalizedChatId),
+      tasks: nextContextTasks.filter(item => String(item.channelId) === normalizedChatId),
+    })
+  }
+
   const contextsById = useMemo(
     () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),
     [contextItems]
@@ -5100,31 +5121,46 @@ export default function CollaborationApp() {
     setMessageContextPicker(null)
   }
 
-  const deleteContextPermanently = contextId => {
+  const deleteContextPermanently = async contextId => {
     const target = contextItems.find(context => String(context.id) === String(contextId))
     if (!target || !isContextOwner(target)) return
 
     const confirmed = window.confirm(`Delete "${target.title}" permanently? This will remove it from linked messages and the contexts page.`)
     if (!confirmed) return
 
-    setContextItems(prev => prev.filter(context => String(context.id) !== String(contextId)))
-    setContextDecisions(prev => prev.filter(item => String(item.contextId) !== String(contextId)))
-    setContextTasks(prev => prev.filter(item => String(item.contextId) !== String(contextId)))
-    setMessages(prev =>
-      Object.fromEntries(
-        Object.entries(prev).map(([chatId, list]) => [
-          chatId,
-          Array.isArray(list)
-            ? list.map(message => ({
-                ...message,
-                contextIds: Array.isArray(message.contextIds)
-                  ? message.contextIds.filter(id => String(id) !== String(contextId))
-                  : [],
-              }))
-            : list,
-        ])
-      )
-    )
+    const targetChatId = String(target.channelId || getActiveChatId() || "")
+    if (!targetChatId) return
+
+    const previousContextItems = contextItems
+    const previousContextDecisions = contextDecisions
+    const previousContextTasks = contextTasks
+    const previousMessages = messages
+
+    const nextContextItems = previousContextItems.filter(context => String(context.id) !== String(contextId))
+    const nextContextDecisions = previousContextDecisions.filter(item => String(item.contextId) !== String(contextId))
+    const nextContextTasks = previousContextTasks.filter(item => String(item.contextId) !== String(contextId))
+    const previousChannelMessages = Array.isArray(previousMessages[targetChatId]) ? previousMessages[targetChatId] : []
+    const nextChannelMessages = previousChannelMessages.map(message => ({
+      ...message,
+      contextIds: Array.isArray(message.contextIds)
+        ? message.contextIds.filter(id => String(id) !== String(contextId))
+        : [],
+    }))
+    const changedMessages = nextChannelMessages.filter((message, index) => {
+      const previousMessage = previousChannelMessages[index]
+      const previousIds = Array.isArray(previousMessage?.contextIds) ? previousMessage.contextIds.map(String) : []
+      const nextIds = Array.isArray(message.contextIds) ? message.contextIds.map(String) : []
+      return previousIds.length !== nextIds.length
+    })
+    const nextMessages = {
+      ...previousMessages,
+      [targetChatId]: nextChannelMessages,
+    }
+
+    setContextItems(nextContextItems)
+    setContextDecisions(nextContextDecisions)
+    setContextTasks(nextContextTasks)
+    setMessages(nextMessages)
 
     if (String(openContextId) === String(contextId)) {
       setOpenContextId(null)
@@ -5135,6 +5171,27 @@ export default function CollaborationApp() {
     if (String(editingContextId) === String(contextId)) {
       setEditingContextId(null)
       setContextDraft(null)
+    }
+
+    try {
+      await Promise.all(
+        changedMessages.map(message =>
+          Storage.updateMessage(targetChatId, sanitizeMessagePayload(message))
+        )
+      )
+      await saveChannelContextStateImmediately(
+        targetChatId,
+        nextContextItems,
+        nextContextDecisions,
+        nextContextTasks
+      )
+    } catch (error) {
+      console.error("Failed to delete context permanently", error)
+      setContextItems(previousContextItems)
+      setContextDecisions(previousContextDecisions)
+      setContextTasks(previousContextTasks)
+      setMessages(previousMessages)
+      window.alert("Could not delete this context from the backend. Please try again.")
     }
   }
 

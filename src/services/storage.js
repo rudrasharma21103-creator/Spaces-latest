@@ -567,6 +567,9 @@ export const getContextState = async chatId => {
   const request = (async () => {
     const res = await authFetch(`${API_BASE}/contexts/${chatId}`)
     const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to load context state (${res.status})`)
+    }
     const normalized = {
       chatId,
       contexts: Array.isArray(data?.contexts) ? data.contexts : [],
@@ -591,6 +594,7 @@ export const getContextState = async chatId => {
 
 export const saveContextState = async (chatId, payload) => {
   if (!chatId) return null
+  const { data: previousCache } = readContextCache(chatId)
   const optimistic = {
     chatId,
     contexts: Array.isArray(payload?.contexts) ? payload.contexts : [],
@@ -608,8 +612,16 @@ export const saveContextState = async (chatId, payload) => {
     })
   })
   const data = await safeJson(res)
+  if (!res.ok) {
+    if (previousCache) {
+      writeContextCache(chatId, previousCache)
+    } else {
+      clearContextCache(chatId)
+    }
+    throw new Error(data?.detail || `Failed to save context state (${res.status})`)
+  }
   if (data) writeContextCache(chatId, data)
-  return data
+  return data || optimistic
 }
 
 // --------------------

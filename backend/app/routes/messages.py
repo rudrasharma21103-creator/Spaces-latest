@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from starlette import status
 from app.ws_manager import manager
 from app.database import messages_collection, spaces_collection
 from app.auth import verify_ws_token
+import time
+
+_ACCESS_CACHE_TTL_SECONDS = 2.0
+_channel_access_cache = {}
 
 def _get_user_id_from_request(request: Request):
     # Prefer explicit X-User-Id header
@@ -54,12 +59,20 @@ def _message_filter(chat_id: str, message_id):
 
 
 def _check_channel_access(chat_id: str, user_id: int):
+    cache_key = (str(chat_id), str(user_id))
+    cached = _channel_access_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and cached[1] > now:
+        return cached[0]
+
     # Allow DM chats where chat id is like 'dm_<id1>_<id2>' if user is participant
     if isinstance(chat_id, str) and chat_id.startswith("dm_"):
         try:
             parts = chat_id.split("_")
             ids = [int(parts[1]), int(parts[2])]
-            return user_id in ids
+            allowed = user_id in ids
+            _channel_access_cache[cache_key] = (allowed, now + _ACCESS_CACHE_TTL_SECONDS)
+            return allowed
         except Exception:
             return False
 
@@ -82,7 +95,7 @@ def _check_channel_access(chat_id: str, user_id: int):
     # Find the space and channel that contains this channel id, using any normalized form
     space = spaces_collection.find_one({
         "channels.id": {"$in": list(normalized_ids)}
-    })
+    }, {"ownerId": 1, "createdBy": 1, "members": 1, "channels.id": 1, "channels.members": 1})
     if not space:
         return False
 
@@ -168,15 +181,44 @@ def _check_channel_access(chat_id: str, user_id: int):
     try:
         norm_owner = _normalize_owner(owner_id)
         if norm_owner is not None and str(norm_owner) == str(user_id):
+            _channel_access_cache[cache_key] = (True, now + _ACCESS_CACHE_TTL_SECONDS)
             return True
     except Exception:
         pass
 
     # User has access if they are in space members, or in channel members
     if _id_in_list(user_id, space_members) or _id_in_list(user_id, channel_members):
+        _channel_access_cache[cache_key] = (True, now + _ACCESS_CACHE_TTL_SECONDS)
         return True
 
+    _channel_access_cache[cache_key] = (False, now + _ACCESS_CACHE_TTL_SECONDS)
     return False
+
+
+def _fetch_messages(chat_id: str):
+    docs = messages_collection.find({"chatId": chat_id}, {"_id": 0}).sort("message.timestamp", 1)
+    return [d["message"] for d in docs]
+
+
+def _count_messages(chat_id: str):
+    return messages_collection.count_documents({"chatId": chat_id})
+
+
+def _save_message_document(chat_id: str, message: dict):
+    message_id = message.get("id")
+    if message_id is not None:
+        messages_collection.update_one(
+            _message_filter(chat_id, message_id),
+            {"$set": {"chatId": chat_id, "message": message}},
+            upsert=True,
+        )
+        return
+
+    messages_collection.insert_one({"chatId": chat_id, "message": message})
+
+
+def _delete_message_documents(chat_id: str, message_id: str):
+    return messages_collection.delete_many(_message_filter(chat_id, message_id))
 
 
 @router.get("/{chat_id}")
@@ -187,11 +229,7 @@ def get_messages(request: Request, chat_id: str):
     if user_id is None or not has_access:
         return []
 
-    docs = messages_collection.find(
-        {"chatId": chat_id},
-        {"_id": 0}
-    ).sort("message.timestamp", 1)
-    return [d["message"] for d in docs]
+    return _fetch_messages(chat_id)
 
 
 @router.get("/{chat_id}/count")
@@ -200,29 +238,18 @@ def get_message_count(request: Request, chat_id: str):
     if user_id is None or not _check_channel_access(chat_id, user_id):
         return {"count": 0}
 
-    count = messages_collection.count_documents({"chatId": chat_id})
+    count = _count_messages(chat_id)
     return {"count": count}
 
 
 @router.post("/{chat_id}")
 async def save_message(request: Request, chat_id: str, message: dict):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
+    has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
+    if user_id is None or not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    # Persist the message idempotently so retries do not create duplicates.
-    message_id = message.get("id")
-    if message_id is not None:
-        messages_collection.update_one(
-            _message_filter(chat_id, message_id),
-            {"$set": {"chatId": chat_id, "message": message}},
-            upsert=True,
-        )
-    else:
-        messages_collection.insert_one({
-            "chatId": chat_id,
-            "message": message
-        })
+    await run_in_threadpool(_save_message_document, chat_id, message)
 
     # Broadcast immediately to connected websocket clients in this chat
     try:
@@ -255,12 +282,11 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
 @router.delete("/{chat_id}/{message_id}")
 async def delete_message(request: Request, chat_id: str, message_id: str):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
+    has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
+    if user_id is None or not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    res = messages_collection.delete_many(
-        _message_filter(chat_id, message_id)
-    )
+    res = await run_in_threadpool(_delete_message_documents, chat_id, message_id)
 
     if res.deleted_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
