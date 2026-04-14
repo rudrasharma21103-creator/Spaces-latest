@@ -15,6 +15,8 @@ import {
 } from "lucide-react"
 
 const cx = (...classes) => classes.filter(Boolean).join(" ")
+const fastTransition = "motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none"
+const colorTransition = "motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none"
 
 const getEntityId = value => {
   if (value === undefined || value === null) return ""
@@ -150,6 +152,7 @@ function SurfaceCard({ children, className = "", isDarkMode = false }) {
       className={cx(
         "overflow-hidden rounded-2xl border",
         isDarkMode ? "border-[#2a313a] bg-[#171b21]" : "border-slate-200 bg-white",
+        fastTransition,
         className
       )}
     >
@@ -221,7 +224,8 @@ function FilterField({
       <div
         className={cx(
           "flex items-center gap-2 rounded-xl border px-3",
-          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50"
+          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50",
+          colorTransition
         )}
       >
         <span className={cx(isDarkMode ? "text-slate-400" : "text-slate-500")}>{icon}</span>
@@ -253,7 +257,8 @@ function SearchField({ value, onChange, isDarkMode = false }) {
       <div
         className={cx(
           "flex items-center gap-2 rounded-xl border px-3",
-          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50"
+          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50",
+          colorTransition
         )}
       >
         <Search className={cx("h-4 w-4", isDarkMode ? "text-slate-400" : "text-slate-500")} />
@@ -314,14 +319,15 @@ function TaskItem({
   return (
     <article
       className={cx(
-        "rounded-xl border px-4 py-4 transition-colors",
+        "rounded-xl border px-4 py-4",
         isCompleted
           ? isDarkMode
             ? "border-emerald-900/40 bg-emerald-950/20"
             : "border-emerald-100 bg-emerald-50/60"
           : isDarkMode
-            ? "border-[#2c333c] bg-[#14181d] hover:border-[#39414c]"
-            : "border-slate-200 bg-white hover:border-slate-300"
+            ? "border-[#2c333c] bg-[#14181d] hover:border-[#39414c] hover:bg-[#171c22]"
+            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70",
+        fastTransition
       )}
     >
       <div className="flex items-start gap-3">
@@ -329,13 +335,14 @@ function TaskItem({
           onClick={() => onComplete?.(task)}
           disabled={isCompleted || isWorking}
           className={cx(
-            "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors",
+            "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
             isCompleted
               ? "border-emerald-500 bg-emerald-500 text-white"
               : isDarkMode
                 ? "border-[#343b45] bg-[#1c2128] text-slate-300 hover:border-[#4b5563] hover:text-white"
                 : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700",
-            isWorking ? "cursor-wait opacity-80" : ""
+            isWorking ? "cursor-wait opacity-80" : "",
+            fastTransition
           )}
           title={isCompleted ? "Task completed" : "Mark task as complete"}
         >
@@ -561,8 +568,9 @@ export default function TasksHub({
               <button
                 onClick={onBackHome}
                 className={cx(
-                  "inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors",
-                  isDarkMode ? "border-[#2d323a] bg-[#171b21] text-slate-200 hover:bg-[#1b2026]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  "inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium",
+                  isDarkMode ? "border-[#2d323a] bg-[#171b21] text-slate-200 hover:bg-[#1b2026]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                  fastTransition
                 )}
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -636,7 +644,7 @@ export default function TasksHub({
                   </div>
 
                   <div className={cx("mt-4 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
-                    <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900")} style={{ width: `${completionRate}%` }} />
+                    <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900", fastTransition)} style={{ width: `${completionRate}%` }} />
                   </div>
 
                   <div className="mt-4 space-y-4">

@@ -636,15 +636,9 @@ export default function CollaborationApp() {
     messageScrollPositionsRef.current[String(chatId)] = container.scrollTop
   }
   const [isAtBottom, setIsAtBottom] = useState(true)
-  const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
   const updateIsAtBottom = nextValue => {
     setIsAtBottom(prev => (prev === nextValue ? prev : nextValue))
-  }
-
-  const updateVisibleDateLabel = nextValue => {
-    if (!nextValue) return
-    setVisibleDateLabel(prev => (prev === nextValue ? prev : nextValue))
   }
 
   const handleMessagesScroll = () => {
@@ -667,23 +661,6 @@ export default function CollaborationApp() {
       const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
       const atBottom = latest.scrollHeight - latest.scrollTop - latest.clientHeight < threshold
       updateIsAtBottom(atBottom)
-
-      try {
-        const mid = latest.scrollTop + latest.clientHeight / 2
-        const nodes = latest.querySelectorAll('[id^="msg-"]')
-        let foundTs = null
-        for (let i = 0; i < nodes.length; i++) {
-          const node = nodes[i]
-          if (node.offsetTop <= mid) {
-            foundTs = node.dataset.timestamp || null
-          } else {
-            break
-          }
-        }
-        if (foundTs) {
-          updateVisibleDateLabel(formatDateLabel(foundTs, timeTicker))
-        }
-      } catch (e) {}
     })
   }
 
@@ -1991,7 +1968,6 @@ export default function CollaborationApp() {
       updateIsAtBottom(true)
       // record current height so future incoming messages can preserve scroll position
       try { prevScrollHeightRef.current = el.scrollHeight } catch (e) {}
-      try { updateVisibleDateLabel(messageDateLabel || "Today") } catch (e) {}
     } else {
       // Preserve scroll position: adjust scrollTop by the increase in scrollHeight
       try {
@@ -4233,7 +4209,6 @@ export default function CollaborationApp() {
       previousChannelTabRef.current = "messages"
       prevScrollHeightRef.current = 0
       updateIsAtBottom(true)
-      updateVisibleDateLabel("Today")
       setTargetMessageId(null)
       setPinnedMessageId(null)
       if (activeChannelTab !== "messages") {
@@ -4287,18 +4262,6 @@ export default function CollaborationApp() {
   }, [activeView, activeChannelData, activeDMUser, currentUser, usersById])
 
   const getActiveMembers = () => activeMembers
-
-  // Compute the current chat's date label (latest message) and update when relevant state changes
-  const messageDateLabel = useMemo(() => {
-    try {
-      const latest = currentMessages.length ? currentMessages[currentMessages.length - 1] : null
-      return formatDateLabel(latest?.timestamp, timeTicker)
-    } catch (e) {
-      return "Today"
-    }
-  }, [currentMessages, timeTicker])
-
-  // Visible date label (changes while scrolling to indicate the date of messages in view)
 
   const getChannelRole = (memberId) => {
     if (!activeChannelData) return 'member'
@@ -10014,7 +9977,6 @@ export default function CollaborationApp() {
                   />
                 )}
                 {/* Updated Container with Custom Pattern Background */}
-                {/* day label computed above via `messageDateLabel` */}
 
                 {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
                   <div className="flex-1 overflow-y-auto py-1 pb-5">
@@ -10110,12 +10072,6 @@ export default function CollaborationApp() {
                         </div>
                       )}
 
-                      <div className="sticky top-0 z-10 flex justify-center mb-4 pointer-events-none">
-                        <span className="text-[10px] font-black px-3.5 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
-                          {visibleDateLabel || messageDateLabel || 'Today'}
-                        </span>
-                      </div>
-
                       {currentMessages.map((msg, idx) => {
                         const user = getUser(msg.userId)
                         const isMe = String(msg.userId) === String(currentUser?.id)
@@ -10130,13 +10086,37 @@ export default function CollaborationApp() {
                         const messageStatus = msg.status || "sent"
                         const messageContexts = getMessageContexts(msg)
                         const isMessageSelected = selectedMessageIds.some(id => String(id) === String(msg.id))
+                        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0
+                        const hasMessageText = Boolean(
+                          typeof msg.text === "string" ? msg.text.trim() : msg.text
+                        )
+                        const isAttachmentOnlyMessage =
+                          hasAttachments &&
+                          !hasMessageText &&
+                          msg.type !== "meet-invite" &&
+                          msg.type !== "task"
+                        const ownMetaTextClass = isAttachmentOnlyMessage
+                          ? isDarkMode
+                            ? "text-slate-400"
+                            : "text-slate-500"
+                          : "text-sky-100"
+                        const ownRetryTextClass = isAttachmentOnlyMessage
+                          ? isDarkMode
+                            ? "text-rose-400"
+                            : "text-rose-500"
+                          : "text-rose-200"
+                        const ownSpinnerBorderClass = isAttachmentOnlyMessage
+                          ? isDarkMode
+                            ? "border-slate-500/50"
+                            : "border-slate-400/60"
+                          : "border-white/40"
                         const statusLabel = (() => {
                           if (!isMe) return null
                           if (messageStatus === "failed") {
                             return (
                               <button
                                 onClick={() => retryFailedMessage(getActiveChatId(), msg)}
-                                className="flex items-center gap-1 text-[9px] text-rose-200 underline underline-offset-2"
+                                className={`flex items-center gap-1 text-[9px] underline underline-offset-2 ${ownRetryTextClass}`}
                               >
                                 <XCircle className="w-3 h-3" />
                                 Retry send
@@ -10145,14 +10125,14 @@ export default function CollaborationApp() {
                           }
                           if (messageStatus === "sending" || messageStatus === "retrying") {
                             return (
-                              <span className="flex items-center gap-1 text-[9px] text-sky-100">
-                                <span className="w-3 h-3 rounded-full border border-white/40 border-t-transparent animate-spin"></span>
+                              <span className={`flex items-center gap-1 text-[9px] ${ownMetaTextClass}`}>
+                                <span className={`w-3 h-3 rounded-full border ${ownSpinnerBorderClass} border-t-transparent animate-spin`}></span>
                                 {messageStatus === "retrying" ? "Retrying" : "Sending"}
                               </span>
                             )
                           }
                           return (
-                            <span className="flex items-center gap-1 text-[9px] text-sky-100">
+                            <span className={`flex items-center gap-1 text-[9px] ${ownMetaTextClass}`}>
                               Sent
                               <Check className="w-3 h-3" />
                             </span>
@@ -10245,11 +10225,13 @@ export default function CollaborationApp() {
                                 clearTimeout(longPressTimerRef.current)
                               }}
                               className={`relative overflow-visible break-words transition-all duration-200 ${
-                                  isMe
-                                    ? "liquid-glass-message-own text-white rounded-[18px] rounded-tr-[6px]" 
-                                    : isDarkMode 
-                                      ? "liquid-glass-message text-slate-100 rounded-[18px] rounded-tl-[6px]" 
-                                      : "liquid-glass-message text-slate-800 rounded-[18px] rounded-tl-[6px]"
+                                  isAttachmentOnlyMessage
+                                    ? "bg-transparent shadow-none border-0"
+                                    : isMe
+                                      ? "liquid-glass-message-own text-white rounded-[18px] rounded-tr-[6px]" 
+                                      : isDarkMode 
+                                        ? "liquid-glass-message text-slate-100 rounded-[18px] rounded-tl-[6px]" 
+                                        : "liquid-glass-message text-slate-800 rounded-[18px] rounded-tl-[6px]"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-sky-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 <div
@@ -10405,7 +10387,7 @@ export default function CollaborationApp() {
                                     </div>
                                   </div>
                                 ) : (
-                                  msg.text && msg.type !== 'meet-invite' && (
+                                  hasMessageText && msg.type !== 'meet-invite' && (
                                     <div>
                                       {renderWithHighlight(
                                         msg.text,
@@ -10464,7 +10446,7 @@ export default function CollaborationApp() {
                                 {msg.attachments && msg.attachments.length > 0 && (
                                   <div
                                     className={`flex flex-wrap gap-2 ${
-                                      msg.text ? "mt-3" : ""
+                                      hasMessageText ? "mt-3" : ""
                                     }`}
                                   >
                                     {msg.attachments.map(att => (
@@ -10615,7 +10597,7 @@ export default function CollaborationApp() {
                               
                                 {/* Timestamp for Me inside bubble, slightly cleaner */}
                                 {isMe && (
-                                  <div className="text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-1.5 text-sky-100 flex-wrap">
+                                  <div className={`text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-1.5 flex-wrap ${ownMetaTextClass}`}>
                                     <span>
                                       {msg.timestamp
                                         ? formatTime(msg.timestamp)
