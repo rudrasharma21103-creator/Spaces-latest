@@ -453,7 +453,15 @@ export function ContextBadge({ contexts = [], isDarkMode, onOpen }) {
   )
 }
 
-export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, formatUpdatedTime }) {
+export function ContextsTabView({
+  contexts,
+  isDarkMode,
+  onOpen,
+  onDelete,
+  canDelete,
+  renderOwner,
+  formatUpdatedTime,
+}) {
   if (!contexts.length) {
     return (
       <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
@@ -470,10 +478,19 @@ export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, for
     <div className="mx-4 sm:mx-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {contexts.map(context => {
         const statusMeta = CONTEXT_STATUS_META[context.status] || CONTEXT_STATUS_META.active
+        const showDelete = typeof canDelete === "function" ? canDelete(context) : false
         return (
-          <button
+          <article
             key={context.id}
             onClick={() => onOpen(context.id)}
+            onKeyDown={event => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                onOpen(context.id)
+              }
+            }}
+            role="button"
+            tabIndex={0}
             className={`text-left rounded-[1.5rem] border p-4 transition-all hover:-translate-y-0.5 ${
               isDarkMode ? "bg-[#16181c] border-slate-800 hover:border-slate-700" : "bg-white/80 border-white hover:shadow-lg"
             }`}
@@ -483,7 +500,27 @@ export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, for
                 <div className={`text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
                 <div className={`text-sm mt-1 line-clamp-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{context.summary}</div>
               </div>
-              <span className={`px-2.5 py-1 rounded-full text-xs border ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
+              <div className="flex items-start gap-2">
+                <span className={`px-2.5 py-1 rounded-full text-xs border ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
+                {showDelete && (
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onDelete?.(context.id)
+                    }}
+                    className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                      isDarkMode
+                        ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
+                        : "text-rose-500 hover:bg-rose-50 hover:text-rose-600"
+                    }`}
+                    aria-label={`Delete ${context.title}`}
+                    title="Delete context permanently"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className={`grid grid-cols-2 gap-1.5 text-xs mb-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
@@ -497,7 +534,7 @@ export function ContextsTabView({ contexts, isDarkMode, onOpen, renderOwner, for
               <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>Owner {renderOwner(context.ownerId)}</span>
               <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>{formatUpdatedTime(context.updatedAt)}</span>
             </div>
-          </button>
+          </article>
         )
       })}
     </div>
@@ -575,28 +612,193 @@ export function CreateContextModal({
   )
 }
 
-export function AddToContextPopover({ isDarkMode, contexts = [], onClose, onSelect }) {
-  return (
-    <div className={`rounded-2xl border p-2 w-72 shadow-2xl ${isDarkMode ? "bg-[#111317] border-slate-800" : "bg-white border-slate-200"}`}>
-      <div className={`px-2 py-1.5 text-xs font-semibold uppercase tracking-wider ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>Add to context</div>
-      <div className="max-h-64 overflow-y-auto space-y-1">
+export function AddToContextPopover({
+  anchorEl,
+  boundaryEl,
+  preferredAlign = "right",
+  isDarkMode,
+  contexts = [],
+  onClose,
+  onSelect,
+}) {
+  const popoverRef = React.useRef(null)
+  const [position, setPosition] = React.useState({
+    left: 0,
+    top: 0,
+    ready: false,
+    openUpward: false,
+    align: preferredAlign,
+  })
+
+  const computePosition = React.useCallback(() => {
+    if (!anchorEl || !popoverRef.current) return
+    if (!anchorEl.isConnected) {
+      onClose?.()
+      return
+    }
+
+    const anchorRect = anchorEl.getBoundingClientRect()
+    const popoverRect = popoverRef.current.getBoundingClientRect()
+    const boundaryRect = boundaryEl?.getBoundingClientRect?.() || {
+      top: 0,
+      left: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight,
+    }
+    const viewportPadding = 12
+    const boundaryPadding = 10
+    const gap = 8
+
+    const minLeft = Math.max(viewportPadding, boundaryRect.left + boundaryPadding)
+    const maxRight = Math.min(window.innerWidth - viewportPadding, boundaryRect.right - boundaryPadding)
+    const minTop = Math.max(viewportPadding, boundaryRect.top + boundaryPadding)
+    const maxBottom = Math.min(window.innerHeight - viewportPadding, boundaryRect.bottom - boundaryPadding)
+
+    const preferredLeft =
+      preferredAlign === "left"
+        ? anchorRect.left
+        : anchorRect.right - popoverRect.width
+
+    let left = clampValue(
+      preferredLeft,
+      minLeft,
+      Math.max(minLeft, maxRight - popoverRect.width)
+    )
+
+    left = clampValue(
+      left,
+      viewportPadding,
+      Math.max(viewportPadding, window.innerWidth - viewportPadding - popoverRect.width)
+    )
+
+    let openUpward = false
+    let top = anchorRect.bottom + gap
+
+    if (top + popoverRect.height > maxBottom) {
+      top = anchorRect.top - popoverRect.height - gap
+      openUpward = true
+    }
+
+    if (top < minTop) {
+      const downTop = clampValue(
+        anchorRect.bottom + gap,
+        minTop,
+        Math.max(minTop, maxBottom - popoverRect.height)
+      )
+      const upTop = clampValue(
+        anchorRect.top - popoverRect.height - gap,
+        minTop,
+        Math.max(minTop, maxBottom - popoverRect.height)
+      )
+      const spaceBelow = maxBottom - anchorRect.bottom
+      const spaceAbove = anchorRect.top - minTop
+      top = spaceBelow >= spaceAbove ? downTop : upTop
+      openUpward = spaceBelow < spaceAbove
+    }
+
+    const resolvedAlign =
+      left <= minLeft + 4 ? "left" : left + popoverRect.width >= maxRight - 4 ? "right" : preferredAlign
+
+    setPosition({
+      left,
+      top,
+      ready: true,
+      openUpward,
+      align: resolvedAlign,
+    })
+  }, [anchorEl, boundaryEl, onClose, preferredAlign])
+
+  React.useLayoutEffect(() => {
+    computePosition()
+  }, [computePosition, contexts.length])
+
+  React.useEffect(() => {
+    if (!anchorEl) return undefined
+
+    let frame = null
+    const updatePosition = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        computePosition()
+      })
+    }
+
+    window.addEventListener("resize", updatePosition)
+    window.addEventListener("scroll", updatePosition, true)
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener("resize", updatePosition)
+      window.removeEventListener("scroll", updatePosition, true)
+    }
+  }, [anchorEl, computePosition])
+
+  if (!anchorEl) return null
+
+  const popoverNode = (
+    <div
+      ref={popoverRef}
+      onClick={event => event.stopPropagation()}
+      className={`fixed z-[96] w-[284px] overflow-hidden rounded-[22px] border p-2 backdrop-blur-xl transition-[opacity,transform] duration-150 ${
+        position.ready ? "opacity-100 scale-100" : "opacity-0 scale-95"
+      } ${
+        isDarkMode
+          ? "bg-[#17191d]/96 border-white/8 shadow-[0_18px_48px_rgba(2,6,23,0.55)]"
+          : "bg-white/96 border-slate-200/80 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      }`}
+      style={{
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        visibility: position.ready ? "visible" : "hidden",
+        transformOrigin: `${position.openUpward ? "bottom" : "top"} ${position.align === "left" ? "left" : "right"}`,
+      }}
+    >
+      <div className={`px-2.5 pb-2 pt-1 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em]">Add to context</div>
+        <div className="mt-1 text-xs">Link this message into an existing context.</div>
+      </div>
+
+      <div className={`mb-1 h-px ${isDarkMode ? "bg-white/8" : "bg-slate-200/80"}`} />
+
+      <div className="max-h-[280px] overflow-y-auto pr-1 space-y-1">
         {contexts.length === 0 && (
-          <div className={`px-3 py-4 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>No contexts in this channel yet.</div>
+          <div className={`rounded-[16px] px-3 py-4 text-sm ${isDarkMode ? "text-slate-400 bg-white/[0.03]" : "text-slate-500 bg-slate-50/90"}`}>
+            No contexts in this channel yet.
+          </div>
         )}
         {contexts.map(context => (
           <button
             key={context.id}
             onClick={() => onSelect(context.id)}
-            className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors ${isDarkMode ? "hover:bg-slate-800 text-slate-200" : "hover:bg-slate-100 text-slate-700"}`}
+            className={`group w-full rounded-[16px] px-3 py-2.5 text-left transition-all duration-150 ${
+              isDarkMode ? "hover:bg-white/[0.06]" : "hover:bg-slate-100"
+            }`}
           >
-            <div className="font-medium">{context.title}</div>
-            <div className={`text-xs mt-0.5 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{context.summary}</div>
+            <div className={`text-[13px] font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+              {context.title}
+            </div>
+            <div className={`mt-1 line-clamp-2 text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              {context.summary || "No summary yet"}
+            </div>
           </button>
         ))}
       </div>
-      <button onClick={onClose} className={`w-full mt-2 px-3 py-2 rounded-xl text-sm ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-slate-100"}`}>Close</button>
+
+      <div className={`mt-1 h-px ${isDarkMode ? "bg-white/8" : "bg-slate-200/80"}`} />
+
+      <button
+        onClick={onClose}
+        className={`mt-1 flex w-full items-center justify-center rounded-[16px] px-3 py-2.5 text-sm font-medium transition-colors ${
+          isDarkMode ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-slate-100"
+        }`}
+      >
+        Close
+      </button>
     </div>
   )
+
+  return createPortal(popoverNode, document.body)
 }
 
 function Section({ title, count, icon, isDarkMode, children }) {

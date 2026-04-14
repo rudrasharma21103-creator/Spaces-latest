@@ -595,6 +595,7 @@ export default function CollaborationApp() {
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const messageActionButtonRefs = useRef(new Map())
+  const composerAttachTriggerRef = useRef(null)
   const prevScrollHeightRef = useRef(0)
   const messageScrollPositionsRef = useRef({})
   const pendingTabScrollRestoreRef = useRef(null)
@@ -4659,6 +4660,11 @@ export default function CollaborationApp() {
     return String(context.ownerId) === String(currentUser.id) || role === "owner" || role === "admin"
   }
 
+  const isContextOwner = context => {
+    if (!context || !currentUser) return false
+    return String(context.ownerId) === String(currentUser.id)
+  }
+
   const patchMessage = async (messageId, updater) => {
     const chatId = getActiveChatId()
     if (!chatId || !messageId) return null
@@ -5092,6 +5098,44 @@ export default function CollaborationApp() {
     setOpenContextId(contextId)
     setMessageActionMenu(null)
     setMessageContextPicker(null)
+  }
+
+  const deleteContextPermanently = contextId => {
+    const target = contextItems.find(context => String(context.id) === String(contextId))
+    if (!target || !isContextOwner(target)) return
+
+    const confirmed = window.confirm(`Delete "${target.title}" permanently? This will remove it from linked messages and the contexts page.`)
+    if (!confirmed) return
+
+    setContextItems(prev => prev.filter(context => String(context.id) !== String(contextId)))
+    setContextDecisions(prev => prev.filter(item => String(item.contextId) !== String(contextId)))
+    setContextTasks(prev => prev.filter(item => String(item.contextId) !== String(contextId)))
+    setMessages(prev =>
+      Object.fromEntries(
+        Object.entries(prev).map(([chatId, list]) => [
+          chatId,
+          Array.isArray(list)
+            ? list.map(message => ({
+                ...message,
+                contextIds: Array.isArray(message.contextIds)
+                  ? message.contextIds.filter(id => String(id) !== String(contextId))
+                  : [],
+              }))
+            : list,
+        ])
+      )
+    )
+
+    if (String(openContextId) === String(contextId)) {
+      setOpenContextId(null)
+    }
+    if (String(selectedComposerContextId) === String(contextId)) {
+      setSelectedComposerContextId(null)
+    }
+    if (String(editingContextId) === String(contextId)) {
+      setEditingContextId(null)
+      setContextDraft(null)
+    }
   }
 
   const currentContext = useMemo(
@@ -10009,6 +10053,8 @@ export default function CollaborationApp() {
                         contexts={currentChannelContexts}
                         isDarkMode={isDarkMode}
                         onOpen={openContext}
+                        onDelete={deleteContextPermanently}
+                        canDelete={isContextOwner}
                         renderOwner={getContextOwnerName}
                         formatUpdatedTime={formatContextTime}
                       />
@@ -10264,7 +10310,7 @@ export default function CollaborationApp() {
                                 >
                                   <MessageActionButton
                                     buttonRef={node => setMessageActionButtonRef(msg.id, node)}
-                                    isActive={isActionMenuOpen}
+                                    isActive={isActionMenuOpen || isContextPickerOpen}
                                     isDarkMode={isDarkMode}
                                     onClick={() =>
                                       setMessageActionMenu(prev =>
@@ -10325,18 +10371,19 @@ export default function CollaborationApp() {
                                     />
                                   )}
                                   {isContextPickerOpen && (
-                                    <div className={`absolute top-11 z-40 ${isMe ? 'left-[calc(100%+0.5rem)] max-sm:left-0' : 'right-[calc(100%+0.5rem)] max-sm:right-0'} max-sm:top-[calc(100%+0.5rem)]`}>
-                                      <AddToContextPopover
-                                        isDarkMode={isDarkMode}
-                                        contexts={currentChannelContexts}
-                                        onClose={() => setMessageContextPicker(null)}
-                                        onSelect={contextId => {
-                                          addMessageToContext(contextId, msg.id)
-                                          setMessageContextPicker(null)
-                                          setMessageActionMenu(null)
-                                        }}
-                                      />
-                                    </div>
+                                    <AddToContextPopover
+                                      anchorEl={messageActionButtonRefs.current.get(String(msg.id))}
+                                      boundaryEl={messagesContainerRef.current}
+                                      preferredAlign={isMe ? "left" : "right"}
+                                      isDarkMode={isDarkMode}
+                                      contexts={currentChannelContexts}
+                                      onClose={() => setMessageContextPicker(null)}
+                                      onSelect={contextId => {
+                                        addMessageToContext(contextId, msg.id)
+                                        setMessageContextPicker(null)
+                                        setMessageActionMenu(null)
+                                      }}
+                                    />
                                   )}
                                 </div>
                                 {/* Meet Invite Message */}
@@ -10735,6 +10782,7 @@ export default function CollaborationApp() {
                     <div className="flex items-end gap-1.5 px-1.5 pb-0.5 relative">
                       <div className="relative">
                         <button
+                          ref={composerAttachTriggerRef}
                           onClick={e => {
                             e.stopPropagation()
                             setComposerAttachMenuOpen(prev => !prev)
@@ -10798,20 +10846,18 @@ export default function CollaborationApp() {
                         )}
 
                         {(activeView === "channel" || activeView === "dm") && composerContextPickerOpen && (
-                          <div
-                            className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <AddToContextPopover
-                              isDarkMode={isDarkMode}
-                              contexts={currentChannelContexts}
-                              onClose={() => setComposerContextPickerOpen(false)}
-                              onSelect={contextId => {
-                                setSelectedComposerContextId(contextId)
-                                setComposerContextPickerOpen(false)
-                              }}
-                            />
-                          </div>
+                          <AddToContextPopover
+                            anchorEl={composerAttachTriggerRef.current}
+                            boundaryEl={messagesContainerRef.current}
+                            preferredAlign="left"
+                            isDarkMode={isDarkMode}
+                            contexts={currentChannelContexts}
+                            onClose={() => setComposerContextPickerOpen(false)}
+                            onSelect={contextId => {
+                              setSelectedComposerContextId(contextId)
+                              setComposerContextPickerOpen(false)
+                            }}
+                          />
                         )}
 
                         {showEmojiPickerFor === 'input' && (
