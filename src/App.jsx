@@ -731,6 +731,7 @@ export default function CollaborationApp() {
 
     // Handle relative URLs by prepending API_BASE
     if (url && typeof url === 'string') {
+      const shouldUseApiBase = url.startsWith('/uploads/')
       if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
         return (
           <SmartImage
@@ -750,7 +751,7 @@ export default function CollaborationApp() {
           <SmartImage
             src={url}
             alt={name}
-            apiBase={API_BASE}
+            apiBase={shouldUseApiBase ? API_BASE : undefined}
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
@@ -761,8 +762,20 @@ export default function CollaborationApp() {
       }
     }
 
-    if (preset) {
-      // simple gradient generation from preset id
+    if (typeof preset === "string" && preset.trim()) {
+      return (
+        <SmartImage
+          src={preset}
+          alt={name}
+          className="rounded-full object-cover"
+          style={sizeStyle}
+          loading="eager"
+          fetchPriority="high"
+        />
+      )
+    }
+
+    if (Array.isArray(preset) && preset.length >= 2) {
       const grad = `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)`
       return (
         <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
@@ -814,16 +827,10 @@ export default function CollaborationApp() {
     return ""
   }
 
-  const avatarPresets = [
-    ["#ff9a9e", "#fecfef"],
-    ["#a1c4fd", "#c2e9fb"],
-    ["#f6d365", "#fda085"],
-    ["#f093fb", "#f5576c"],
-    ["#96fbc4", "#f9f586"],
-    ["#c2e9fb", "#a1c4fd"],
-    ["#fddb92", "#d1fdff"],
-    ["#fbc2eb", "#a6c1ee"]
-  ]
+  const avatarPresets = Array.from({ length: 8 }, (_, index) => ({
+    id: `ellipse-${index + 2}`,
+    src: `/Ellipse%20${index + 2}.png`
+  }))
 
   const syncUserCollections = updatedUser => {
     if (!updatedUser) return
@@ -7885,25 +7892,26 @@ export default function CollaborationApp() {
                 <div className="mb-3 text-sm font-semibold text-slate-600">Choose an avatar</div>
                 <div className="grid grid-cols-4 gap-3">
                   {avatarPresets.map((preset, i) => {
-                    const isActive = Array.isArray(selectedPreset) &&
-                      selectedPreset.length === preset.length &&
-                      selectedPreset.every((clr, idx) => clr === preset[idx])
+                    const isActive = selectedPreset === preset.src || avatarPreview === preset.src
                     return (
                       <button
-                        key={i}
+                        key={preset.id}
                         type="button"
                         onClick={() => {
-                          setSelectedPreset([...preset])
-                          setAvatarPreview(null)
+                          setSelectedPreset(preset.src)
+                          setAvatarPreview(preset.src)
                         }}
                         className={`w-16 h-16 rounded-full shadow-md flex items-center justify-center transition-all ${
                           isActive ? "ring-4 ring-sky-200 scale-105" : "ring-0"
                         }`}
-                        style={{ background: `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)` }}
                       >
-                        <span className="text-white font-bold">
-                          {(currentUser?.name || "?")[0]?.toUpperCase() || "?"}
-                        </span>
+                        <SmartImage
+                          src={preset.src}
+                          alt={`Avatar preset ${i + 2}`}
+                          className="w-full h-full rounded-full object-cover"
+                          loading="eager"
+                          fetchPriority="high"
+                        />
                       </button>
                     )
                   })}
