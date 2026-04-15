@@ -1000,11 +1000,11 @@ export default function HomeHub({
         <aside className={cx("border-b lg:flex lg:min-h-0 lg:w-[272px] lg:min-w-[272px] lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar)}>
           <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
             <button onClick={() => onSectionChange("overview")} className="flex w-full items-center gap-3 text-left">
-              <div className={cx("flex h-10 w-10 items-center justify-center rounded-2xl shadow-[0_10px_20px_rgba(17,24,39,0.14)]", isDarkMode ? "bg-white/[0.08]" : "bg-[#111827]")}>
+              <div className={cx("flex h-10 w-10 items-center justify-center", isDarkMode && "rounded-2xl bg-white/[0.08] shadow-[0_10px_20px_rgba(17,24,39,0.14)]")}>
                 <SmartImage
-                  src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+                  src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.jpg"}
                   alt="Spacess logo"
-                  className="h-6 w-6 object-contain"
+                  className={cx("object-contain", isDarkMode ? "h-6 w-6" : "h-7 w-7")}
                   loading="eager"
                   fetchPriority="high"
                 />
