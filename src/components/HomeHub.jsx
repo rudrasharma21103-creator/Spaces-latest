@@ -569,7 +569,7 @@ export default function HomeHub({
           </ShellCard>
         </div>
 
-        <div className="space-y-4 xl:col-span-4">
+        <div className="space-y-4 xl:col-span-7">
           {renderThoughtsCard()}
 
           <ShellCard className={overviewWidgetClass}>
@@ -596,35 +596,6 @@ export default function HomeHub({
           </ShellCard>
         </div>
 
-        <div className="xl:col-span-3">
-          <ShellCard className={overviewWidgetClass}>
-            <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Connect</h3>
-                <p className={cx("mt-1 text-sm", ui.textMuted)}>Jump back into the people you talk with most.</p>
-              </div>
-              <button onClick={() => onSectionChange("connect")} className={cx("w-full justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:w-auto", ui.secondaryButton)}>View all</button>
-            </div>
-            <div className={cx("space-y-2.5", !isMobile && "max-h-[calc(100vh-22rem)] overflow-y-auto pr-1")}>
-              {filteredFriends.map(friend => (
-                <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex w-full items-center gap-3 rounded-[20px] border p-3 text-left transition", overviewItemClass)}>
-                  <div className="relative">
-                    <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
-                    <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className={cx("truncate text-sm font-semibold", ui.textPrimary)}>{friend.name}</div>
-                    <div className={cx("mt-1 text-xs", ui.textMuted)}>{friend.status === "online" ? "Online" : "Open direct message"}</div>
-                  </div>
-                </button>
-              ))}
-              <button onClick={onOpenAddConnection} className={cx("flex w-full items-center justify-center gap-2 rounded-[20px] border border-dashed px-4 py-3 text-sm font-semibold transition", overviewEmptyClass, isDarkMode ? "hover:bg-[#111111]" : "hover:border-[#cfd9e3] hover:bg-white")}>
-                <UserPlus className="h-4 w-4" />
-                Connect new friend
-              </button>
-            </div>
-          </ShellCard>
-        </div>
       </div>
         </>
       )}
