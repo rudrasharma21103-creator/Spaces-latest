@@ -708,6 +708,11 @@ export default function CollaborationApp() {
   }, [])
 
   // Helper: render avatar for a user object
+  const isEllipseAvatarSource = value => {
+    if (typeof value !== "string") return false
+    return /(?:^|\/)Ellipse(?:%20| )?[2-9]\.png(?:\?.*)?$/i.test(value.trim())
+  }
+
   const renderAvatar = (user, size = 40) => {
     if (!user) return null
     let url = user.avatar_url || user.avatarImage || user.avatar_image
@@ -728,11 +733,40 @@ export default function CollaborationApp() {
       user.updated_at ||
       user.updatedAt ||
       ""
+    const initialOverlay = (
+      <span
+        className="pointer-events-none absolute inset-0 flex select-none items-center justify-center font-bold text-white"
+        style={{
+          fontSize: Math.max(12, Math.floor(size * 0.42)),
+          lineHeight: 1,
+          textShadow: "0 1px 2px rgba(15,23,42,0.24)"
+        }}
+      >
+        {initial}
+      </span>
+    )
 
     // Handle relative URLs by prepending API_BASE
     if (url && typeof url === 'string') {
       const shouldUseApiBase = url.startsWith('/uploads/')
+      const isEllipseAvatar = isEllipseAvatarSource(url)
       if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
+        if (isEllipseAvatar) {
+          return (
+            <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
+              <SmartImage
+                src={url}
+                alt={name}
+                apiBase={API_BASE}
+                cacheKey={avatarCacheKey}
+                className="h-full w-full rounded-full object-cover"
+                loading="eager"
+                fetchPriority="high"
+              />
+              {initialOverlay}
+            </div>
+          )
+        }
         return (
           <SmartImage
             src={url}
@@ -747,6 +781,22 @@ export default function CollaborationApp() {
         )
       }
       if (url.startsWith('/')) {
+        if (isEllipseAvatar) {
+          return (
+            <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
+              <SmartImage
+                src={url}
+                alt={name}
+                apiBase={shouldUseApiBase ? API_BASE : undefined}
+                cacheKey={avatarCacheKey}
+                className="h-full w-full rounded-full object-cover"
+                loading="eager"
+                fetchPriority="high"
+              />
+              {initialOverlay}
+            </div>
+          )
+        }
         return (
           <SmartImage
             src={url}
@@ -763,6 +813,20 @@ export default function CollaborationApp() {
     }
 
     if (typeof preset === "string" && preset.trim()) {
+      if (isEllipseAvatarSource(preset)) {
+        return (
+          <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
+            <SmartImage
+              src={preset}
+              alt={name}
+              className="h-full w-full rounded-full object-cover"
+              loading="eager"
+              fetchPriority="high"
+            />
+            {initialOverlay}
+          </div>
+        )
+      }
       return (
         <SmartImage
           src={preset}
@@ -7891,7 +7955,7 @@ export default function CollaborationApp() {
               <div>
                 <div className="mb-3 text-sm font-semibold text-slate-600">Choose an avatar</div>
                 <div className="grid grid-cols-4 gap-3">
-                  {avatarPresets.map((preset, i) => {
+                  {avatarPresets.map(preset => {
                     const isActive = selectedPreset === preset.src || avatarPreview === preset.src
                     return (
                       <button
@@ -7905,13 +7969,14 @@ export default function CollaborationApp() {
                           isActive ? "ring-4 ring-sky-200 scale-105" : "ring-0"
                         }`}
                       >
-                        <SmartImage
-                          src={preset.src}
-                          alt={`Avatar preset ${i + 2}`}
-                          className="w-full h-full rounded-full object-cover"
-                          loading="eager"
-                          fetchPriority="high"
-                        />
+                        {renderAvatar(
+                          {
+                            name: currentUser?.name,
+                            avatar_url: preset.src,
+                            avatar_preset: preset.src
+                          },
+                          64
+                        )}
                       </button>
                     )
                   })}
