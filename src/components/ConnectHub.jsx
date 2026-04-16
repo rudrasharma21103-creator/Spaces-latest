@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react"
-import { BriefcaseBusiness, CheckCircle2, ExternalLink, Link2, LoaderCircle, Search, ShieldCheck, Sparkles, Users } from "lucide-react"
+import {
+  ArrowLeft,
+  BriefcaseBusiness,
+  CheckCircle2,
+  ChevronDown,
+  ExternalLink,
+  Link2,
+  LoaderCircle,
+  MoreHorizontal,
+  Search,
+  ShieldCheck,
+  Users,
+} from "lucide-react"
 import * as Storage from "../services/storage"
 
 const cx = (...classes) => classes.filter(Boolean).join(" ")
@@ -19,6 +31,27 @@ const getResultMeta = person => {
     headline: profile.position && profile.companyName ? `${profile.position} at ${profile.companyName}` : profile.position || profile.companyName || "",
     linkedInUrl: profile.linkedInUrl || "",
   }
+}
+
+const getConnectionTimestamp = person => {
+  const value =
+    person?.connected_at ||
+    person?.connectedAt ||
+    person?.friend_since ||
+    person?.friendSince ||
+    person?.created_at ||
+    person?.createdAt ||
+    null
+
+  if (!value) return 0
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+const formatConnectionDate = person => {
+  const timestamp = getConnectionTimestamp(person)
+  if (!timestamp) return "In your network"
+  return `Connected on ${new Date(timestamp).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}`
 }
 
 const patchResults = (items, personId, patch) => items.map(item => String(item.id) === String(personId) ? { ...item, ...patch } : item)
@@ -62,6 +95,8 @@ export default function ConnectHub({
   onAcceptRequest,
   onRejectRequest,
   onConnectUser,
+  preferredPane = "discover",
+  onPaneChange = () => {},
   isDarkMode = false,
 }) {
   const [query, setQuery] = useState("")
@@ -70,7 +105,10 @@ export default function ConnectHub({
   const [loadingResults, setLoadingResults] = useState(false)
   const [searchError, setSearchError] = useState("")
   const [savingIds, setSavingIds] = useState([])
+  const [networkQuery, setNetworkQuery] = useState("")
+  const [networkSort, setNetworkSort] = useState("recent")
 
+  const activePane = preferredPane === "network" ? "network" : "discover"
   const currentProfile = useMemo(() => getProfessionalProfile(currentUser), [currentUser])
   const profileStrength = [currentProfile.companyName, currentProfile.position, currentProfile.linkedInUrl].filter(Boolean).length
 
@@ -126,6 +164,30 @@ export default function ConnectHub({
       ignore = true
     }
   }, [currentUser, debouncedQuery, friends, pendingRequests])
+
+  const networkConnections = useMemo(() => {
+    const normalizedQuery = networkQuery.trim().toLowerCase()
+    const items = [...friends]
+
+    items.sort((left, right) => {
+      if (networkSort === "name") {
+        return (left?.name || "").localeCompare(right?.name || "")
+      }
+
+      const rightTimestamp = getConnectionTimestamp(right)
+      const leftTimestamp = getConnectionTimestamp(left)
+      if (rightTimestamp !== leftTimestamp) return rightTimestamp - leftTimestamp
+      return (left?.name || "").localeCompare(right?.name || "")
+    })
+
+    if (!normalizedQuery) return items
+
+    return items.filter(friend => {
+      const meta = getResultMeta(friend)
+      const haystack = `${friend?.name || ""} ${meta.headline || ""}`.toLowerCase()
+      return haystack.includes(normalizedQuery)
+    })
+  }, [friends, networkQuery, networkSort])
 
   const handlePersonAction = async person => {
     if (!person || savingIds.includes(person.id)) return
@@ -204,7 +266,126 @@ export default function ConnectHub({
     )
   }
 
-  return (
+  const renderNetworkConnection = friend => {
+    const meta = getResultMeta(friend)
+
+    return (
+      <div key={friend.id} className={cx("flex flex-col gap-4 px-5 py-4 sm:px-6 md:flex-row md:items-center md:justify-between", isDarkMode ? "hover:bg-white/[0.03]" : "hover:bg-[#fcfdff]")}>
+        <div className="flex min-w-0 items-start gap-4">
+          <div className={cx("flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f7fb]")}>
+            {renderAvatar(friend, 60)}
+          </div>
+          <div className="min-w-0">
+            <div className={cx("truncate text-[1.12rem] font-semibold", ui.textPrimary)}>{friend.name}</div>
+            <div className={cx("mt-1 line-clamp-2 text-sm leading-6", meta.headline ? ui.textSecondary : ui.textMuted)}>
+              {meta.headline || "Professional details appear here when available."}
+            </div>
+            <div className={cx("mt-1 text-sm", ui.textMuted)}>{formatConnectionDate(friend)}</div>
+            {meta.linkedInUrl ? (
+              <a href={meta.linkedInUrl} target="_blank" rel="noreferrer" className={cx("mt-2 inline-flex items-center gap-1.5 text-sm font-medium", isDarkMode ? "text-sky-300 hover:text-sky-200" : "text-sky-700 hover:text-sky-800")}>
+                <Link2 className="h-3.5 w-3.5" />
+                LinkedIn
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 self-end md:self-auto">
+          <button type="button" onClick={() => onOpenDM?.(friend.id)} className={cx("inline-flex items-center justify-center rounded-full border px-4 py-2.5 text-sm font-semibold transition", ui.secondaryButton)}>
+            Message
+          </button>
+          <button type="button" className={cx("inline-flex h-10 w-10 items-center justify-center rounded-full border transition", ui.secondaryButton)} title="More actions">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const renderNetworkPane = () => (
+    <div className="space-y-5">
+      <section className={cx("rounded-[30px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className={cx("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", ui.pill)}>
+              <Users className="h-3.5 w-3.5" />
+              My Network
+            </div>
+            <div className={cx("mt-3 text-[1.55rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>
+              {friends.length} connection{friends.length === 1 ? "" : "s"}
+            </div>
+            <p className={cx("mt-1.5 max-w-2xl text-sm leading-6", ui.textMuted)}>
+              Browse every connection in one place, message someone quickly, and scan your network by name.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <button type="button" onClick={() => onPaneChange("discover")} className={cx("inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-semibold transition", ui.secondaryButton)}>
+              <ArrowLeft className="h-4 w-4" />
+              Back to Search
+            </button>
+
+            <label className="relative block w-full lg:w-[320px]">
+              <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
+              <input
+                type="text"
+                value={networkQuery}
+                onChange={event => setNetworkQuery(event.target.value)}
+                placeholder="Search by name"
+                className={cx("h-11 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)}
+              />
+            </label>
+
+            <label className="relative block">
+              <select
+                value={networkSort}
+                onChange={event => setNetworkSort(event.target.value)}
+                className={cx("h-11 appearance-none rounded-full border pl-4 pr-10 text-sm font-medium outline-none transition", ui.input)}
+              >
+                <option value="recent">Recently added</option>
+                <option value="name">Name A-Z</option>
+              </select>
+              <ChevronDown className={cx("pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
+            </label>
+          </div>
+        </div>
+
+        <div className={cx("mt-5 flex items-center justify-between rounded-[22px] border px-4 py-3 text-sm", ui.tint)}>
+          <span className={ui.textSecondary}>
+            {networkQuery.trim()
+              ? `Showing ${networkConnections.length} of ${friends.length} connection${friends.length === 1 ? "" : "s"}`
+              : `Showing all ${friends.length} connection${friends.length === 1 ? "" : "s"}`}
+          </span>
+          <span className={cx("rounded-full border px-3 py-1 text-xs font-semibold", ui.pill)}>{networkConnections.length}</span>
+        </div>
+
+        <div className={cx("mt-4 overflow-hidden rounded-[26px] border", isDarkMode ? "border-white/10 bg-[#09111b]/40" : "border-[#e7edf4] bg-[#fdfefe]")}>
+          {networkConnections.length > 0 ? (
+            <div className={cx("divide-y", isDarkMode ? "divide-white/10" : "divide-[#ebf0f6]")}>
+              {networkConnections.map(renderNetworkConnection)}
+            </div>
+          ) : (
+            <div className={cx("px-6 py-16 text-center", isDarkMode ? "bg-white/[0.02]" : "bg-[#fbfdff]")}>
+              <div className={cx("mx-auto flex h-16 w-16 items-center justify-center rounded-full", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-[#506176] shadow-[0_12px_24px_rgba(15,23,42,0.06)]")}>
+                <Users className="h-7 w-7" />
+              </div>
+              <div className={cx("mt-5 text-xl font-semibold", ui.textPrimary)}>
+                {friends.length === 0 ? "No connections yet" : "No matching connections"}
+              </div>
+              <p className={cx("mx-auto mt-2 max-w-md text-sm leading-6", ui.textMuted)}>
+                {friends.length === 0
+                  ? "Once you connect with people, they will appear here in a full network view."
+                  : "Try another spelling or clear the search to see your full network again."}
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+
+  const renderDiscoverPane = () => (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_320px]">
       <div className="space-y-5">
         <section className={cx("rounded-[28px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
@@ -370,4 +551,6 @@ export default function ConnectHub({
       </aside>
     </div>
   )
+
+  return activePane === "network" ? renderNetworkPane() : renderDiscoverPane()
 }

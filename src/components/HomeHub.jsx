@@ -20,6 +20,7 @@ import {
   Settings,
   Sun,
   Trash2,
+  Users,
   UserPlus,
   X,
 } from "lucide-react"
@@ -186,6 +187,7 @@ export default function HomeHub({
   onConnectUser,
   onSaveProfessionalProfile,
   connectPreferredPane = "discover",
+  setConnectPreferredPane = () => {},
   setDmInput,
   isDarkMode = false,
   isMobile = false,
@@ -970,6 +972,7 @@ export default function HomeHub({
       onConnectUser={onConnectUser}
       onSaveProfessionalProfile={onSaveProfessionalProfile}
       preferredPane={connectPreferredPane}
+      onPaneChange={setConnectPreferredPane}
       isDarkMode={isDarkMode}
     />
   )
@@ -1452,6 +1455,19 @@ export default function HomeHub({
                       )}
 
                       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:flex-nowrap">
+                        {section === "connect" && (
+                          <button
+                            type="button"
+                            onClick={() => setConnectPreferredPane("network")}
+                            className={cx(
+                              "inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-semibold transition",
+                              connectPreferredPane === "network" ? ui.navActive : ui.secondaryButton
+                            )}
+                          >
+                            <Users className="h-4 w-4" />
+                            My Network
+                          </button>
+                        )}
                         <div className={cx("inline-flex w-full justify-center rounded-full border p-1 sm:w-auto", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")}>
                           <button onClick={() => onThemeChange(false)} className={cx("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition", !isDarkMode ? "bg-[#111827] text-white" : ui.textSecondary)}>
                             <Sun className="h-4 w-4" />

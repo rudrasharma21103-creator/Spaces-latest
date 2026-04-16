@@ -8483,6 +8483,7 @@ export default function CollaborationApp() {
           onConnectUser={sendFriendRequest}
           onSaveProfessionalProfile={handleProfessionalProfileSave}
           connectPreferredPane={homeConnectPane}
+          setConnectPreferredPane={setHomeConnectPane}
           setDmInput={setHomeDMInput}
           isDarkMode={isDarkMode}
           isMobile={isMobile}
