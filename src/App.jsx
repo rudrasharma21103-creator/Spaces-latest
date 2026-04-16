@@ -226,6 +226,7 @@ export default function CollaborationApp() {
   const [activeView, setActiveView] = useState("home")
   const [activeDMUser, setActiveDMUser] = useState(null)
   const [homeSection, setHomeSection] = useState("overview")
+  const [homeConnectPane, setHomeConnectPane] = useState("discover")
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
   const [homeDMSending, setHomeDMSending] = useState(false)
@@ -276,7 +277,6 @@ export default function CollaborationApp() {
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState("")
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
-  const [showAddFriendModal, setShowAddFriendModal] = useState(false)
   const [showAddToSpaceModal, setShowAddToSpaceModal] = useState(false)
   const [showNotificationsModal, setShowNotificationsModal] = useState(false)
   const [showMemberDetails, setShowMemberDetails] = useState(false)
@@ -470,10 +470,7 @@ export default function CollaborationApp() {
 
   // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
-  const [debouncedInviteSearchQuery, setDebouncedInviteSearchQuery] = useState("")
   const [inviteSearchResults, setInviteSearchResults] = useState([])
-  // Changed to array for bulk selection in Friend Modal
-  const [selectedFriendInvitees, setSelectedFriendInvitees] = useState([])
 
   // For Channel Invites
   const [selectedInviteUsers, setSelectedInviteUsers] = useState([])
@@ -1014,14 +1011,6 @@ export default function CollaborationApp() {
     }, 150)
     return () => clearTimeout(handler)
   }, [dmSearchQuery])
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedInviteSearchQuery(inviteSearchQuery)
-    }, 100)
-    return () => clearTimeout(handler)
-  }, [inviteSearchQuery])
-
 
   // --- Search Logic: Spaces ---
   useEffect(() => {
@@ -2067,49 +2056,8 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     ;(async () => {
-      const existingFriendIds = new Set([
-        ...(Array.isArray(currentUser?.friends) ? currentUser.friends : []),
-        ...(Array.isArray(friends) ? friends.map(friend => friend.id).filter(Boolean) : [])
-      ])
-
-      // 1. "Add Friend" Modal: Global Search for NEW friends
-      if (showAddFriendModal && debouncedInviteSearchQuery.length > 0) {
-        try {
-          const q = debouncedInviteSearchQuery.toLowerCase()
-          // Fast client-side matches from cached `users` for immediate responsiveness
-          const localMatches = Array.isArray(users)
-            ? users.filter(
-                u =>
-                  u.name &&
-                  u.name.toLowerCase().includes(q) &&
-                  u.id !== currentUser?.id &&
-                  !existingFriendIds.has(u.id)
-              )
-            : []
-          // show a limited set immediately to avoid UI jank
-          setInviteSearchResults(localMatches.slice(0, 50))
-
-          // For longer queries, fetch server-side results to improve coverage
-          if (q.length >= 3) {
-            const remote = await Storage.searchUsersByName(debouncedInviteSearchQuery)
-            const safeUsers = Array.isArray(remote) ? remote : []
-            const results = safeUsers.filter(
-              u => u.id !== currentUser?.id && !existingFriendIds.has(u.id)
-            )
-            setInviteSearchResults(results)
-          }
-        } catch (e) {
-          console.error("searchUsersByName failed", e)
-          // keep local matches if available, otherwise clear
-          setInviteSearchResults(prev => (Array.isArray(prev) && prev.length ? prev : []))
-        }
-      }
-      // 2. "Invite to Channel" Modal: Filter EXISTING friends only
-      else if (showAddToSpaceModal && activeView === "channel") {
+      if (showAddToSpaceModal && activeView === "channel") {
         const currentCh = getCurrentChannels().find(c => c.id === activeChannel)
-        // We only show friends who are NOT in the current channel
-        // If inviteSearchQuery is empty, we show all eligible friends
-        // If inviteSearchQuery is set, we filter friends by name
         const eligibleFriends = friends.filter(friend => {
           const isMember = currentCh
             ? currentCh.members.includes(friend.id)
@@ -2125,9 +2073,7 @@ export default function CollaborationApp() {
       }
     })()
   }, [
-    debouncedInviteSearchQuery,
     inviteSearchQuery,
-    showAddFriendModal,
     showAddToSpaceModal,
     currentUser,
     activeChannel,
@@ -2891,6 +2837,7 @@ export default function CollaborationApp() {
   const handleHomeSectionChange = nextSection => {
     setActiveView("home")
     setHomeSection(nextSection)
+    if (nextSection === "connect") setHomeConnectPane("discover")
     if (nextSection === "files" && googleAccessToken) {
       loadGoogleDocs(googleAccessToken).catch(error => console.warn("Failed to refresh home files", error))
     }
@@ -3976,6 +3923,22 @@ export default function CollaborationApp() {
       setActiveView("channel")
     }
     setHomeSection("overview")
+  }
+
+  const openConnectHome = () => {
+    setActiveDraftId(null)
+    setActiveView("home")
+    setHomeSection("connect")
+    setHomeConnectPane("discover")
+    if (isMobile) setMobileView("chat")
+  }
+
+  const openManageProfileHome = () => {
+    setActiveDraftId(null)
+    setActiveView("home")
+    setHomeSection("connect")
+    setHomeConnectPane("profile")
+    if (isMobile) setMobileView("chat")
   }
 
   const openHomeDM = async (partnerId, options = {}) => {
@@ -6086,40 +6049,35 @@ export default function CollaborationApp() {
 
   const sendFriendRequest = async targetId => {
     if (!currentUser) return
-    const target = users.find(u => u.id === targetId)
-    if (!target) return
-    if (pendingFriendRequestIdsRef.current.has(target.id)) return
+    const normalizedTargetId = String(targetId)
+    if (pendingFriendRequestIdsRef.current.has(normalizedTargetId)) return
 
-    pendingFriendRequestIdsRef.current.add(target.id)
-    setPendingFriendRequestIds(prev => (prev.includes(target.id) ? prev : [...prev, target.id]))
+    pendingFriendRequestIdsRef.current.add(normalizedTargetId)
+    setPendingFriendRequestIds(prev => (prev.includes(normalizedTargetId) ? prev : [...prev, normalizedTargetId]))
 
     try {
-      await Storage.sendFriendRequest(currentUser.id, currentUser.name, target.id)
+      return await Storage.sendFriendRequest(currentUser.id, currentUser.name, targetId)
     } finally {
-      pendingFriendRequestIdsRef.current.delete(target.id)
-      setPendingFriendRequestIds(prev => prev.filter(id => id !== target.id))
+      pendingFriendRequestIdsRef.current.delete(normalizedTargetId)
+      setPendingFriendRequestIds(prev => prev.filter(id => String(id) !== normalizedTargetId))
     }
   }
 
-  const handleBulkFriendInvite = async () => {
-    if (selectedFriendInvitees.length === 0) return
-    await Promise.all(selectedFriendInvitees.map(id => sendFriendRequest(id)))
+  const handleProfessionalProfileSave = async profileUpdates => {
+    if (!currentUser) return null
 
-    setInviteSent(true)
-    setTimeout(() => {
-      setShowAddFriendModal(false)
-      setInviteSearchQuery("")
-      setSelectedFriendInvitees([])
-      setInviteSent(false)
-    }, 2000)
-  }
+    const response = await Storage.updateProfessionalProfile(currentUser.id, profileUpdates)
+    const updatedUser = response && typeof response === "object"
+      ? { ...currentUser, ...(response.user || response) }
+      : null
 
-  const toggleFriendSelection = userId => {
-    setSelectedFriendInvitees(prev =>
-      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
-    )
-    // Hide the dropdown after a selection to reveal the Send button and avoid overlay issues
-    setInviteSearchResults([])
+    if (updatedUser) {
+      setCurrentUser(updatedUser)
+      saveAuth(updatedUser, getToken())
+      syncUserCollections(updatedUser)
+    }
+
+    return updatedUser
   }
 
   const addFriendsToChannel = async () => {
@@ -8504,9 +8462,9 @@ export default function CollaborationApp() {
           onOpenDirectMessages={openWorkspaceFriendsHome}
           onOpenDM={openHomeDM}
           onOpenAddConnection={() => {
-            setInviteSearchQuery("")
-            setSelectedFriendInvitees([])
-            setShowAddFriendModal(true)
+            setActiveView("home")
+            setHomeSection("connect")
+            setHomeConnectPane("discover")
           }}
           onOpenTask={openTaskDetailView}
           onOpenDraft={openDraft}
@@ -8522,6 +8480,9 @@ export default function CollaborationApp() {
             setAvatarPreview(currentUser?.avatar_url || null)
             setShowProfileModal(true)
           }}
+          onConnectUser={sendFriendRequest}
+          onSaveProfessionalProfile={handleProfessionalProfileSave}
+          connectPreferredPane={homeConnectPane}
           setDmInput={setHomeDMInput}
           isDarkMode={isDarkMode}
           isMobile={isMobile}
@@ -9853,6 +9814,17 @@ export default function CollaborationApp() {
                           </button>
                           <button
                             onClick={() => {
+                              openManageProfileHome()
+                              setShowUserMenu(false)
+                            }}
+                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-sky-50 hover:text-sky-700'}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Briefcase className="w-4 h-4" /> Manage Profile
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => {
                               setShowNotificationsModal(true)
                               setShowUserMenu(false)
                             }}
@@ -10072,6 +10044,22 @@ export default function CollaborationApp() {
                               {renderAvatar(currentUser, 32)}
                             </div>
                             Profile
+                          </button>
+                          <button
+                            onClick={() => {
+                              openManageProfileHome()
+                              setShowMobileDrawer(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
+                              isDarkMode
+                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600 border-slate-700'
+                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100 border-slate-100'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-sky-400' : 'bg-slate-100 text-slate-500'}`}>
+                              <Briefcase className="w-4 h-4" />
+                            </div>
+                            Manage Profile
                           </button>
                           
                           {/* Google Apps */}
@@ -11376,11 +11364,7 @@ export default function CollaborationApp() {
           <div className="flex gap-2 ml-auto">
             {!friendsSidebarCollapsed && !isMobile && (
               <button
-                onClick={() => {
-                  setInviteSearchQuery("")
-                  setSelectedFriendInvitees([])
-                  setShowAddFriendModal(true)
-                }}
+                onClick={openConnectHome}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -11388,11 +11372,7 @@ export default function CollaborationApp() {
             )}
             {isMobile && (
               <button
-                onClick={() => {
-                  setInviteSearchQuery("")
-                  setSelectedFriendInvitees([])
-                  setShowAddFriendModal(true)
-                }}
+                onClick={openConnectHome}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -11493,7 +11473,7 @@ export default function CollaborationApp() {
                     No friends yet.
                   </p>
                   <button
-                    onClick={() => setShowAddFriendModal(true)}
+                    onClick={openConnectHome}
                     className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`}
                   >
                     Find people
@@ -11553,7 +11533,7 @@ export default function CollaborationApp() {
             <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
               {friends.length === 0 ? (
                 <button
-                  onClick={() => setShowAddFriendModal(true)}
+                  onClick={openConnectHome}
                   className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                   title="Add Friend"
                 >
@@ -11599,7 +11579,7 @@ export default function CollaborationApp() {
                     </button>
                   ))}
                   <button
-                    onClick={() => setShowAddFriendModal(true)}
+                    onClick={openConnectHome}
                     className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                     title="Add Friend"
                   >
@@ -12075,256 +12055,6 @@ export default function CollaborationApp() {
         </div>
       )}
 
-      {/* Add Friend Modal - UPDATED FOR BULK SELECTION */}
-      {showAddFriendModal && (
-        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
-          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
-        }`}>
-          <div className={`w-full max-w-4xl rounded-[26px] overflow-hidden shadow-[0_40px_110px_rgba(15,23,42,0.28)] border ${
-            isDarkMode
-              ? 'bg-slate-900 border-slate-700/80'
-              : 'bg-white border-slate-200/90'
-          }`}>
-            <div className="relative p-7 sm:p-9">
-              <button
-                onClick={() => setShowAddFriendModal(false)}
-                className={`absolute right-5 top-5 p-2.5 rounded-full transition-all ${
-                  isDarkMode
-                    ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
-                }`}
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="pr-14">
-                <h3 className={`text-[2rem] leading-tight font-bold ${
-                  isDarkMode ? 'text-white' : 'text-slate-900'
-                }`}>
-                  Invite friends to Spacess
-                </h3>
-              </div>
-
-              {!inviteSent ? (
-                <div className="mt-8">
-                  <label className={`block text-sm font-semibold mb-2 ${
-                    isDarkMode ? 'text-slate-200' : 'text-slate-800'
-                  }`}>
-                    To:
-                  </label>
-
-                  <div className={`rounded-[22px] border-2 px-4 py-4 min-h-[110px] transition-all ${
-                    isDarkMode
-                      ? 'border-sky-500/80 bg-slate-950 shadow-[0_0_0_4px_rgba(14,165,233,0.12)]'
-                      : 'border-sky-500 bg-white shadow-[0_0_0_4px_rgba(59,130,246,0.10)]'
-                  }`}>
-                    <div className="relative">
-                      <Search className={`absolute left-0 top-1 w-5 h-5 ${
-                        isDarkMode ? 'text-slate-500' : 'text-slate-400'
-                      }`} />
-                      <input
-                        type="text"
-                        value={inviteSearchQuery}
-                        onChange={e => {
-                          setInviteSearchQuery(e.target.value)
-                        }}
-                        placeholder="Search by name..."
-                        className={`w-full pl-8 pr-2 bg-transparent text-2xl sm:text-[2rem] leading-tight border-0 outline-none focus:outline-none focus:ring-0 ${
-                          isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'
-                        }`}
-                      />
-                    </div>
-
-                    {selectedFriendInvitees.length > 0 && (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {selectedFriendInvitees.map(id => {
-                          const u =
-                            inviteSearchResults.find(r => r.id === id) ||
-                            users.find(us => us.id === id)
-                          return (
-                            <div
-                              key={id}
-                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
-                                isDarkMode
-                                  ? 'bg-sky-500/12 text-sky-100 border border-sky-400/20'
-                                  : 'bg-sky-100 text-sky-800 border border-sky-200'
-                              }`}
-                            >
-                              <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-transparent">
-                                {u ? renderAvatar(u, 22) : <UserIcon className="w-4 h-4" />}
-                              </span>
-                              {u?.name || 'Selected user'}
-                              <button
-                                type="button"
-                                onClick={() => toggleFriendSelection(id)}
-                                className={`rounded-full p-0.5 ${
-                                  isDarkMode ? 'hover:bg-white/10' : 'hover:bg-sky-200/70'
-                                }`}
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="my-8 flex items-center gap-4">
-                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                    <span className={`text-sm ${
-                      isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                    }`}>
-                      OR
-                    </span>
-                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                  </div>
-
-                  <div className={`rounded-2xl border p-4 ${
-                    isDarkMode ? 'border-slate-700 bg-slate-950/40' : 'border-slate-200 bg-slate-50/60'
-                  }`}>
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 w-10 h-10 rounded-xl flex items-center justify-center ${
-                        isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600 border border-slate-200'
-                      }`}>
-                        <Users className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className={`text-xl font-semibold ${
-                          isDarkMode ? 'text-white' : 'text-slate-900'
-                        }`}>
-                          Find people from your network
-                        </p>
-                        <p className={`mt-1 text-base ${
-                          isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                        }`}>
-                          Select one or more friends and send requests together.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5">
-                      <p className={`text-sm mb-3 ${
-                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                      }`}>
-                        Suggestions
-                      </p>
-
-                      <div className={`rounded-2xl border overflow-hidden ${
-                        isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
-                      }`}>
-                        {inviteSearchResults.length > 0 ? (
-                          <div className="max-h-[220px] overflow-y-auto">
-                            {inviteSearchResults.map((u, index) => {
-                              const isSelected = selectedFriendInvitees.includes(u.id)
-                              return (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  onClick={() => toggleFriendSelection(u.id)}
-                                  className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors ${
-                                    index !== inviteSearchResults.length - 1
-                                      ? isDarkMode ? 'border-b border-slate-800' : 'border-b border-slate-100'
-                                      : ''
-                                  } ${
-                                    isSelected
-                                      ? isDarkMode ? 'bg-sky-500/10' : 'bg-sky-50'
-                                      : isDarkMode ? 'hover:bg-slate-800/80' : 'hover:bg-slate-50'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center ${
-                                      isDarkMode ? 'bg-slate-800' : 'bg-slate-100'
-                                    }`}>
-                                      {renderAvatar(u, 32)}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className={`font-medium truncate ${
-                                        isDarkMode ? 'text-slate-100' : 'text-slate-800'
-                                      }`}>
-                                        {u.name}
-                                      </p>
-                                      <p className={`text-sm ${
-                                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                                      }`}>
-                                        {isSelected ? 'Selected' : 'Click to add'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
-                                    isSelected
-                                      ? isDarkMode
-                                        ? 'border-sky-400 bg-sky-400 text-slate-950'
-                                        : 'border-sky-500 bg-sky-500 text-white'
-                                      : isDarkMode
-                                        ? 'border-slate-600'
-                                        : 'border-slate-300'
-                                  }`}>
-                                    {isSelected && <CheckCircle className="w-4 h-4" />}
-                                  </div>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <div className="px-6 py-10 text-center">
-                            <p className={`font-medium ${
-                              isDarkMode ? 'text-slate-300' : 'text-slate-700'
-                            }`}>
-                              {inviteSearchQuery.trim() ? 'No matching people found' : 'Start typing to find friends'}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-8 flex items-center justify-between gap-4 flex-wrap">
-                    <button
-                      type="button"
-                      className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
-                        isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'
-                      }`}
-                    >
-                      <UserPlus className="w-5 h-5" />
-                      Copy invite link
-                    </button>
-
-                    <button
-                      onClick={handleBulkFriendInvite}
-                      disabled={selectedFriendInvitees.length === 0}
-                      className={`min-w-[128px] rounded-2xl px-8 py-3.5 text-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        isDarkMode
-                          ? 'bg-slate-200 text-slate-900 hover:bg-white'
-                          : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
-                      }`}
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="py-16 text-center">
-                  <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 ${
-                    isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600'
-                  }`}>
-                    <Check className="w-10 h-10" />
-                  </div>
-                  <h4 className={`text-3xl font-bold mb-2 ${
-                    isDarkMode ? 'text-white' : 'text-slate-900'
-                  }`}>
-                    Requests sent
-                  </h4>
-                  <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
-                    Your friend invites have been delivered successfully.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Add To Channel Modal - Invite Member logic */}
       {showAddToSpaceModal && (
         <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
@@ -12375,7 +12105,7 @@ export default function CollaborationApp() {
                     <button
                       onClick={() => {
                         setShowAddToSpaceModal(false)
-                        setShowAddFriendModal(true)
+                        openConnectHome()
                       }}
                       className={`inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-lg font-semibold transition-all ${
                         isDarkMode
@@ -12562,7 +12292,7 @@ export default function CollaborationApp() {
                       <button
                         onClick={() => {
                           setShowAddToSpaceModal(false)
-                          setShowAddFriendModal(true)
+                          openConnectHome()
                         }}
                         className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
                           isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'

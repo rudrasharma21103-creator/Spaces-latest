@@ -1,8 +1,27 @@
+import re
+
 from fastapi import APIRouter, HTTPException
 from app.database import users_collection, spaces_collection
 from app.ws_manager import manager
 
 router = APIRouter(prefix="/actions")
+
+
+def get_user_by_id(user_id):
+    user = users_collection.find_one({"id": user_id})
+    if user:
+        return user
+    try:
+        return users_collection.find_one({"id": int(user_id)})
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_email_domain(email):
+    if not email:
+        return None
+    match = re.search(r"@([A-Za-z0-9.-]+)$", str(email))
+    return match.group(1).lower() if match else None
 
 @router.post("/send-friend-request")
 async def send_friend_request(payload: dict):
@@ -10,23 +29,23 @@ async def send_friend_request(payload: dict):
     notification = payload["notification"]
     # Determine sender id from notification or payload
     from_id = notification.get("fromId") or payload.get("fromId")
-    recipient = None
+    if from_id is None:
+        raise HTTPException(status_code=400, detail="Missing sender information")
+
+    if str(from_id) == str(to_id):
+        raise HTTPException(status_code=400, detail="You cannot send a connection request to yourself")
+
+    sender = get_user_by_id(from_id)
+    recipient = get_user_by_id(to_id)
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    if sender is None:
+        raise HTTPException(status_code=404, detail="Sender not found")
 
     # Permission enforcement: if sender has company-only invite permission,
     # ensure recipient is in the same organization or domain
     try:
-        sender = None
-        if from_id is not None:
-            try:
-                sender = users_collection.find_one({"id": int(from_id)})
-            except Exception:
-                sender = users_collection.find_one({"id": from_id})
-        recipient = None
-        try:
-            recipient = users_collection.find_one({"id": int(to_id)})
-        except Exception:
-            recipient = users_collection.find_one({"id": to_id})
-
         if sender and sender.get("invitePermissions"):
             perms = sender.get("invitePermissions") or {}
             can_all = perms.get("canInviteAll")
@@ -40,13 +59,8 @@ async def send_friend_request(payload: dict):
                         raise HTTPException(status_code=403, detail="Not allowed to invite users outside your organization")
                 else:
                     # Fallback to email domain comparison
-                    import re
-                    s_email = (sender.get("email") or "")
-                    r_email = (recipient.get("email") or "")
-                    sm = re.search(r"@([A-Za-z0-9.-]+)$", s_email)
-                    rm = re.search(r"@([A-Za-z0-9.-]+)$", r_email)
-                    sd = sm.group(1).lower() if sm else None
-                    rd = rm.group(1).lower() if rm else None
+                    sd = extract_email_domain(sender.get("email"))
+                    rd = extract_email_domain(recipient.get("email"))
                     if sd != rd:
                         raise HTTPException(status_code=403, detail="Not allowed to invite users outside your company domain")
     except HTTPException:
@@ -55,29 +69,41 @@ async def send_friend_request(payload: dict):
         # On any unexpected failure, be conservative and deny
         raise HTTPException(status_code=403, detail="Invite not permitted")
 
+    recipient_id = recipient.get("id")
+
     try:
-        if recipient is None:
-            try:
-                recipient = users_collection.find_one({"id": int(to_id)})
-            except Exception:
-                recipient = users_collection.find_one({"id": to_id})
-        if recipient is None:
-            raise HTTPException(status_code=404, detail="Recipient not found")
+        sender_id = str(sender.get("id"))
+
+        if any(str(friend_id) == str(recipient_id) for friend_id in sender.get("friends") or []):
+            return {"status": "already_connected"}
+
+        incoming_request = next(
+            (
+                item
+                for item in sender.get("notifications") or []
+                if item.get("type") == "friend_request"
+                and item.get("status") == "pending"
+                and str(item.get("fromId")) == str(recipient_id)
+            ),
+            None,
+        )
+        if incoming_request:
+            return {"status": "incoming_request", "notificationId": incoming_request.get("id")}
+
         existing_notifications = (recipient or {}).get("notifications") or []
         already_pending = any(
             n.get("type") == "friend_request"
-            and str(n.get("fromId")) == str(from_id)
+            and str(n.get("fromId")) == sender_id
             and n.get("status") == "pending"
             for n in existing_notifications
         )
         if already_pending:
-            return {"status": "sent"}
+            return {"status": "pending"}
     except HTTPException:
         raise
     except Exception:
         pass
 
-    recipient_id = recipient.get("id") if recipient else to_id
     update_result = users_collection.update_one(
         {"id": recipient_id},
         {"$push": {"notifications": notification}}

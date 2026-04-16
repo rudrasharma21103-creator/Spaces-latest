@@ -1,276 +1,506 @@
-from fastapi import APIRouter, HTTPException, Request
-from app.auth import hash_password, verify_password, create_access_token
-from app.database import users_collection, spaces_collection, organizations_collection
-from app.ws_manager import manager
-import time
-import re
-from bson import ObjectId
 import logging
+import re
+import time
+from urllib.parse import urlparse, urlunparse
+
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, Query, Request
 from pymongo.errors import PyMongoError
 
+from app.auth import create_access_token, hash_password, verify_password
+from app.database import organizations_collection, spaces_collection, users_collection
+from app.models import ProfessionalProfilePayload
+from app.ws_manager import manager
+
 logger = logging.getLogger("app.routes.users")
+
 USER_LIST_PROJECTION = {"_id": 0, "password": 0, "notifications": 0}
+USER_SEARCH_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "name": 1,
+    "email": 1,
+    "organizationId": 1,
+    "friends": 1,
+    "companyName": 1,
+    "position": 1,
+    "linkedInUrl": 1,
+    "linkedinUrl": 1,
+    "linkedinURL": 1,
+    "professionalProfile": 1,
+    "avatar_url": 1,
+    "avatar_preset": 1,
+    "notifications.id": 1,
+    "notifications.type": 1,
+    "notifications.status": 1,
+    "notifications.fromId": 1,
+}
+MAX_SEARCH_LIMIT = 50
+PROFILE_FIELD_ALIASES = ("companyName", "position", "linkedInUrl", "linkedinUrl", "linkedinURL")
+
+router = APIRouter(prefix="/users")
+
 
 def sanitize(obj):
     if isinstance(obj, ObjectId):
         return str(obj)
     if isinstance(obj, dict):
         out = {}
-        for k, v in obj.items():
-            if k == "_id":
+        for key, value in obj.items():
+            if key == "_id":
                 continue
-            out[k] = sanitize(v)
+            out[key] = sanitize(value)
         return out
     if isinstance(obj, list):
-        return [sanitize(v) for v in obj]
+        return [sanitize(value) for value in obj]
     return obj
 
-router = APIRouter(prefix="/users")
 
-@router.get("/")
-def get_users(request: Request):
-    # Determine requester to enforce invite visibility rules
+def clean_optional_text(value, max_length=None):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        return None
+    if max_length is not None:
+        value = value[:max_length]
+    return value
+
+
+def extract_email_domain(email):
+    if not email:
+        return None
+    match = re.search(r"@([A-Za-z0-9.-]+)$", str(email))
+    return match.group(1).lower() if match else None
+
+
+def normalize_linkedin_url(value):
+    cleaned = clean_optional_text(value, 500)
+    if not cleaned:
+        return None
+
+    candidate = cleaned if re.match(r"^https?://", cleaned, re.IGNORECASE) else f"https://{cleaned}"
+    parsed = urlparse(candidate)
+    host = (parsed.netloc or "").lower()
+    normalized_host = host[4:] if host.startswith("www.") else host
+
+    if not normalized_host.endswith("linkedin.com"):
+        raise HTTPException(status_code=422, detail="LinkedIn URL must point to linkedin.com")
+
+    normalized = urlunparse(
+        (
+            parsed.scheme or "https",
+            parsed.netloc,
+            parsed.path or "",
+            parsed.params,
+            parsed.query,
+            "",
+        )
+    )
+    return normalized[:500]
+
+
+def normalize_professional_profile(source, strict=False):
+    raw = {}
+    if isinstance(source, dict):
+        nested = source.get("professionalProfile")
+        if isinstance(nested, dict):
+            raw.update(nested)
+        raw.update(source)
+
+    company_name = clean_optional_text(raw.get("companyName"), 120)
+    position = clean_optional_text(raw.get("position"), 120)
+    linkedin_raw = (
+        raw.get("linkedInUrl")
+        or raw.get("linkedinUrl")
+        or raw.get("linkedinURL")
+    )
+    linkedin_url = None
+    if linkedin_raw is not None:
+        if strict:
+            linkedin_url = normalize_linkedin_url(linkedin_raw)
+        else:
+            try:
+                linkedin_url = normalize_linkedin_url(linkedin_raw)
+            except HTTPException:
+                linkedin_url = clean_optional_text(linkedin_raw, 500)
+
+    profile = {}
+    if company_name:
+        profile["companyName"] = company_name
+    if position:
+        profile["position"] = position
+    if linkedin_url:
+        profile["linkedInUrl"] = linkedin_url
+    return profile or None
+
+
+def build_profile_update_ops(profile):
+    if not profile:
+        return {
+            "$unset": {
+                "professionalProfile": "",
+                "companyName": "",
+                "position": "",
+                "linkedInUrl": "",
+                "linkedinUrl": "",
+                "linkedinURL": "",
+            }
+        }
+
+    set_doc = {
+        "professionalProfile": profile,
+        "companyName": profile.get("companyName"),
+        "position": profile.get("position"),
+        "linkedInUrl": profile.get("linkedInUrl"),
+    }
+    unset_doc = {
+        "linkedinUrl": "",
+        "linkedinURL": "",
+    }
+    for key in ("companyName", "position", "linkedInUrl"):
+        if set_doc.get(key) is None:
+            unset_doc[key] = ""
+            set_doc.pop(key, None)
+
+    ops = {"$set": set_doc}
+    if unset_doc:
+        ops["$unset"] = unset_doc
+    return ops
+
+
+def serialize_user(user, include_notifications=False):
+    if not user:
+        return None
+
+    sanitized = sanitize(user)
+    sanitized.pop("password", None)
+
+    profile = normalize_professional_profile(sanitized)
+    if profile:
+        sanitized["professionalProfile"] = profile
+    else:
+        sanitized.pop("professionalProfile", None)
+
+    for key in PROFILE_FIELD_ALIASES:
+        sanitized.pop(key, None)
+
+    if include_notifications:
+        sanitized["notifications"] = sanitize(user.get("notifications") or [])
+    else:
+        sanitized.pop("notifications", None)
+
+    return sanitized
+
+
+def get_user_by_id(user_id, projection=None):
+    user = users_collection.find_one({"id": user_id}, projection)
+    if user:
+        return user
+    try:
+        return users_collection.find_one({"id": int(user_id)}, projection)
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_requester(request: Request):
     requester = None
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
     if auth and auth.lower().startswith("bearer "):
         token = auth.split(" ", 1)[1]
         try:
             from app.auth import verify_ws_token
+
             requester_id = verify_ws_token(token)
-            if requester_id:
-                requester = users_collection.find_one({"id": requester_id})
+            if requester_id is not None:
+                requester = get_user_by_id(requester_id)
         except Exception:
             requester = None
-    else:
-        xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-        if xuid:
-            try:
-                requester = users_collection.find_one({"id": int(xuid)})
-            except Exception:
-                try:
-                    requester = users_collection.find_one({"id": xuid})
-                except Exception:
-                    requester = None
+
+    if requester:
+        return requester
+
+    x_user_id = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
+    if not x_user_id:
+        return None
+    return get_user_by_id(x_user_id)
+
+
+def can_requester_see_user(requester, candidate):
+    if not requester:
+        return True
+
+    permissions = requester.get("invitePermissions") or {}
+    can_invite_all = permissions.get("canInviteAll")
+    can_invite_company_only = permissions.get("canInviteCompanyOnly")
+
+    if not can_invite_company_only or can_invite_all:
+        return True
+
+    requester_org = requester.get("organizationId")
+    candidate_org = candidate.get("organizationId")
+    if requester_org and candidate_org:
+        return str(requester_org) == str(candidate_org)
+
+    requester_domain = extract_email_domain(requester.get("email"))
+    candidate_domain = extract_email_domain(candidate.get("email"))
+    return bool(requester_domain and requester_domain == candidate_domain)
+
+
+def build_relationship_state(requester, candidate):
+    if not requester:
+        return "can_connect", None
+
+    requester_id = str(requester.get("id"))
+    candidate_id = str(candidate.get("id"))
+
+    if requester_id == candidate_id:
+        return "self", None
+
+    requester_friends = {str(friend_id) for friend_id in requester.get("friends") or []}
+    if candidate_id in requester_friends:
+        return "connected", None
+
+    incoming_request = next(
+        (
+            notification
+            for notification in requester.get("notifications") or []
+            if notification.get("type") == "friend_request"
+            and notification.get("status") == "pending"
+            and str(notification.get("fromId")) == candidate_id
+        ),
+        None,
+    )
+    if incoming_request:
+        return "incoming_request", incoming_request.get("id")
+
+    outgoing_request = any(
+        notification.get("type") == "friend_request"
+        and notification.get("status") == "pending"
+        and str(notification.get("fromId")) == requester_id
+        for notification in candidate.get("notifications") or []
+    )
+    if outgoing_request:
+        return "outgoing_request", None
+
+    return "can_connect", None
+
+
+def build_user_search_result(candidate, requester):
+    serialized = serialize_user(candidate)
+    relationship_status, notification_id = build_relationship_state(requester, candidate)
+    return {
+        "id": serialized.get("id"),
+        "name": serialized.get("name") or "",
+        "avatar_url": serialized.get("avatar_url"),
+        "avatar_preset": serialized.get("avatar_preset"),
+        "professionalProfile": serialized.get("professionalProfile"),
+        "relationshipStatus": relationship_status,
+        "incomingRequestNotificationId": notification_id,
+    }
+
+
+def search_users_core(query: str, request: Request, limit: int = 25):
+    requester = resolve_requester(request)
+    safe_limit = max(1, min(int(limit or 25), MAX_SEARCH_LIMIT))
+    normalized_query = query.strip()
+    if not normalized_query:
+        return []
+
+    escaped_query = re.escape(normalized_query)
+    prefix_pattern = f"^{escaped_query}"
+    contains_pattern = escaped_query
+    query_length = len(normalized_query)
+    should_run_contains_fallback = query_length >= 3
+
+    try:
+        prefix_limit = safe_limit if query_length > 1 else min(safe_limit, 10)
+        candidates = list(
+            users_collection.find(
+                {"name": {"$regex": prefix_pattern, "$options": "i"}},
+                USER_SEARCH_PROJECTION,
+            ).limit(prefix_limit)
+        )
+
+        if should_run_contains_fallback and len(candidates) < safe_limit:
+            existing_ids = {str(candidate.get("id")) for candidate in candidates}
+            remaining = max(safe_limit - len(candidates), 0)
+            fallback_limit = min(max(remaining + 4, 6), safe_limit + 4)
+            fallback_candidates = list(
+                users_collection.find(
+                    {
+                        "name": {"$regex": contains_pattern, "$options": "i"},
+                        "id": {"$nin": [candidate.get("id") for candidate in candidates if candidate.get("id") is not None]},
+                    },
+                    USER_SEARCH_PROJECTION,
+                )
+                .limit(fallback_limit)
+            )
+            for candidate in fallback_candidates:
+                candidate_id = str(candidate.get("id"))
+                if candidate_id in existing_ids:
+                    continue
+                candidates.append(candidate)
+                existing_ids.add(candidate_id)
+                if len(candidates) >= safe_limit:
+                    break
+    except PyMongoError as exc:
+        logger.error("Failed to search users for query %s: %s", normalized_query, exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
+
+    visible_candidates = [candidate for candidate in candidates if can_requester_see_user(requester, candidate)]
+    visible_candidates.sort(key=lambda candidate: (candidate.get("name") or "").lower())
+    results = [build_user_search_result(candidate, requester) for candidate in visible_candidates[:safe_limit]]
+    return results
+
+
+def discover_people_core(request: Request, limit: int = 8):
+    requester = resolve_requester(request)
+    safe_limit = max(1, min(int(limit or 8), 24))
+
+    try:
+        candidates = list(
+            users_collection.find({}, USER_SEARCH_PROJECTION).sort("name", 1).limit(200)
+        )
+    except PyMongoError as exc:
+        logger.error("Failed to load discover users: %s", exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
+
+    results = []
+    for candidate in candidates:
+        if not can_requester_see_user(requester, candidate):
+            continue
+
+        card = build_user_search_result(candidate, requester)
+        if card["relationshipStatus"] in {"self", "connected"}:
+            continue
+
+        results.append(card)
+
+    relationship_order = {
+        "incoming_request": 0,
+        "can_connect": 1,
+        "outgoing_request": 2,
+    }
+    results.sort(key=lambda item: (relationship_order.get(item["relationshipStatus"], 3), item["name"].lower()))
+    return results[:safe_limit]
+
+
+@router.get("/")
+def get_users(request: Request):
+    requester = resolve_requester(request)
 
     try:
         users_raw = list(users_collection.find({}, USER_LIST_PROJECTION))
     except PyMongoError as exc:
         logger.error("Failed to load users list: %s", exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
-    users = [sanitize(u) for u in users_raw]
-    for u in users:
-        u.pop("password", None)
 
-    # If requester exists and has company-only invite permissions, filter results
-    try:
-        if requester:
-            perms = (requester.get("invitePermissions") or {})
-            can_all = perms.get("canInviteAll")
-            can_company = perms.get("canInviteCompanyOnly")
-            if can_company and not can_all:
-                # Determine requester's domain/org
-                req_org = requester.get("organizationId")
-                req_email = requester.get("email", "") or ""
-                import re
-                m = re.search(r"@([A-Za-z0-9.-]+)$", req_email)
-                req_domain = m.group(1).lower() if m else None
-                def visible(u):
-                    if req_org and u.get("organizationId"):
-                        return str(u.get("organizationId")) == str(req_org)
-                    ue = u.get("email", "") or ""
-                    mm = re.search(r"@([A-Za-z0-9.-]+)$", ue)
-                    ud = mm.group(1).lower() if mm else None
-                    return ud == req_domain
-                users = [u for u in users if visible(u)]
-    except Exception:
-        pass
+    users = []
+    requester_id = str(requester.get("id")) if requester else None
+    for user in users_raw:
+        if requester and str(user.get("id")) == requester_id:
+            users.append(serialize_user(requester, include_notifications=True))
+            continue
+        if can_requester_see_user(requester, user):
+            users.append(serialize_user(user))
 
     return users
 
+
 @router.post("/signup")
 def signup(user: dict):
-    print(f"[users.signup] received signup for: {user.get('email')}")
+    logger.info("[users.signup] received signup for: %s", user.get("email"))
     existing = users_collection.find_one(
-        {"email": {"$regex": f"^{user['email']}$", "$options": "i"}}
+        {"email": {"$regex": f"^{re.escape(user['email'])}$", "$options": "i"}}
     )
     if existing:
-        print(f"[users.signup] email already registered: {user.get('email')}")
         return {"error": "Email already registered"}
-
-    # Debugging: inspect password type and length before hashing to diagnose
-    pw = user.get("password")
-    try:
-        pw_bytes_len = len(pw.encode("utf-8")) if isinstance(pw, str) else len(str(pw).encode("utf-8"))
-    except Exception:
-        pw_bytes_len = None
-    print(f"[users.signup] password type={type(pw)}, bytes_len={pw_bytes_len}")
 
     try:
         user["password"] = hash_password(user["password"])
-    except Exception as e:
-        # Raise a clear HTTP error instead of letting a 500 bubble up; helps CORS and client visibility
-        print(f"[users.signup] password hashing failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Password hashing failed: {exc}")
 
-    # Auto-link user to an organization if the domain matches a verified org
     try:
-        email = user.get("email", "")
-        domain = ""
-        m = None
-        import re
-        m = re.search(r"@([A-Za-z0-9.-]+)$", email)
-        if m:
-            domain = m.group(1).lower()
-        org = None
-        if domain:
-            org = organizations_collection.find_one({"domain": domain, "verified": True})
-        if org:
-            user["organizationId"] = org.get("_id") or org.get("domain")
+        domain = extract_email_domain(user.get("email"))
+        organization = organizations_collection.find_one({"domain": domain, "verified": True}) if domain else None
+        if organization:
+            user["organizationId"] = organization.get("_id") or organization.get("domain")
             user["role"] = "employee"
-            # default invite permissions for verified org members
             user.setdefault("invitePermissions", {"canInviteAll": False, "canInviteCompanyOnly": True})
         else:
-            # allow caller to set role, default to basic user
             user.setdefault("role", "user")
-            # default invite permissions for non-org users
             user.setdefault("invitePermissions", {"canInviteAll": True, "canInviteCompanyOnly": False})
     except Exception:
         pass
 
+    user.setdefault("spaces", [])
+    user.setdefault("friends", [])
+    user.setdefault("notifications", [])
+
+    profile = normalize_professional_profile(user, strict=True)
+    if profile:
+        user["professionalProfile"] = profile
+
     users_collection.insert_one(user)
     token = create_access_token({"user_id": user["id"]})
-    user.pop("_id", None)
-    user.pop("password", None)
-    user = sanitize(user)
+    return {"user": serialize_user(user, include_notifications=True), "token": token}
 
-    print(f"[users.signup] created user id: {user.get('id')}")
-    return {"user": user, "token": token}
 
 @router.post("/login")
 def login(data: dict):
-    print(f"[users.login] login attempt for: {data.get('email')}")
-
+    logger.info("[users.login] login attempt for: %s", data.get("email"))
     user = users_collection.find_one(
-        {"email": {"$regex": f"^{data['email']}$", "$options": "i"}}
+        {"email": {"$regex": f"^{re.escape(data['email'])}$", "$options": "i"}}
     )
 
-    if not user:
-        print(f"[users.login] no user found for: {data.get('email')}")
-        return {"error": "Invalid credentials"}
-
-    stored_hash = user.get("password")
-    scheme = None
-    try:
-        from app.auth import identify_hash_scheme
-        scheme = identify_hash_scheme(stored_hash)
-    except Exception as e:
-        print(f"[users.login] identify_hash_scheme failed: {e}")
-
-    print(f"[users.login] found user id: {user.get('id')}, hash_scheme={scheme}, hash_len={len(stored_hash or '')}")
-
-    ok = verify_password(data["password"], stored_hash)
-    print(f"[users.login] verify_password returned: {ok}")
-
-    if not ok:
+    if not user or not verify_password(data["password"], user.get("password")):
         return {"error": "Invalid credentials"}
 
     token = create_access_token({"user_id": user["id"]})
-    user.pop("_id", None)
-    user.pop("password", None)
-    user = sanitize(user)
+    return {"user": serialize_user(user, include_notifications=True), "token": token}
 
-    return {"user": user, "token": token}
 
 @router.get("/by-email/{email}")
 def find_user_by_email(email: str):
-    print(f"[users.find_user_by_email] called with: {email}")
     try:
         user = users_collection.find_one(
-            {"email": {"$regex": f"^{email}$", "$options": "i"}},
-            {"_id": 0, "password": 0, "notifications": 0},
+            {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+            USER_LIST_PROJECTION,
         )
     except PyMongoError as exc:
         logger.error("Failed to look up user by email %s: %s", email, exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
-    if user:
-        print(f"[users.find_user_by_email] found user: {user.get('email')}")
-        user.pop("password", None)
-        user = sanitize(user)
-    else:
-        print(f"[users.find_user_by_email] no user found for: {email}")
-    return user
+    return serialize_user(user) if user else None
+
+
+@router.get("/search")
+def search_users_query(request: Request, q: str = Query(..., min_length=1), limit: int = Query(25, ge=1, le=MAX_SEARCH_LIMIT)):
+    return search_users_core(q, request, limit)
+
 
 @router.get("/search/{query}")
-def search_users(query: str, request: Request):
-    try:
-        users = list(
-            users_collection.find(
-                {"name": {"$regex": query, "$options": "i"}},
-                USER_LIST_PROJECTION,
-            )
-        )
-    except PyMongoError as exc:
-        logger.error("Failed to search users for query %s: %s", query, exc)
-        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
-    for u in users:
-        u.pop("password", None)
-    users = [sanitize(u) for u in users]
+def search_users_legacy(query: str, request: Request, limit: int = Query(25, ge=1, le=MAX_SEARCH_LIMIT)):
+    return search_users_core(query, request, limit)
 
-    # Apply same visibility filtering as get_users
-    try:
-        requester = None
-        auth = request.headers.get("authorization") or request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1]
-            from app.auth import verify_ws_token
-            requester_id = verify_ws_token(token)
-            if requester_id:
-                requester = users_collection.find_one({"id": requester_id})
-        else:
-            xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-            if xuid:
-                try:
-                    requester = users_collection.find_one({"id": int(xuid)})
-                except Exception:
-                    requester = users_collection.find_one({"id": xuid})
 
-        if requester:
-            perms = (requester.get("invitePermissions") or {})
-            can_all = perms.get("canInviteAll")
-            can_company = perms.get("canInviteCompanyOnly")
-            if can_company and not can_all:
-                req_org = requester.get("organizationId")
-                req_email = requester.get("email", "") or ""
-                import re
-                m = re.search(r"@([A-Za-z0-9.-]+)$", req_email)
-                req_domain = m.group(1).lower() if m else None
-                def visible(u):
-                    if req_org and u.get("organizationId"):
-                        return str(u.get("organizationId")) == str(req_org)
-                    ue = u.get("email", "") or ""
-                    mm = re.search(r"@([A-Za-z0-9.-]+)$", ue)
-                    ud = mm.group(1).lower() if mm else None
-                    return ud == req_domain
-                users = [u for u in users if visible(u)]
-    except Exception:
-        pass
-
-    return users
+@router.get("/discover")
+def discover_people(request: Request, limit: int = Query(8, ge=1, le=24)):
+    return discover_people_core(request, limit)
 
 
 @router.get("/by-domain/{domain}")
 def users_by_domain(domain: str):
-    # Return users whose email domain matches the requested domain
-    q = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
+    query = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
     try:
-        users = list(users_collection.find(q, USER_LIST_PROJECTION))
+        users = list(users_collection.find(query, USER_LIST_PROJECTION))
     except PyMongoError as exc:
         logger.error("Failed to list users for domain %s: %s", domain, exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
-    for u in users:
-        u.pop("password", None)
-    users = [sanitize(u) for u in users]
-    return users
+    return [serialize_user(user) for user in users]
 
 
 @router.post("/set-password")
@@ -279,217 +509,213 @@ def set_password(payload: dict):
     password = payload.get("password")
     if not email or not password:
         raise HTTPException(status_code=400, detail="email and password required")
-    # Find existing user (case-insensitive)
-    user = users_collection.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
+
+    user = users_collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
 
     try:
         hashed = hash_password(password)
-    except Exception as e:
-        print(f"set_password: hashing failed: {e}")
+    except Exception:
         raise HTTPException(status_code=500, detail="Failed to hash password")
 
     if user:
-        # Update existing user
         try:
             users_collection.update_one({"id": user["id"]}, {"$set": {"password": hashed}})
-        except Exception as e:
-            print(f"set_password: failed to update password: {e}")
+        except Exception:
             raise HTTPException(status_code=500, detail="Failed to set password")
-        user = users_collection.find_one({"id": user["id"]}, {"_id": 0})
-    else:
-        # Create a minimal admin user record (for first-time admin sign-in)
-        try:
-            new_id = int(time.time() * 1000)
-            new_user = {
-                "id": new_id,
-                "name": email.split("@")[0],
-                "email": email,
-                "password": hashed,
-                "role": "org_admin",
-                "status": "active",
-                "spaces": [],
-                "friends": [],
-                "notifications": []
-            }
-            users_collection.insert_one(new_user)
-            user = users_collection.find_one({"id": new_id}, {"_id": 0})
-        except Exception as e:
-            print(f"set_password: failed to create user: {e}")
-            raise HTTPException(status_code=500, detail="Failed to create admin user")
+        updated = users_collection.find_one({"id": user["id"]}, {"_id": 0})
+        return {"user": serialize_user(updated, include_notifications=True), "token": create_access_token({"user_id": updated["id"]})}
 
-    if user:
-        user.pop("password", None)
-        user = sanitize(user)
-    token = create_access_token({"user_id": user.get("id")})
-    return {"user": user, "token": token}
+    try:
+        new_id = int(time.time() * 1000)
+        new_user = {
+            "id": new_id,
+            "name": email.split("@")[0],
+            "email": email,
+            "password": hashed,
+            "role": "org_admin",
+            "status": "active",
+            "spaces": [],
+            "friends": [],
+            "notifications": [],
+        }
+        users_collection.insert_one(new_user)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to create admin user")
+
+    return {"user": serialize_user(new_user, include_notifications=True), "token": create_access_token({"user_id": new_id})}
+
 
 @router.get("/__ping")
 def users_ping():
     return {"users_router": "alive"}
 
+
+@router.put("/{user_id}/professional-profile")
+async def update_professional_profile(user_id: str, payload: ProfessionalProfilePayload, request: Request):
+    existing_user = get_user_by_id(user_id)
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    requester = resolve_requester(request)
+    actual_id = existing_user.get("id")
+    if requester and str(requester.get("id")) != str(actual_id) and requester.get("role") != "org_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to update this profile")
+
+    normalized_profile = normalize_professional_profile(payload.model_dump(), strict=True)
+    update_ops = build_profile_update_ops(normalized_profile)
+    users_collection.update_one({"id": actual_id}, update_ops)
+    updated = get_user_by_id(actual_id)
+    return serialize_user(updated, include_notifications=bool(requester and str(requester.get("id")) == str(actual_id)))
+
+
 @router.put("/{user_id}")
 async def update_user(user_id: str, user: dict, request: Request):
-    # Only allow updating existing users; avoid changing password here
-    update_doc = {k: v for k, v in user.items() if k != "password"}
-    
-    # Handle type-flexible user lookup (id may be stored as string or int)
-    existing_user = users_collection.find_one({"id": user_id})
-    if not existing_user:
-        try:
-            existing_user = users_collection.find_one({"id": int(user_id)})
-        except (ValueError, TypeError):
-            pass
+    update_doc = {key: value for key, value in user.items() if key != "password"}
+    existing_user = get_user_by_id(user_id)
     if not existing_user:
         return {"error": "User not found"}
-    
-    # Use the actual id from the found document for update
-    actual_id = existing_user.get("id")
 
-    # If invitePermissions are being changed, enforce admin-only guard
+    actual_id = existing_user.get("id")
+    requester = resolve_requester(request)
+
     try:
         if "invitePermissions" in update_doc:
-            # Determine requester
-            requester = None
-            auth = request.headers.get("authorization") or request.headers.get("Authorization")
-            if auth and auth.lower().startswith("bearer "):
-                token = auth.split(" ", 1)[1]
-                try:
-                    from app.auth import verify_ws_token
-                    requester_id = verify_ws_token(token)
-                    if requester_id:
-                        requester = users_collection.find_one({"id": requester_id})
-                except Exception:
-                    requester = None
-            else:
-                xuid = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-                if xuid:
-                    try:
-                        requester = users_collection.find_one({"id": int(xuid)})
-                    except Exception:
-                        requester = users_collection.find_one({"id": xuid})
-
-            # If no requester, deny
             if not requester:
                 raise HTTPException(status_code=403, detail="Not authorized to change invite permissions")
 
-            # Allow if requester is updating their own record
-            try:
-                req_id = requester.get("id")
-                if str(req_id) != str(actual_id):
-                    # Not self - require org_admin role
-                    if requester.get("role") != "org_admin":
-                        raise HTTPException(status_code=403, detail="Only org admins can change other users' invite permissions")
-                    # Optionally ensure same organization
-                    req_org = requester.get("organizationId")
-                    targ_org = existing_user.get("organizationId")
-                    if req_org and targ_org and str(req_org) != str(targ_org):
-                        raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
-            except HTTPException:
-                raise
-            except Exception:
-                raise HTTPException(status_code=403, detail="Not authorized to change invite permissions")
+            requester_id = requester.get("id")
+            if str(requester_id) != str(actual_id):
+                if requester.get("role") != "org_admin":
+                    raise HTTPException(status_code=403, detail="Only org admins can change other users' invite permissions")
+                requester_org = requester.get("organizationId")
+                target_org = existing_user.get("organizationId")
+                if requester_org and target_org and str(requester_org) != str(target_org):
+                    raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
     except HTTPException:
         raise
-    except Exception:
-        pass
-    res = users_collection.update_one({"id": actual_id}, {"$set": update_doc})
-    if res.matched_count == 0:
+
+    profile_fields_present = "professionalProfile" in update_doc or any(
+        key in update_doc for key in PROFILE_FIELD_ALIASES
+    )
+    if profile_fields_present:
+        normalized_profile = normalize_professional_profile(update_doc, strict=True)
+        for key in PROFILE_FIELD_ALIASES:
+            update_doc.pop(key, None)
+        update_doc.pop("professionalProfile", None)
+
+    update_ops = {}
+    set_doc = dict(update_doc)
+    unset_doc = {}
+
+    if profile_fields_present:
+        profile_ops = build_profile_update_ops(normalized_profile)
+        set_doc.update(profile_ops.get("$set", {}))
+        unset_doc.update(profile_ops.get("$unset", {}))
+
+    if set_doc:
+        update_ops["$set"] = set_doc
+    if unset_doc:
+        update_ops["$unset"] = unset_doc
+
+    if not update_ops:
+        updated = get_user_by_id(actual_id)
+        return serialize_user(updated, include_notifications=bool(requester and str(requester.get("id")) == str(actual_id)))
+
+    result = users_collection.update_one({"id": actual_id}, update_ops)
+    if result.matched_count == 0:
         return {"error": "User not found"}
-    updated = users_collection.find_one({"id": actual_id}, {"_id": 0})
-    if updated:
-        updated.pop("password", None)
-        updated = sanitize(updated)
-        # Broadcast invitePermissions update to org admins for this user's domain
-        try:
-            inv = updated.get("invitePermissions")
-            # normalize domain lookup
+
+    updated = get_user_by_id(actual_id)
+    serialized_updated = serialize_user(
+        updated,
+        include_notifications=bool(requester and str(requester.get("id")) == str(actual_id)),
+    )
+
+    try:
+        if "invitePermissions" in update_doc:
             domain = None
-            org_id = updated.get("organizationId")
-            if org_id:
+            organization_id = updated.get("organizationId")
+            if organization_id:
                 try:
-                    org = organizations_collection.find_one({"_id": org_id})
-                    if org:
-                        domain = org.get("domain")
+                    organization = organizations_collection.find_one({"_id": organization_id})
+                    if organization:
+                        domain = organization.get("domain")
                 except Exception:
                     domain = None
             if not domain:
-                email = updated.get("email") or ""
-                import re
-                m = re.search(r"@([A-Za-z0-9.-]+)$", email)
-                if m:
-                    domain = m.group(1).lower()
+                domain = extract_email_domain(updated.get("email"))
             if domain:
-                try:
-                    import asyncio
-                    msg = {
-                        "type": "invite_permissions_updated",
-                        "userId": str(actual_id),
-                        "email": updated.get("email"),
-                        "invitePermissions": inv
-                    }
-                    # fire-and-forget broadcast to admins for this domain
-                    asyncio.create_task(manager.send_to_admins_for_domain(domain, msg))
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    # If avatar fields were updated, broadcast to friends and space members
+                import asyncio
+
+                asyncio.create_task(
+                    manager.send_to_admins_for_domain(
+                        domain,
+                        {
+                            "type": "invite_permissions_updated",
+                            "userId": str(actual_id),
+                            "email": updated.get("email"),
+                            "invitePermissions": updated.get("invitePermissions"),
+                        },
+                    )
+                )
+    except Exception:
+        pass
+
     try:
-        if any(k in update_doc for k in ("avatar_url", "avatar_preset", "profileImage", "avatar")):
-            # Prepare avatar data with cache-busting timestamp
+        if any(key in update_doc for key in ("avatar_url", "avatar_preset", "profileImage", "avatar")):
             raw_url = updated.get("avatar_url")
-            ts = int(time.time() * 1000)
-            avatar_url = raw_url  # Default to raw URL
-            if isinstance(raw_url, str) and raw_url:
-                # Don't append cache-buster to data: or blob: URLs
-                if not (raw_url.startswith('data:') or raw_url.startswith('blob:')):
-                    sep = '&' if '?' in raw_url else '?'
-                    avatar_url = f"{raw_url}{sep}v={ts}"
-                    # Persist versioned URL so subsequent fetches reflect new version
-                    users_collection.update_one({"id": actual_id}, {"$set": {"avatar_url": avatar_url}})
-                    updated["avatar_url"] = avatar_url
+            avatar_url = raw_url
+            if isinstance(raw_url, str) and raw_url and not (raw_url.startswith("data:") or raw_url.startswith("blob:")):
+                timestamp = int(time.time() * 1000)
+                separator = "&" if "?" in raw_url else "?"
+                avatar_url = f"{raw_url}{separator}v={timestamp}"
+                users_collection.update_one({"id": actual_id}, {"$set": {"avatar_url": avatar_url}})
+                serialized_updated["avatar_url"] = avatar_url
+                updated["avatar_url"] = avatar_url
 
             avatar_data = {
                 "avatar_url": avatar_url,
                 "avatar_preset": updated.get("avatar_preset"),
-                "name": updated.get("name")
+                "name": updated.get("name"),
             }
 
-            # Collect recipients: friends + members of spaces the user belongs to
             recipients = set()
-            for fid in (updated.get("friends") or []):
-                if fid and str(fid) != str(actual_id):
-                    recipients.add(str(fid))
+            for friend_id in updated.get("friends") or []:
+                if friend_id and str(friend_id) != str(actual_id):
+                    recipients.add(str(friend_id))
+
             user_spaces = updated.get("spaces") or []
             for space in spaces_collection.find({"id": {"$in": user_spaces}}):
                 for member_id in space.get("members", []):
                     if member_id and str(member_id) != str(actual_id):
                         recipients.add(str(member_id))
 
-            notif = {
+            notification = {
                 "type": "avatar_updated",
                 "userId": str(actual_id),
                 "avatarData": avatar_data,
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
             }
-            # Send notification to recipients - use string IDs for WebSocket lookup
-            for rid in recipients:
+
+            for recipient_id in recipients:
                 try:
-                    await manager.send_to_user(str(rid), {"type": "notification", "notification": notif})
+                    await manager.send_to_user(str(recipient_id), {"type": "notification", "notification": notification})
                 except Exception:
                     pass
-            # Also broadcast a lightweight profileUpdated event to notifications group
-            # so only notification sockets receive it (avoids treating it as a chat message).
+
             try:
-                await manager.broadcast("notifications", {
-                    "type": "profileUpdated",
-                    "userId": str(actual_id),
-                    "avatar_url": avatar_url,
-                    "avatar_preset": updated.get("avatar_preset")
-                })
+                await manager.broadcast(
+                    "notifications",
+                    {
+                        "type": "profileUpdated",
+                        "userId": str(actual_id),
+                        "avatar_url": avatar_url,
+                        "avatar_preset": updated.get("avatar_preset"),
+                    },
+                )
             except Exception:
                 pass
-    except Exception as e:
-        # Don't fail the request on broadcast errors
-        print(f"avatar broadcast failed: {e}")
-    return updated
+    except Exception as exc:
+        logger.warning("avatar broadcast failed for %s: %s", actual_id, exc)
+
+    return serialized_updated

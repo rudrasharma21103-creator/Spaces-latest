@@ -1,7 +1,34 @@
 import { getToken, saveAuth } from "./auth"
 
-// Use environment variable when deployed (Vite): VITE_API_URL
-const API_BASE = import.meta.env.VITE_API_URL || "https://spaces-wc1z.onrender.com"
+// Keep storage requests aligned with App.jsx so profile/search calls do not
+// accidentally hit a different backend than the rest of the app.
+let API_BASE = "http://localhost:8000"
+try {
+  const raw = import.meta.env.VITE_API_URL || ""
+  if (raw && typeof raw === "string") {
+    if (/^https?:\/\//.test(raw)) {
+      API_BASE = raw
+    } else if (/^:\d+/.test(raw)) {
+      if (typeof window !== "undefined") {
+        API_BASE = `${window.location.protocol}//${window.location.hostname}${raw}`
+      } else {
+        API_BASE = `http://localhost${raw}`
+      }
+    } else if (raw.startsWith("//")) {
+      API_BASE = typeof window !== "undefined" ? `${window.location.protocol}${raw}` : `http:${raw}`
+    } else if (/^[A-Za-z0-9.-]+(:\d+)?$/.test(raw)) {
+      API_BASE = /^localhost|127\.0\.0\.1|[A-Za-z0-9.-]+:\d+$/.test(raw)
+        ? `http://${raw}`
+        : raw
+    } else {
+      API_BASE = raw
+    }
+  } else if (typeof window !== "undefined") {
+    API_BASE = window.location.origin
+  }
+} catch (e) {
+  if (typeof window !== "undefined") API_BASE = window.location.origin
+}
 const DEBUG_STORAGE = false
 const USERS_CACHE_KEY = "users_cache"
 const USERS_CACHE_TIME_KEY = "users_cache_time"
@@ -38,6 +65,8 @@ const spacesRequestCache = new Map()
 const spacesForUserRequestCache = new Map()
 const contextRequestCache = new Map()
 const eventsRequestCache = new Map()
+const userSearchRequestCache = new Map()
+const userSearchResponseCache = new Map()
 
 const getMessagesCacheKeys = chatId => ({
   cacheKey: `messages_cache_${chatId}`,
@@ -166,6 +195,8 @@ const authFetch = async (url, options = {}) => {
 
 export const invalidateUsersCache = () => {
   removeSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  userSearchRequestCache.clear()
+  userSearchResponseCache.clear()
 }
 
 export const invalidateSpacesCache = () => {
@@ -232,6 +263,11 @@ export const getUsers = async (options = {}) => {
   return arr
 }
 
+export const peekUsers = () => {
+  const { data } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  return Array.isArray(data) ? data : []
+}
+
 export const saveUser = async user => {
   if (!user.friends) user.friends = []
   if (!user.notifications) user.notifications = []
@@ -296,10 +332,50 @@ export const findUserByEmail = async email => {
   }
 }
 
-export const searchUsersByName = async query => {
-  if (!query) return []
-  const res = await authFetch(`${API_BASE}/users/search/${query}`)
+export const searchUsersByName = async (query, options = {}) => {
+  const normalizedQuery = String(query || "").trim()
+  if (!normalizedQuery) return []
+
+  const limit = Math.max(1, Math.min(Number(options.limit) || 12, 25))
+  const cacheTtl = Math.max(1000, Number(options.cacheTtl) || 15000)
+  const cacheKey = `${normalizedQuery.toLowerCase()}::${limit}`
+  const cached = userSearchResponseCache.get(cacheKey)
+
+  if (cached && Date.now() - cached.timestamp < cacheTtl) {
+    return cached.items
+  }
+
+  if (userSearchRequestCache.has(cacheKey)) {
+    return userSearchRequestCache.get(cacheKey)
+  }
+
+  const encoded = encodeURIComponent(normalizedQuery)
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/users/search?q=${encoded}&limit=${limit}`)
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to search users (${res.status})`)
+    }
+    const items = ensureArray(data)
+    userSearchResponseCache.set(cacheKey, {
+      items,
+      timestamp: Date.now(),
+    })
+    return items
+  })().finally(() => {
+    userSearchRequestCache.delete(cacheKey)
+  })
+
+  userSearchRequestCache.set(cacheKey, request)
+  return request
+}
+
+export const getConnectSuggestions = async (limit = 8) => {
+  const res = await authFetch(`${API_BASE}/users/discover?limit=${encodeURIComponent(limit)}`)
   const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(data?.detail || `Failed to load suggestions (${res.status})`)
+  }
   return ensureArray(data)
 }
 
@@ -658,7 +734,11 @@ export const sendFriendRequest = async (fromId, fromName, toUserId) => {
   })
 
   invalidateUsersCache()
-  return safeJson(res)
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(data?.detail || `Failed to send friend request (${res.status})`)
+  }
+  return data
 }
 
 /* ✅ FIXED — ONLY REQUIRED CHANGE */
@@ -988,10 +1068,30 @@ export const updateUser = async (userId, updates) => {
       method: "PUT",
       body: JSON.stringify(updates)
     })
+    invalidateUsersCache()
     return safeJson(res)
   } catch (e) {
     console.error("updateUser failed", e)
     return null
+  }
+}
+
+export const updateProfessionalProfile = async (userId, profile) => {
+  if (!userId) return null
+  try {
+    const res = await authFetch(`${API_BASE}/users/${userId}/professional-profile`, {
+      method: "PUT",
+      body: JSON.stringify(profile)
+    })
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to update professional profile (${res.status})`)
+    }
+    invalidateUsersCache()
+    return data
+  } catch (e) {
+    console.error("updateProfessionalProfile failed", e)
+    throw e
   }
 }
 

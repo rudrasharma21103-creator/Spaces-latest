@@ -3,21 +3,28 @@ import {
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
+  Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock3,
   FileText,
   MessageCircle,
   Moon,
   Plus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   Send,
   Settings,
   Sun,
   Trash2,
   UserPlus,
+  X,
 } from "lucide-react"
 import SmartImage from "./SmartImage"
+import ConnectHub from "./ConnectHub"
 
 const THOUGHTS = [
   { title: "Tiny progress counts", body: "A calm 20 minutes of focused work still moves the whole week forward.", accent: "from-[#ffd87c] via-[#ffb8a4] to-[#ff9ecb]" },
@@ -116,6 +123,37 @@ const getFileMetaLabel = file => {
   return file.source || "File"
 }
 
+const getProfessionalProfile = user => {
+  const profile = user?.professionalProfile || {}
+  return {
+    companyName: profile.companyName || user?.companyName || "",
+    position: profile.position || user?.position || "",
+    linkedInUrl:
+      profile.linkedInUrl ||
+      profile.linkedinUrl ||
+      user?.linkedInUrl ||
+      user?.linkedinUrl ||
+      "",
+  }
+}
+
+const normalizeLinkedInUrl = value => {
+  const trimmed = (value || "").trim()
+  if (!trimmed) return ""
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+
+  try {
+    const parsed = new URL(candidate)
+    if (!parsed.hostname.toLowerCase().replace(/^www\./, "").endsWith("linkedin.com")) {
+      return null
+    }
+    parsed.hash = ""
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
 export default function HomeHub({
   currentUser,
   friends = [],
@@ -145,6 +183,9 @@ export default function HomeHub({
   onOpenDocumentsHub,
   onOpenNotifications,
   onOpenProfile,
+  onConnectUser,
+  onSaveProfessionalProfile,
+  connectPreferredPane = "discover",
   setDmInput,
   isDarkMode = false,
   isMobile = false,
@@ -153,15 +194,49 @@ export default function HomeHub({
   onThemeChange = () => {},
 }) {
   const [searchQuery, setSearchQuery] = useState("")
+  const [homeSidebarCollapsed, setHomeSidebarCollapsed] = useState(false)
   const [isDMAtBottom, setIsDMAtBottom] = useState(true)
+  const [connectionsScrollState, setConnectionsScrollState] = useState({ left: false, right: false })
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+  const [showManageProfileModal, setShowManageProfileModal] = useState(false)
+  const [profileForm, setProfileForm] = useState(() => getProfessionalProfile(currentUser))
+  const [profileError, setProfileError] = useState("")
+  const [profileSaved, setProfileSaved] = useState("")
+  const [savingProfile, setSavingProfile] = useState(false)
   const dmMessagesContainerRef = useRef(null)
+  const connectionsScrollerRef = useRef(null)
+  const settingsMenuRef = useRef(null)
   const previousDMUserRef = useRef(null)
   const justSwitchedDMRef = useRef(false)
   const thought = useMemo(() => getDailyThought(), [])
+  const currentProfile = useMemo(() => getProfessionalProfile(currentUser), [currentUser])
   const activeFriend = useMemo(
     () => friends.find(friend => String(friend.id) === String(activeDMUser)) || null,
     [friends, activeDMUser]
   )
+  const profileStrength = [currentProfile.companyName, currentProfile.position, currentProfile.linkedInUrl].filter(Boolean).length
+  const profileStrengthLabel = profileStrength === 3 ? "Complete" : profileStrength === 2 ? "Strong" : profileStrength === 1 ? "Started" : "Needs details"
+
+  const syncConnectionsScrollState = targetScrollLeft => {
+    const container = connectionsScrollerRef.current
+    if (!container) return
+
+    const maxScrollLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
+    const nextScrollLeft = Math.min(Math.max(targetScrollLeft ?? container.scrollLeft, 0), maxScrollLeft)
+
+    setConnectionsScrollState(prev => {
+      const next = {
+        left: nextScrollLeft > 8,
+        right: nextScrollLeft < maxScrollLeft - 8,
+      }
+
+      return prev.left === next.left && prev.right === next.right ? prev : next
+    })
+  }
+
+  useEffect(() => {
+    setProfileForm(currentProfile)
+  }, [currentProfile.companyName, currentProfile.position, currentProfile.linkedInUrl, currentUser?.id])
 
   useEffect(() => {
     const normalizedActiveDMUser = activeDMUser ? String(activeDMUser) : null
@@ -190,6 +265,77 @@ export default function HomeHub({
       setIsDMAtBottom(true)
     }
   }, [section, activeDMUser, dmMessages, isDMAtBottom])
+
+  useEffect(() => {
+    if (isMobile) return
+    try {
+      const stored = localStorage.getItem("spacexyz-home-sidebar-collapsed")
+      if (stored != null) setHomeSidebarCollapsed(stored === "true")
+    } catch {}
+  }, [isMobile])
+
+  useEffect(() => {
+    if (isMobile) return
+    try {
+      localStorage.setItem("spacexyz-home-sidebar-collapsed", String(homeSidebarCollapsed))
+    } catch {}
+  }, [homeSidebarCollapsed, isMobile])
+
+  useEffect(() => {
+    const container = connectionsScrollerRef.current
+    if (!container || isMobile) return
+
+    let resizeObserver
+    let frameId = 0
+    let settleTimeout = 0
+
+    const updateScrollState = () => {
+      const maxScrollLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
+      const nextScrollLeft = Math.min(Math.max(container.scrollLeft, 0), maxScrollLeft)
+
+      setConnectionsScrollState(prev => {
+        const next = {
+          left: nextScrollLeft > 8,
+          right: nextScrollLeft < maxScrollLeft - 8,
+        }
+
+        return prev.left === next.left && prev.right === next.right ? prev : next
+      })
+    }
+
+    updateScrollState()
+    frameId = window.requestAnimationFrame(updateScrollState)
+    settleTimeout = window.setTimeout(updateScrollState, 180)
+    container.addEventListener("scroll", updateScrollState, { passive: true })
+    window.addEventListener("resize", updateScrollState)
+
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(updateScrollState)
+      resizeObserver.observe(container)
+      Array.from(container.children).forEach(child => resizeObserver.observe(child))
+    }
+
+    return () => {
+      if (frameId) window.cancelAnimationFrame(frameId)
+      if (settleTimeout) window.clearTimeout(settleTimeout)
+      resizeObserver?.disconnect()
+      container.removeEventListener("scroll", updateScrollState)
+      window.removeEventListener("resize", updateScrollState)
+    }
+  }, [friends, isMobile, searchQuery])
+
+  useEffect(() => {
+    if (!showSettingsMenu) return
+
+    const handlePointerDown = event => {
+      if (!settingsMenuRef.current?.contains(event.target)) {
+        setShowSettingsMenu(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => document.removeEventListener("mousedown", handlePointerDown)
+  }, [showSettingsMenu])
 
   const filteredFriends = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -482,6 +628,182 @@ export default function HomeHub({
     </div>
   )
 
+  const scrollConnections = direction => {
+    const container = connectionsScrollerRef.current
+    if (!container) return
+
+    const offset = Math.max(container.clientWidth * 0.72, 220)
+    const maxScrollLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
+    const startScrollLeft = Math.min(Math.max(container.scrollLeft, 0), maxScrollLeft)
+    const targetScrollLeft = Math.min(Math.max(startScrollLeft + direction * offset, 0), maxScrollLeft)
+
+    if (Math.abs(targetScrollLeft - startScrollLeft) < 1) return
+
+    container.scrollTo({ left: targetScrollLeft, behavior: "smooth" })
+    syncConnectionsScrollState(targetScrollLeft)
+  }
+
+  const handleConnectionsButtonClick = (event, direction) => {
+    event.preventDefault()
+    event.stopPropagation()
+    scrollConnections(direction)
+  }
+
+  const handleConnectionsButtonKeyDown = (event, direction) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    event.stopPropagation()
+    scrollConnections(direction)
+  }
+
+  const openManageProfileModal = () => {
+    setProfileForm(currentProfile)
+    setProfileError("")
+    setProfileSaved("")
+    setShowSettingsMenu(false)
+    setShowManageProfileModal(true)
+  }
+
+  const handleManageProfileSave = async event => {
+    event.preventDefault()
+    const normalizedLinkedIn = normalizeLinkedInUrl(profileForm.linkedInUrl)
+
+    if (profileForm.linkedInUrl.trim() && !normalizedLinkedIn) {
+      setProfileError("Enter a valid LinkedIn URL that points to linkedin.com.")
+      setProfileSaved("")
+      return
+    }
+
+    setSavingProfile(true)
+    setProfileError("")
+    setProfileSaved("")
+
+    try {
+      await onSaveProfessionalProfile?.({
+        companyName: profileForm.companyName.trim(),
+        position: profileForm.position.trim(),
+        linkedInUrl: normalizedLinkedIn || "",
+      })
+      setProfileSaved("Profile updated successfully.")
+      setShowManageProfileModal(false)
+    } catch {
+      setProfileError("We could not save your profile right now. Please try again.")
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const renderManageProfileModal = () => {
+    if (!showManageProfileModal) return null
+
+    return (
+      <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+        <button
+          type="button"
+          aria-label="Close manage profile modal"
+          className="absolute inset-0 bg-slate-950/35 backdrop-blur-sm"
+          onClick={() => setShowManageProfileModal(false)}
+        />
+        <div className={cx("relative z-[91] w-full max-w-4xl overflow-hidden rounded-[34px] border shadow-[0_28px_80px_rgba(15,23,42,0.22)]", isDarkMode ? "border-white/10 bg-[#0f1724]" : "border-[#dfe8f2] bg-white")}>
+          <div className="flex items-start justify-between gap-4 p-5 sm:p-8">
+            <div className="min-w-0">
+              <div className={cx("inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]", ui.badge, ui.border)}>
+                <Building2 className="h-3.5 w-3.5" />
+                Manage Profile
+              </div>
+              <div className={cx("mt-5 text-[2rem] font-semibold tracking-[-0.05em]", ui.textPrimary)}>Make your connect card feel complete.</div>
+              <p className={cx("mt-3 max-w-2xl text-sm leading-8 sm:text-[15px]", ui.textMuted)}>
+                These details appear on your connect card only when they exist. Leave anything blank if you would rather keep it private.
+              </p>
+            </div>
+
+            <div className={cx("hidden rounded-[22px] border px-5 py-4 sm:block", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#dbe5ef] bg-[#fbfdff]")}>
+              <div className={cx("text-[11px] font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Strength</div>
+              <div className={cx("mt-2 text-[1.35rem] font-semibold", ui.textPrimary)}>{profileStrengthLabel}</div>
+              <div className={cx("mt-1 text-sm leading-6", ui.textMuted)}>{profileStrength}/3 details added</div>
+            </div>
+          </div>
+
+          <form onSubmit={handleManageProfileSave} className="px-5 pb-5 sm:px-8 sm:pb-8">
+            <div className="grid gap-5 md:grid-cols-2">
+              <label className="block">
+                <span className={cx("mb-2.5 block text-sm font-semibold", ui.textPrimary)}>Company name</span>
+                <input
+                  type="text"
+                  value={profileForm.companyName}
+                  onChange={event => setProfileForm(prev => ({ ...prev, companyName: event.target.value }))}
+                  placeholder="Spacess"
+                  className={cx("h-14 w-full rounded-[20px] border px-4 text-base outline-none transition", ui.input)}
+                />
+              </label>
+
+              <label className="block">
+                <span className={cx("mb-2.5 block text-sm font-semibold", ui.textPrimary)}>Position</span>
+                <input
+                  type="text"
+                  value={profileForm.position}
+                  onChange={event => setProfileForm(prev => ({ ...prev, position: event.target.value }))}
+                  placeholder="Founder"
+                  className={cx("h-14 w-full rounded-[20px] border px-4 text-base outline-none transition", ui.input)}
+                />
+              </label>
+            </div>
+
+            <label className="mt-5 block">
+              <span className={cx("mb-2.5 block text-sm font-semibold", ui.textPrimary)}>LinkedIn profile link</span>
+              <input
+                type="url"
+                value={profileForm.linkedInUrl}
+                onChange={event => setProfileForm(prev => ({ ...prev, linkedInUrl: event.target.value }))}
+                placeholder="linkedin.com/in/your-name"
+                className={cx("h-14 w-full rounded-[20px] border px-4 text-base outline-none transition", ui.input)}
+              />
+            </label>
+
+            {profileError ? (
+              <div className={cx("mt-5 rounded-[18px] border px-4 py-3 text-sm", isDarkMode ? "border-rose-400/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700")}>
+                {profileError}
+              </div>
+            ) : null}
+
+            {profileSaved ? (
+              <div className={cx("mt-5 rounded-[18px] border px-4 py-3 text-sm", isDarkMode ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                {profileSaved}
+              </div>
+            ) : null}
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button type="submit" disabled={savingProfile} className={cx("inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60", ui.primaryButton)}>
+                {savingProfile ? "Saving..." : "Save profile"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileForm(currentProfile)
+                  setProfileError("")
+                  setProfileSaved("")
+                  setShowManageProfileModal(false)
+                }}
+                className={cx("rounded-full border px-6 py-3 text-sm font-semibold transition", ui.secondaryButton)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => setShowManageProfileModal(false)}
+            className={cx("absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)}
+            title="Close manage profile modal"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   const renderOverview = () => (
     <div className={cx("space-y-4", isMobile && "flex min-h-full flex-col")}>
       {isMobile ? (
@@ -493,21 +815,55 @@ export default function HomeHub({
       ) : (
         <>
       <ShellCard className={cx("p-4", overviewWidgetClass)}>
-        <div className="flex items-center gap-3 overflow-x-auto pb-1.5 pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
-              <Plus className="h-5 w-5" />
-            </span>
-            <span className={cx("text-sm font-medium", ui.textPrimary)}>Add yours</span>
+        <div className="relative mx-auto w-full max-w-[1074px]">
+          <button
+            type="button"
+            onClick={event => handleConnectionsButtonClick(event, -1)}
+            onKeyDown={event => handleConnectionsButtonKeyDown(event, -1)}
+            className={cx(
+              "pointer-events-auto absolute left-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+              ui.iconButton,
+              !connectionsScrollState.left && "opacity-40"
+            )}
+            title="Scroll left"
+          >
+            <ChevronLeft className="h-4.5 w-4.5" />
           </button>
-          {filteredFriends.map(friend => (
-            <button key={friend.id} onClick={() => onOpenDM(friend.id)} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
-              <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
-                {renderAvatar(friend, 48)}
+
+          <div
+            ref={connectionsScrollerRef}
+            className="mx-12 flex items-center gap-3 overflow-x-auto pb-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            style={{ scrollBehavior: "auto" }}
+          >
+            <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
+                <Plus className="h-5 w-5" />
               </span>
-              <span className={cx("max-w-[78px] truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</span>
+              <span className={cx("text-sm font-medium", ui.textPrimary)}>Add yours</span>
             </button>
-          ))}
+            {filteredFriends.map(friend => (
+              <button key={friend.id} onClick={() => onOpenDM(friend.id)} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
+                <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
+                  {renderAvatar(friend, 48)}
+                </span>
+                <span className={cx("max-w-[78px] truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</span>
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={event => handleConnectionsButtonClick(event, 1)}
+            onKeyDown={event => handleConnectionsButtonKeyDown(event, 1)}
+            className={cx(
+              "pointer-events-auto absolute right-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+              ui.iconButton,
+              !connectionsScrollState.right && "opacity-40"
+            )}
+            title="Scroll right"
+          >
+            <ChevronRight className="h-4.5 w-4.5" />
+          </button>
         </div>
       </ShellCard>
 
@@ -603,62 +959,19 @@ export default function HomeHub({
   )
 
   const renderConnect = () => (
-    <div className="space-y-6">
-      <ShellCard>
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className={cx("text-xl font-semibold", ui.textPrimary)}>Your connections</h3>
-            <p className={cx("mt-1 text-sm", ui.textMuted)}>People you can message directly from Home.</p>
-          </div>
-          <button onClick={onOpenAddConnection} className={cx("inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition sm:w-auto", ui.secondaryButton)}>
-            <Plus className="h-4 w-4" />
-            Connect new friend
-          </button>
-        </div>
-      </ShellCard>
-
-      {pendingRequests.length > 0 && (
-        <ShellCard>
-          <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className={cx("text-lg font-semibold", ui.textPrimary)}>Pending requests</h3>
-              <p className={cx("mt-1 text-sm", ui.textMuted)}>Respond to new connection requests without leaving Home.</p>
-            </div>
-            <span className={cx("rounded-full px-3 py-1 text-xs font-semibold", ui.badge)}>{pendingRequests.length}</span>
-          </div>
-          <div className="space-y-2.5">
-            {pendingRequests.map(request => (
-              <div key={request.id} className={cx("flex flex-col gap-3.5 rounded-[20px] border p-3.5 sm:flex-row sm:items-center sm:justify-between", ui.softCard)}>
-                <div className="min-w-0">
-                  <div className={cx("text-sm font-semibold", ui.textPrimary)}>{request.from || "New request"}</div>
-                  <div className={cx("mt-1 text-sm", ui.textMuted)}>Wants to connect with you.</div>
-                </div>
-                <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:items-center">
-                  <button onClick={() => onRejectRequest(request.id)} className={cx("w-full rounded-full border px-4 py-2 text-sm font-semibold transition sm:w-auto", ui.secondaryTextButton)}>Ignore</button>
-                  <button onClick={() => onAcceptRequest(request.id)} className={cx("w-full rounded-full px-4 py-2 text-sm font-semibold transition sm:w-auto", ui.primaryButton)}>Accept</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </ShellCard>
-      )}
-
-      <div className="grid gap-3.5 lg:grid-cols-2">
-        {filteredFriends.map(friend => (
-          <button key={friend.id} onClick={() => onOpenDM(friend.id)} className={cx("flex items-start gap-4 rounded-[24px] border p-4 text-left transition hover:-translate-y-[1px] sm:items-center", ui.shellCard, isDarkMode ? "hover:border-sky-400/20" : "hover:border-[#dce5ee]")}>
-            <div className="relative">
-              <div className={cx("h-12 w-12 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 48)}</div>
-              <span className={cx("absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className={cx("truncate text-base font-semibold", ui.textPrimary)}>{friend.name}</div>
-              <div className={cx("mt-1 text-sm", ui.textMuted)}>{friend.status === "online" ? "Online now" : "Available in direct messages"}</div>
-            </div>
-            <ArrowUpRight className={cx("h-4 w-4 shrink-0 self-end sm:self-auto", ui.textSoft)} />
-          </button>
-        ))}
-      </div>
-    </div>
+    <ConnectHub
+      currentUser={currentUser}
+      friends={friends}
+      pendingRequests={pendingRequests}
+      renderAvatar={renderAvatar}
+      onOpenDM={onOpenDM}
+      onAcceptRequest={onAcceptRequest}
+      onRejectRequest={onRejectRequest}
+      onConnectUser={onConnectUser}
+      onSaveProfessionalProfile={onSaveProfessionalProfile}
+      preferredPane={connectPreferredPane}
+      isDarkMode={isDarkMode}
+    />
   )
 
   const renderDrafts = () => (
@@ -968,87 +1281,113 @@ export default function HomeHub({
     <div className={cx("min-h-[100dvh] w-full overflow-x-hidden transition-colors", ui.page)}>
       <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
         {showSidebar && (
-        <aside className={cx("border-b lg:flex lg:min-h-0 lg:w-[272px] lg:min-w-[272px] lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar)}>
-          <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
-            <button onClick={() => onSectionChange("overview")} className="flex w-full items-center gap-3 text-left">
-              <div
-                className={cx(
-                  "flex h-10 w-10 items-center justify-center rounded-2xl",
-                  isDarkMode
-                    ? "bg-white/[0.08] shadow-[0_10px_20px_rgba(17,24,39,0.14)]"
-                    : "border border-[#e7edf4] bg-white/92 shadow-[0_10px_24px_rgba(148,163,184,0.14)]"
-                )}
-              >
-                <SmartImage
-                  src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
-                  alt="Spacess logo"
-                  className={cx("object-contain", isDarkMode ? "h-6 w-6" : "h-7 w-7")}
-                  loading="eager"
-                  fetchPriority="high"
-                />
-              </div>
-              <div>
-                <div className={cx("text-[17px] font-semibold", ui.textPrimary)}>Spacess</div>
-                <div className={cx("text-sm", ui.textMuted)}>Home</div>
-              </div>
-            </button>
-          </div>
-
-          <div className="space-y-3 px-4 py-3.5 sm:px-5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-4">
-            <div className="space-y-2.5">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-                {navItems.map(item => {
-                  const Icon = item.icon
-                  const isActive = item.key !== "workspaces" && section === item.key
-                  return (
-                    <button key={item.key} onClick={item.action} className={cx("flex min-w-0 items-center gap-3 rounded-[16px] px-3.5 py-2.5 text-sm font-medium transition", isActive ? ui.navActive : ui.navIdle)}>
-                      <Icon className="h-4.5 w-4.5 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className={cx("rounded-[20px] border p-3.5 lg:mt-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
-                <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-              <div className={cx(isMobile ? "grid grid-cols-1 gap-2" : "flex gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:pr-1")}>
-                {friends.map(friend => (
-                  <button
-                    key={friend.id}
-                    onClick={() => onOpenDM(friend.id)}
+        <div className={cx("relative transition-[width] duration-300 lg:flex-shrink-0", homeSidebarCollapsed ? "lg:w-[92px] lg:min-w-[92px]" : "lg:w-[272px] lg:min-w-[272px]")}>
+          <aside className={cx("w-full border-b lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar, ui.border)}>
+            <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
+              <div className={cx("flex items-center", homeSidebarCollapsed ? "justify-center" : "gap-3")}>
+                <button onClick={() => onSectionChange("overview")} className={cx("flex items-center gap-3 text-left", homeSidebarCollapsed && "justify-center")}>
+                  <div
                     className={cx(
-                      "flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2 text-left transition",
-                      !isMobile && "min-w-[208px] lg:min-w-0",
-                      section === "dm" && String(activeDMUser) === String(friend.id)
-                        ? (isDarkMode ? "bg-white/[0.07]" : "bg-[#f4f7fb]")
-                        : isDarkMode
-                          ? "hover:bg-white/[0.04]"
-                          : "hover:bg-white"
+                      "flex h-10 w-10 items-center justify-center rounded-2xl",
+                      isDarkMode
+                        ? "bg-white/[0.08] shadow-[0_10px_20px_rgba(17,24,39,0.14)]"
+                        : "border border-[#e7edf4] bg-white/92 shadow-[0_10px_24px_rgba(148,163,184,0.14)]"
                     )}
                   >
-                    <div className="relative">
-                      <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
-                      <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
+                    <SmartImage
+                      src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+                      alt="Spacess logo"
+                      className={cx("object-contain", isDarkMode ? "h-6 w-6" : "h-7 w-7")}
+                      loading="eager"
+                      fetchPriority="high"
+                    />
+                  </div>
+                  {!homeSidebarCollapsed && (
+                    <div>
+                      <div className={cx("text-[17px] font-semibold", ui.textPrimary)}>Spacess</div>
+                      <div className={cx("text-sm", ui.textMuted)}>Home</div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className={cx("truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</div>
-                      {isMobile && <div className={cx("mt-0.5 truncate text-xs", ui.textMuted)}>{friend.status === "online" ? "Online now" : "Open chat"}</div>}
-                    </div>
-                  </button>
-                ))}
+                  )}
+                </button>
               </div>
             </div>
-          </div>
-        </aside>
+
+            <div className="space-y-3 px-4 py-3.5 sm:px-5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-4">
+              <div className="space-y-2.5">
+                <div className={cx("grid gap-2", homeSidebarCollapsed ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-1")}>
+                  {navItems.map(item => {
+                    const Icon = item.icon
+                    const isActive = item.key !== "workspaces" && section === item.key
+                    return (
+                      <button
+                        key={item.key}
+                        onClick={item.action}
+                        title={homeSidebarCollapsed ? item.label : undefined}
+                        className={cx(
+                          "flex min-w-0 items-center rounded-[16px] text-sm font-medium transition",
+                          homeSidebarCollapsed ? "justify-center px-0 py-3" : "gap-3 px-3.5 py-2.5",
+                          isActive ? ui.navActive : ui.navIdle
+                        )}
+                      >
+                        <Icon className="h-4.5 w-4.5 shrink-0" />
+                        {!homeSidebarCollapsed && <span className="truncate">{item.label}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {!homeSidebarCollapsed && (
+              <div className={cx("rounded-[20px] border p-3.5 lg:mt-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
+                  <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className={cx(isMobile ? "grid grid-cols-1 gap-2" : "flex gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:pr-1")}>
+                  {friends.map(friend => (
+                    <button
+                      key={friend.id}
+                      onClick={() => onOpenDM(friend.id)}
+                      className={cx(
+                        "flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2 text-left transition",
+                        !isMobile && "min-w-[208px] lg:min-w-0",
+                        section === "dm" && String(activeDMUser) === String(friend.id)
+                          ? (isDarkMode ? "bg-white/[0.07]" : "bg-[#f4f7fb]")
+                          : isDarkMode
+                            ? "hover:bg-white/[0.04]"
+                            : "hover:bg-white"
+                      )}
+                    >
+                      <div className="relative">
+                        <div className={cx("h-9 w-9 overflow-hidden rounded-full", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]")}>{renderAvatar(friend, 36)}</div>
+                        <span className={cx("absolute bottom-0 right-0 h-3 w-3 rounded-full border-2", isDarkMode ? "border-[#0f1724]" : "border-white", friend.status === "online" ? "bg-emerald-400" : "bg-slate-300")} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className={cx("truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</div>
+                        {isMobile && <div className={cx("mt-0.5 truncate text-xs", ui.textMuted)}>{friend.status === "online" ? "Online now" : "Open chat"}</div>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              )}
+            </div>
+          </aside>
+
+          <button
+            type="button"
+            onClick={() => setHomeSidebarCollapsed(prev => !prev)}
+            className={cx("absolute left-full top-5 z-20 ml-3 hidden h-10 w-10 items-center justify-center rounded-full border shadow-[0_14px_28px_rgba(15,23,42,0.10)] transition lg:flex", ui.iconButton)}
+            title={homeSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {homeSidebarCollapsed ? <PanelLeftOpen className="h-4.5 w-4.5" /> : <PanelLeftClose className="h-4.5 w-4.5" />}
+          </button>
+        </div>
         )}
 
-        <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#0d0001]" : "bg-[#f6f8fc]")}>
+        <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#0d0001]" : "bg-[#f6f8fc]", showSidebar && "lg:pl-16")}>
           <div className="flex min-h-0 flex-1 flex-col">
             {isMobile && section !== "overview" && section !== "dm" && renderMobileSectionNav()}
             {isMobile && section === "dm" && (
@@ -1097,14 +1436,20 @@ export default function HomeHub({
                   <div
                     className={cx(
                       "flex w-full flex-col gap-3",
-                      section === "dm" ? "lg:max-w-[520px] xl:w-full xl:max-w-[520px]" : "lg:max-w-[680px] xl:w-auto xl:min-w-[540px]"
+                      section === "dm"
+                        ? "lg:max-w-[520px] xl:w-full xl:max-w-[520px]"
+                        : section === "connect"
+                          ? "xl:w-auto"
+                          : "lg:max-w-[680px] xl:w-auto xl:min-w-[540px]"
                     )}
                   >
                     <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-end">
-                      <div className={cx("relative w-full", section === "dm" ? "md:max-w-[260px]" : "md:max-w-[300px]")}>
-                        <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
-                        <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-10 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
-                      </div>
+                      {section !== "connect" && (
+                        <div className={cx("relative w-full", section === "dm" ? "md:max-w-[260px]" : "md:max-w-[300px]")}>
+                          <Search className={cx("pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2", ui.textSoft)} />
+                          <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search here" className={cx("h-10 w-full rounded-full border pl-11 pr-4 text-sm outline-none transition", ui.input)} />
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:flex-nowrap">
                         <div className={cx("inline-flex w-full justify-center rounded-full border p-1 sm:w-auto", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")}>
@@ -1122,9 +1467,26 @@ export default function HomeHub({
                           <button onClick={onOpenNotifications} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Notifications">
                             <Bell className="h-4.5 w-4.5" />
                           </button>
-                          <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Profile settings">
-                            <Settings className="h-4.5 w-4.5" />
-                          </button>
+                          <div className="relative" ref={settingsMenuRef}>
+                            <button onClick={() => setShowSettingsMenu(prev => !prev)} className={cx("flex h-10 w-10 items-center justify-center rounded-full border transition", ui.iconButton)} title="Settings">
+                              <Settings className="h-4.5 w-4.5" />
+                            </button>
+                            {showSettingsMenu && (
+                              <div className={cx("absolute right-0 top-full z-20 mt-2 min-w-[220px] rounded-[22px] border p-2 shadow-[0_18px_40px_rgba(15,23,42,0.14)]", isDarkMode ? "border-white/10 bg-[#111827]" : "border-[#dfe8f2] bg-white")}>
+                                <div className={cx("px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Settings</div>
+                                <button
+                                  type="button"
+                                  onClick={openManageProfileModal}
+                                  className={cx("flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-medium transition", isDarkMode ? "text-slate-200 hover:bg-white/[0.06]" : "text-[#1f2937] hover:bg-[#f8fbff]")}
+                                >
+                                  <span className={cx("flex h-9 w-9 items-center justify-center rounded-2xl", isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-[#eef5fb] text-[#334155]")}>
+                                    <Building2 className="h-4 w-4" />
+                                  </span>
+                                  <span>Manage profile</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
                           <button onClick={onOpenProfile} className={cx("flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#e6edf4] bg-white")} title="Open profile">
                             {currentUser ? renderAvatar(currentUser, 36) : null}
                           </button>
@@ -1152,6 +1514,7 @@ export default function HomeHub({
           </div>
         </main>
       </div>
+      {renderManageProfileModal()}
     </div>
   )
 }
