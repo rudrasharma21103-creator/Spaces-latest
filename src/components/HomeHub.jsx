@@ -364,8 +364,8 @@ export default function HomeHub({
   }, [files, searchQuery])
 
   const ui = {
-    page: isDarkMode ? "bg-[#0d0001] text-slate-100" : "bg-[#f6f8fc] text-slate-900",
-    sidebar: isDarkMode ? "border-white/10 bg-[#0d0001]" : "border-[#e7edf4] bg-white/92",
+    page: isDarkMode ? "bg-[#111111] text-slate-100" : "bg-[#f6f8fc] text-slate-900",
+    sidebar: isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#e7edf4] bg-white/92",
     shellCard: isDarkMode
       ? "rounded-[24px] border border-white/10 bg-[#0f1724]/90 p-4 shadow-[0_14px_32px_rgba(2,6,23,0.36)]"
       : "rounded-[24px] border border-[#edf1f5] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]",
@@ -1390,7 +1390,7 @@ export default function HomeHub({
         </div>
         )}
 
-        <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#0d0001]" : "bg-[#f6f8fc]", showSidebar && "lg:pl-16")}>
+        <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#111111]" : "bg-[#f6f8fc]", showSidebar && "lg:pl-16")}>
           <div className="flex min-h-0 flex-1 flex-col">
             {isMobile && section !== "overview" && section !== "dm" && renderMobileSectionNav()}
             {isMobile && section === "dm" && (
