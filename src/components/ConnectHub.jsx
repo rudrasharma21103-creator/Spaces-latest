@@ -398,7 +398,7 @@ export default function ConnectHub({
                 </div>
                 <div className={cx("mt-3 text-[1.45rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>Search your network by name</div>
                 <p className={cx("mt-1.5 max-w-2xl text-sm leading-6", ui.textMuted)}>
-                  A cleaner people-search experience focused on fast scanning, professional context, and simple connect actions.
+                  
                 </p>
               </div>
 
