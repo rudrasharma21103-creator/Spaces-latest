@@ -816,25 +816,25 @@ export default function HomeHub({
         </>
       ) : (
         <>
-      <ShellCard className={cx("p-4", overviewWidgetClass)}>
-        <div className="relative mx-auto w-full max-w-[1074px]">
-          <button
-            type="button"
-            onClick={event => handleConnectionsButtonClick(event, -1)}
-            onKeyDown={event => handleConnectionsButtonKeyDown(event, -1)}
-            className={cx(
-              "pointer-events-auto absolute left-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-              ui.iconButton,
-              !connectionsScrollState.left && "opacity-40"
-            )}
-            title="Scroll left"
-          >
-            <ChevronLeft className="h-4.5 w-4.5" />
-          </button>
+      <div className="relative w-full lg:px-5">
+        <button
+          type="button"
+          onClick={event => handleConnectionsButtonClick(event, -1)}
+          onKeyDown={event => handleConnectionsButtonKeyDown(event, -1)}
+          className={cx(
+            "pointer-events-auto absolute left-5 top-1/2 z-10 hidden h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+            ui.iconButton,
+            !connectionsScrollState.left && "opacity-40"
+          )}
+          title="Scroll left"
+        >
+          <ChevronLeft className="h-4.5 w-4.5" />
+        </button>
 
+        <ShellCard className={cx("p-4", overviewWidgetClass)}>
           <div
             ref={connectionsScrollerRef}
-            className="mx-12 flex items-center gap-3 overflow-x-auto pb-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            className="flex items-center gap-3 overflow-x-auto pb-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             style={{ scrollBehavior: "auto" }}
           >
             <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
@@ -852,22 +852,22 @@ export default function HomeHub({
               </button>
             ))}
           </div>
+        </ShellCard>
 
-          <button
-            type="button"
-            onClick={event => handleConnectionsButtonClick(event, 1)}
-            onKeyDown={event => handleConnectionsButtonKeyDown(event, 1)}
-            className={cx(
-              "pointer-events-auto absolute right-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-              ui.iconButton,
-              !connectionsScrollState.right && "opacity-40"
-            )}
-            title="Scroll right"
-          >
-            <ChevronRight className="h-4.5 w-4.5" />
-          </button>
-        </div>
-      </ShellCard>
+        <button
+          type="button"
+          onClick={event => handleConnectionsButtonClick(event, 1)}
+          onKeyDown={event => handleConnectionsButtonKeyDown(event, 1)}
+          className={cx(
+            "pointer-events-auto absolute right-5 top-1/2 z-10 hidden h-10 w-10 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+            ui.iconButton,
+            !connectionsScrollState.right && "opacity-40"
+          )}
+          title="Scroll right"
+        >
+          <ChevronRight className="h-4.5 w-4.5" />
+        </button>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-12">
         <div className="space-y-4 xl:col-span-5">
@@ -1284,8 +1284,8 @@ export default function HomeHub({
     <div className={cx("min-h-[100dvh] w-full overflow-x-hidden transition-colors", ui.page)}>
       <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
         {showSidebar && (
-        <div className={cx("relative transition-[width] duration-300 lg:flex-shrink-0", homeSidebarCollapsed ? "lg:w-[92px] lg:min-w-[92px]" : "lg:w-[272px] lg:min-w-[272px]")}>
-          <aside className={cx("w-full border-b lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r", ui.sidebar, ui.border)}>
+        <div className={cx("relative transition-[width] duration-300 lg:flex lg:h-full lg:min-h-0 lg:flex-shrink-0", homeSidebarCollapsed ? "lg:w-[92px] lg:min-w-[92px]" : "lg:w-[272px] lg:min-w-[272px]")}>
+          <aside className={cx("w-full border-b lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-b-0 lg:border-r", ui.sidebar, ui.border)}>
             <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
               <div className={cx("flex items-center", homeSidebarCollapsed ? "justify-center" : "gap-3")}>
                 <button onClick={() => onSectionChange("overview")} className={cx("flex items-center gap-3 text-left", homeSidebarCollapsed && "justify-center")}>
@@ -1315,7 +1315,7 @@ export default function HomeHub({
               </div>
             </div>
 
-            <div className="space-y-3 px-4 py-3.5 sm:px-5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-4">
+            <div className="space-y-3 px-4 py-3.5 sm:px-5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3 lg:space-y-0 lg:px-4 lg:py-4">
               <div className="space-y-2.5">
                 <div className={cx("grid gap-2", homeSidebarCollapsed ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-1")}>
                   {navItems.map(item => {
@@ -1341,14 +1341,14 @@ export default function HomeHub({
               </div>
 
               {!homeSidebarCollapsed && (
-              <div className={cx("rounded-[20px] border p-3.5 lg:mt-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
+              <div className={cx("rounded-[20px] border p-3.5 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]")}>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-200" : "text-[#374151]")}>Direct Messages</div>
                   <button onClick={onOpenAddConnection} className={cx("rounded-full p-1.5 transition", isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]")} title="Start a new direct message">
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
-                <div className={cx(isMobile ? "grid grid-cols-1 gap-2" : "flex gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:pr-1")}>
+                <div className={cx(isMobile ? "grid grid-cols-1 gap-2" : "flex gap-2 overflow-x-auto pb-1 lg:h-0 lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:pr-1")}>
                   {friends.map(friend => (
                     <button
                       key={friend.id}
@@ -1422,7 +1422,13 @@ export default function HomeHub({
             )}
             {!(isMobile && section === "overview") && (
               <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-6 lg:py-4", ui.border)}>
-                <div className={cx("flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between", section === "dm" && "mx-auto w-full max-w-[1400px]")}>
+                <div
+                  className={cx(
+                    "flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between",
+                    section === "overview" && "mx-auto w-full max-w-[1460px]",
+                    section === "dm" && "mx-auto w-full max-w-[1400px]"
+                  )}
+                >
                   <div className="min-w-0">
                     <div className={cx("text-[24px] font-semibold tracking-[-0.03em] sm:text-[28px]", ui.textPrimary)}>
                       {section === "overview" ? getGreeting(currentUser?.name) : sectionTitles[section] || "Home"}
@@ -1518,6 +1524,7 @@ export default function HomeHub({
               className={cx(
                 "flex-1 min-w-0 px-4 py-3.5 sm:px-5 lg:px-6",
                 isMobile ? "pb-24" : "",
+                section === "overview" && "mx-auto w-full max-w-[1460px]",
                 section === "dm"
                   ? "flex min-h-0 lg:overflow-hidden"
                   : section === "overview"
