@@ -62,8 +62,6 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
-import DocumentsHub from "./components/DocumentsHub"
-import TasksHub from "./components/TasksHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -137,18 +135,6 @@ function getAttachmentCacheKey(att) {
     att.webViewLink ||
     null
   )
-}
-
-function getEntityId(value) {
-  if (value === undefined || value === null) return null
-  if (typeof value === "string" || typeof value === "number") return String(value)
-  if (typeof value === "object") {
-    if (value.$oid) return String(value.$oid)
-    if (value.id !== undefined && value.id !== null) return String(value.id)
-    if (value.userId !== undefined && value.userId !== null) return String(value.userId)
-    if (value._id !== undefined && value._id !== null) return getEntityId(value._id)
-  }
-  return String(value)
 }
 
 // Custom hook to detect window size for responsive design
@@ -226,7 +212,6 @@ export default function CollaborationApp() {
   const [activeView, setActiveView] = useState("home")
   const [activeDMUser, setActiveDMUser] = useState(null)
   const [homeSection, setHomeSection] = useState("overview")
-  const [homeConnectPane, setHomeConnectPane] = useState("discover")
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
   const [homeDMSending, setHomeDMSending] = useState(false)
@@ -235,6 +220,7 @@ export default function CollaborationApp() {
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
+  const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -253,6 +239,7 @@ export default function CollaborationApp() {
   const [highlightTerm, setHighlightTerm] = useState("")
   const [targetMessageId, setTargetMessageId] = useState(null)
   const [pinnedMessageId, setPinnedMessageId] = useState(null)
+  const [hoveredMessageId, setHoveredMessageId] = useState(null)
   const [showEmojiPickerFor, setShowEmojiPickerFor] = useState(null)
   const [activeChannelTab, setActiveChannelTab] = useState("messages")
   const [selectedMessageIds, setSelectedMessageIds] = useState([])
@@ -277,6 +264,7 @@ export default function CollaborationApp() {
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState("")
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
+  const [showAddFriendModal, setShowAddFriendModal] = useState(false)
   const [showAddToSpaceModal, setShowAddToSpaceModal] = useState(false)
   const [showNotificationsModal, setShowNotificationsModal] = useState(false)
   const [showMemberDetails, setShowMemberDetails] = useState(false)
@@ -285,7 +273,6 @@ export default function CollaborationApp() {
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
   const [tasksList, setTasksList] = useState([])
-  const [completingTaskId, setCompletingTaskId] = useState(null)
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -307,7 +294,6 @@ export default function CollaborationApp() {
   const [setPasswordError, setSetPasswordError] = useState("")
   const [setPasswordLoading, setSetPasswordLoading] = useState(false)
   const [pendingAdminUserId, setPendingAdminUserId] = useState(null)
-  const currentUserTaskId = getEntityId(currentUser?.id || currentUser?._id || currentUser?.userId)
 
   const handleSetPasswordSubmit = async () => {
     setSetPasswordError("")
@@ -470,7 +456,10 @@ export default function CollaborationApp() {
 
   // Invite/Friend System State
   const [inviteSearchQuery, setInviteSearchQuery] = useState("")
+  const [debouncedInviteSearchQuery, setDebouncedInviteSearchQuery] = useState("")
   const [inviteSearchResults, setInviteSearchResults] = useState([])
+  // Changed to array for bulk selection in Friend Modal
+  const [selectedFriendInvitees, setSelectedFriendInvitees] = useState([])
 
   // For Channel Invites
   const [selectedInviteUsers, setSelectedInviteUsers] = useState([])
@@ -485,6 +474,18 @@ export default function CollaborationApp() {
     if (stUser && token) {
       setCurrentUser(stUser)
       setIsAuthenticated(true)
+      try {
+        const cachedUsers = Storage.peekUsers()
+        if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+          setUsers(cachedUsers)
+          const friendIds = Array.isArray(stUser.friends) ? stUser.friends.map(id => String(id)) : []
+          if (friendIds.length > 0) {
+            setFriends(cachedUsers.filter(user => friendIds.includes(String(user?.id))))
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to hydrate cached users", error)
+      }
     } else if (!stUser && !token) {
       // If no stored credentials, ensure we're logged out
       setIsAuthenticated(false)
@@ -591,8 +592,6 @@ export default function CollaborationApp() {
 
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
-  const messageActionButtonRefs = useRef(new Map())
-  const composerAttachTriggerRef = useRef(null)
   const prevScrollHeightRef = useRef(0)
   const messageScrollPositionsRef = useRef({})
   const pendingTabScrollRestoreRef = useRef(null)
@@ -603,81 +602,16 @@ export default function CollaborationApp() {
   const previousActiveChatIdRef = useRef(null)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
-  const skipNextAutoScrollRef = useRef(false)
-  const scrollMetricsFrameRef = useRef(null)
-  const messageCountsRef = useRef({})
-  const initializedChannelCountsRef = useRef(new Set())
   const contextSaveTimeoutRef = useRef(null)
   const activeContextStateRef = useRef({ chatId: null, loaded: false })
   const collapsedSpaceMenuRef = useRef(null)
   const protectedFileUrlCacheRef = useRef(new Map())
   const protectedFileInflightRef = useRef(new Map())
-
-  const hasUnreadChannel = channelId =>
-    unreadChannels.some(id => String(id) === String(channelId))
-
-  const rememberChannelMessageCount = (channelId, count) => {
-    if (channelId === undefined || channelId === null || !Number.isFinite(count)) return
-    const key = String(channelId)
-    messageCountsRef.current[key] = count
-    initializedChannelCountsRef.current.add(key)
-  }
-
-  const clearChannelUnread = channelId => {
-    const key = String(channelId)
-    setUnreadChannels(prev => prev.filter(id => String(id) !== key))
-  }
-
-  const saveMessageScrollPosition = chatId => {
-    if (!chatId) return
-    const container = messagesContainerRef.current
-    if (!container) return
-    messageScrollPositionsRef.current[String(chatId)] = container.scrollTop
-  }
-
-  const setMessageActionButtonRef = (messageId, node) => {
-    const key = String(messageId)
-    if (node) {
-      messageActionButtonRefs.current.set(key, node)
-      return
-    }
-    messageActionButtonRefs.current.delete(key)
-  }
-
   const [isAtBottom, setIsAtBottom] = useState(true)
-
-  const updateIsAtBottom = nextValue => {
-    setIsAtBottom(prev => (prev === nextValue ? prev : nextValue))
-  }
-
-  const handleMessagesScroll = () => {
-    const el = messagesContainerRef.current
-    if (!el) return
-
-    if (activeChatId) {
-      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
-    }
-
-    prevScrollHeightRef.current = el.scrollHeight
-
-    if (scrollMetricsFrameRef.current) return
-
-    scrollMetricsFrameRef.current = requestAnimationFrame(() => {
-      scrollMetricsFrameRef.current = null
-      const latest = messagesContainerRef.current
-      if (!latest) return
-
-      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-      const atBottom = latest.scrollHeight - latest.scrollTop - latest.clientHeight < threshold
-      updateIsAtBottom(atBottom)
-    })
-  }
+  const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
   useEffect(() => {
     return () => {
-      if (scrollMetricsFrameRef.current) {
-        cancelAnimationFrame(scrollMetricsFrameRef.current)
-      }
       for (const objectUrl of protectedFileUrlCacheRef.current.values()) {
         URL.revokeObjectURL(objectUrl)
       }
@@ -705,11 +639,6 @@ export default function CollaborationApp() {
   }, [])
 
   // Helper: render avatar for a user object
-  const isEllipseAvatarSource = value => {
-    if (typeof value !== "string") return false
-    return /(?:^|\/)Ellipse(?:%20| )?[2-9]\.png(?:\?.*)?$/i.test(value.trim())
-  }
-
   const renderAvatar = (user, size = 40) => {
     if (!user) return null
     let url = user.avatar_url || user.avatarImage || user.avatar_image
@@ -730,40 +659,10 @@ export default function CollaborationApp() {
       user.updated_at ||
       user.updatedAt ||
       ""
-    const initialOverlay = (
-      <span
-        className="pointer-events-none absolute inset-0 flex select-none items-center justify-center font-bold text-white"
-        style={{
-          fontSize: Math.max(12, Math.floor(size * 0.42)),
-          lineHeight: 1,
-          textShadow: "0 1px 2px rgba(15,23,42,0.24)"
-        }}
-      >
-        {initial}
-      </span>
-    )
 
     // Handle relative URLs by prepending API_BASE
     if (url && typeof url === 'string') {
-      const shouldUseApiBase = url.startsWith('/uploads/')
-      const isEllipseAvatar = isEllipseAvatarSource(url)
       if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
-        if (isEllipseAvatar) {
-          return (
-            <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
-              <SmartImage
-                src={url}
-                alt={name}
-                apiBase={API_BASE}
-                cacheKey={avatarCacheKey}
-                className="h-full w-full rounded-full object-cover"
-                loading="eager"
-                fetchPriority="high"
-              />
-              {initialOverlay}
-            </div>
-          )
-        }
         return (
           <SmartImage
             src={url}
@@ -778,27 +677,11 @@ export default function CollaborationApp() {
         )
       }
       if (url.startsWith('/')) {
-        if (isEllipseAvatar) {
-          return (
-            <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
-              <SmartImage
-                src={url}
-                alt={name}
-                apiBase={shouldUseApiBase ? API_BASE : undefined}
-                cacheKey={avatarCacheKey}
-                className="h-full w-full rounded-full object-cover"
-                loading="eager"
-                fetchPriority="high"
-              />
-              {initialOverlay}
-            </div>
-          )
-        }
         return (
           <SmartImage
             src={url}
             alt={name}
-            apiBase={shouldUseApiBase ? API_BASE : undefined}
+            apiBase={API_BASE}
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
@@ -809,34 +692,8 @@ export default function CollaborationApp() {
       }
     }
 
-    if (typeof preset === "string" && preset.trim()) {
-      if (isEllipseAvatarSource(preset)) {
-        return (
-          <div className="relative overflow-hidden rounded-full" style={sizeStyle}>
-            <SmartImage
-              src={preset}
-              alt={name}
-              className="h-full w-full rounded-full object-cover"
-              loading="eager"
-              fetchPriority="high"
-            />
-            {initialOverlay}
-          </div>
-        )
-      }
-      return (
-        <SmartImage
-          src={preset}
-          alt={name}
-          className="rounded-full object-cover"
-          style={sizeStyle}
-          loading="eager"
-          fetchPriority="high"
-        />
-      )
-    }
-
-    if (Array.isArray(preset) && preset.length >= 2) {
+    if (preset) {
+      // simple gradient generation from preset id
       const grad = `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)`
       return (
         <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
@@ -888,10 +745,16 @@ export default function CollaborationApp() {
     return ""
   }
 
-  const avatarPresets = Array.from({ length: 8 }, (_, index) => ({
-    id: `ellipse-${index + 2}`,
-    src: `/Ellipse%20${index + 2}.png`
-  }))
+  const avatarPresets = [
+    ["#ff9a9e", "#fecfef"],
+    ["#a1c4fd", "#c2e9fb"],
+    ["#f6d365", "#fda085"],
+    ["#f093fb", "#f5576c"],
+    ["#96fbc4", "#f9f586"],
+    ["#c2e9fb", "#a1c4fd"],
+    ["#fddb92", "#d1fdff"],
+    ["#fbc2eb", "#a6c1ee"]
+  ]
 
   const syncUserCollections = updatedUser => {
     if (!updatedUser) return
@@ -1011,6 +874,14 @@ export default function CollaborationApp() {
     }, 150)
     return () => clearTimeout(handler)
   }, [dmSearchQuery])
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedInviteSearchQuery(inviteSearchQuery)
+    }, 100)
+    return () => clearTimeout(handler)
+  }, [inviteSearchQuery])
+
 
   // --- Search Logic: Spaces ---
   useEffect(() => {
@@ -1164,11 +1035,12 @@ export default function CollaborationApp() {
     const pollData = async () => {
       try {
         const isPageHidden = typeof document !== "undefined" && document.hidden
-        const [freshUser, availableSpaces, storedEvents] = await Promise.all([
-          Storage.getCurrentUser(),
+        const [bootstrap, availableSpaces, storedEvents] = await Promise.all([
+          Storage.getBootstrap({ forceRefresh: true }).catch(() => null),
           activeSpace || !isPageHidden ? Storage.getSpaces() : Promise.resolve([]),
           isPageHidden ? Promise.resolve(events) : Storage.getEvents()
         ])
+        const freshUser = bootstrap?.user || null
 
         if (freshUser) {
           if (!freshUser.friends) freshUser.friends = []
@@ -1223,8 +1095,10 @@ export default function CollaborationApp() {
             }
           }
 
+          const maxChannelsPerPoll = 5
+          const channelsThisCycle = channelsToCheck.slice(0, maxChannelsPerPoll)
           const channelCounts = await Promise.all(
-            channelsToCheck.map(async ch => {
+            channelsThisCycle.map(async ch => {
               try {
                 const count = await Storage.getMessageCount(ch.id)
                 return { channelId: ch.id, count }
@@ -1236,21 +1110,14 @@ export default function CollaborationApp() {
 
           for (const { channelId, count } of channelCounts) {
             if (!Number.isFinite(count)) continue
-            const channelKey = String(channelId)
-            const previousCount = messageCountsRef.current[channelKey]
-            const hasBaseline = initializedChannelCountsRef.current.has(channelKey)
-
-            rememberChannelMessageCount(channelId, count)
-
-            if (
-              hasBaseline &&
-              count > (Number.isFinite(previousCount) ? previousCount : 0) &&
-              !(activeView === "channel" && String(activeChannel) === channelKey)
-            ) {
-              setUnreadChannels(prev =>
-                prev.some(id => String(id) === channelKey) ? prev : [...prev, channelId]
-              )
+            const prevCount = messageCounts[channelId] || 0
+            if (count > prevCount && !unreadChannels.includes(channelId)) {
+              setUnreadChannels(prev => [...prev, channelId])
             }
+            messageCounts[channelId] = count
+          }
+          if (channelCounts.length > 0) {
+            setMessageCounts({ ...messageCounts })
           }
         }
 
@@ -1314,7 +1181,8 @@ export default function CollaborationApp() {
     activeCallId,
     activeSpace,
     spaces,
-    activeChannel
+    activeChannel,
+    unreadChannels
   ])
 
   // Ensure any incoming timeout is cleared when incomingCall is removed elsewhere
@@ -1327,21 +1195,24 @@ export default function CollaborationApp() {
   useEffect(() => {
     // Clear unread when entering a channel
     if (activeView === "channel" && activeChannel && currentUser) {
-      clearChannelUnread(activeChannel)
+      setUnreadChannels(prev => prev.filter(id => id !== activeChannel))
       const inMemory = messages[activeChannel]
       if (Array.isArray(inMemory)) {
-        rememberChannelMessageCount(activeChannel, inMemory.length)
+        messageCounts[activeChannel] = inMemory.length
+        setMessageCounts({ ...messageCounts })
         return
       }
       // Update current count reference
       ;(async () => {
         try {
           const count = await Storage.getMessageCount(activeChannel, { forceRefresh: true })
-          rememberChannelMessageCount(activeChannel, count)
+          messageCounts[activeChannel] = count
+          setMessageCounts({ ...messageCounts })
         } catch (e) {
           if (e && e.status === 403) {
             // restricted channel — skip silently
-            rememberChannelMessageCount(activeChannel, 0)
+            messageCounts[activeChannel] = 0
+            setMessageCounts({ ...messageCounts })
           }
           // Silently ignore other errors during initial load
         }
@@ -1354,19 +1225,42 @@ export default function CollaborationApp() {
     let refreshTimeout = null
 
     if (isAuthenticated && currentUser) {
-      const loadInitialData = async (forceRefresh = false) => {
-        const bootstrap = await Storage.getBootstrap({ forceRefresh }).catch(() => null)
-        const freshCurrentUser = bootstrap?.user || currentUser
-        const effectiveUser = filterDismissedUser(freshCurrentUser || currentUser)
-        const bootstrapFriends = Array.isArray(bootstrap?.friends) ? bootstrap.friends : []
+      const loadInitialData = async () => {
+        const bootstrap = await Storage.getBootstrap().catch(() => null)
+        const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
+        const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
+          ? Promise.resolve(bootstrap.friends)
+          : Storage.getFriends(effectiveUser.friends || []).catch(() => [])
+        const spacesPromise = Storage.getSpacesForUser(effectiveUser.spaces || []).catch(() => [])
 
-        // Load core chat data first so UI becomes interactive quickly.
-        const [userSpaces, friendsList] = await Promise.all([
-          Storage.getSpacesForUser(effectiveUser?.spaces || []).catch(() => []),
-          bootstrapFriends.length > 0
-            ? Promise.resolve(bootstrapFriends)
-            : Storage.getFriends(effectiveUser?.friends || []).catch(() => [])
-        ])
+        setCurrentUser(prev => {
+          if (!prev) return effectiveUser
+          return String(prev.id) === String(effectiveUser?.id)
+            && (prev.friends?.length || 0) === (effectiveUser?.friends?.length || 0)
+            && (prev.notifications?.length || 0) === (effectiveUser?.notifications?.length || 0)
+            && (prev.spaces?.length || 0) === (effectiveUser?.spaces?.length || 0)
+            ? prev
+            : effectiveUser
+        })
+
+        const friendsList = await friendsPromise
+        const safeFriends = Array.isArray(friendsList) ? friendsList : []
+        setFriends(safeFriends)
+        setUsers(prev => {
+          const merged = new Map()
+          ;(Array.isArray(prev) ? prev : []).forEach(user => {
+            if (user?.id === undefined || user?.id === null) return
+            merged.set(String(user.id), user)
+          })
+          ;[effectiveUser, ...safeFriends].forEach(user => {
+            if (user?.id === undefined || user?.id === null) return
+            merged.set(String(user.id), { ...(merged.get(String(user.id)) || {}), ...user })
+          })
+          return Array.from(merged.values())
+        })
+
+        // Load spaces separately so friends/DM UI paints first.
+        const userSpaces = await spacesPromise
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
 
@@ -1383,41 +1277,21 @@ export default function CollaborationApp() {
         }))
 
         setSpaces(enrichedSpaces)
-        setCurrentUser(prev => {
-          if (!prev) return effectiveUser
-          const hasSameIdentity = String(prev.id) === String(effectiveUser?.id)
-          const hasSameAvatar =
-            prev.avatar_url === effectiveUser?.avatar_url &&
-            prev.avatar_preset === effectiveUser?.avatar_preset
-          const hasSameCounts =
-            (prev.friends?.length || 0) === (effectiveUser?.friends?.length || 0) &&
-            (prev.notifications?.length || 0) === (effectiveUser?.notifications?.length || 0) &&
-            (prev.spaces?.length || 0) === (effectiveUser?.spaces?.length || 0)
-          const hasSameNames =
-            prev.name === effectiveUser?.name &&
-            prev.email === effectiveUser?.email
-          return hasSameIdentity && hasSameAvatar && hasSameCounts && hasSameNames
-            ? prev
-            : effectiveUser
-        })
-        setUsers(Storage.peekUsers())
-        setFriends(Array.isArray(friendsList) ? friendsList : [])
+        setFriends(safeFriends)
 
         // Non-blocking: load secondary data after core UI is ready.
         Storage.getEvents()
           .then(evts => setEvents(evts || []))
           .catch(() => {})
-        if (currentUserTaskId) {
-          TasksService.getTasksForUser(currentUserTaskId)
-            .then(t => setTasksList(Array.isArray(t) ? t : []))
-            .catch(e => console.warn('Failed to load tasks', e))
-        }
+        TasksService.getTasksForUser(currentUser.id)
+          .then(t => setTasksList(Array.isArray(t) ? t : []))
+          .catch(e => console.warn('Failed to load tasks', e))
 
         return enrichedSpaces
       }
 
       ;(async () => {
-        const enrichedSpaces = await loadInitialData(false)
+        const enrichedSpaces = await loadInitialData()
 
         if (
           enrichedSpaces.length > 0 &&
@@ -1444,7 +1318,7 @@ export default function CollaborationApp() {
         
         // Refresh once shortly after first paint to pick up background-cached updates.
         refreshTimeout = setTimeout(async () => {
-          const refreshedSpaces = await loadInitialData(true)
+          const refreshedSpaces = await loadInitialData()
           // Update active space if we didn't have any before but now we do
           if (refreshedSpaces.length > 0 && !activeSpace) {
             const firstSpace = refreshedSpaces[0]
@@ -1649,13 +1523,8 @@ export default function CollaborationApp() {
               // Refresh authoritative users list to avoid stale cached data
               ;(async () => {
                 try {
-                  if (String(data.userId) === String(currentUser?.id)) {
-                    const refreshedCurrentUser = await (await import("./services/storage")).getCurrentUser({ forceRefresh: true })
-                    if (refreshedCurrentUser) setCurrentUser(filterDismissedUser(refreshedCurrentUser))
-                  } else {
-                    const refreshedUsers = await (await import("./services/storage")).getUsersByIds([data.userId], { forceRefresh: true })
-                    if (Array.isArray(refreshedUsers) && refreshedUsers[0]) syncUserCollections(refreshedUsers[0])
-                  }
+                  const allUsers = await (await import("./services/storage")).getUsers()
+                  if (Array.isArray(allUsers)) setUsers(allUsers)
                 } catch (e) {
                   // ignore refresh errors
                 }
@@ -1683,13 +1552,11 @@ export default function CollaborationApp() {
                   name: incoming.avatarData.name
                 }
                 syncUserCollections(updatedUser)
-                // Refresh only the affected user and friend list instead of the full directory.
+                // Also refresh users and friends list to ensure real-time avatar sync
                 ;(async () => {
                   try {
-                    const refreshedUsers = await Storage.getUsersByIds([incoming.userId], { forceRefresh: true })
-                    if (Array.isArray(refreshedUsers) && refreshedUsers[0]) {
-                      syncUserCollections(refreshedUsers[0])
-                    }
+                    const allUsers = await Storage.getUsers({ forceRefresh: true })
+                    if (Array.isArray(allUsers)) setUsers(allUsers)
                     if (currentUser?.friends?.length > 0) {
                       const friendsList = await Storage.getFriends(currentUser.friends, { forceRefresh: true })
                       if (Array.isArray(friendsList)) setFriends(friendsList)
@@ -1746,13 +1613,11 @@ export default function CollaborationApp() {
                   console.error('Failed to refresh users after incoming friend notification', e)
                 })
               } else {
-                // Refresh only the signed-in user for notification counts/state.
+                // Also refresh users list so friend lists / counts stay in sync
                 ;(async () => {
                   try {
-                    const refreshedCurrentUser = await Storage.getCurrentUser({ forceRefresh: true })
-                    if (refreshedCurrentUser) {
-                      setCurrentUser(filterDismissedUser(refreshedCurrentUser))
-                    }
+                    const allUsers = await Storage.getUsers({ forceRefresh: true })
+                    setUsers(Array.isArray(allUsers) ? allUsers : [])
                   } catch (e) {
                     console.error('Failed to refresh users after incoming notification', e)
                   }
@@ -1848,7 +1713,7 @@ export default function CollaborationApp() {
             [chatId]: [...normalized, ...optimisticOnly]
           }
         })
-        rememberChannelMessageCount(chatId, normalized.length)
+        setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
       } catch (e) {
         if (e && e.status === 403) {
           // Only show access denied modal if user has spaces loaded (not initial load)
@@ -1865,7 +1730,7 @@ export default function CollaborationApp() {
     }
     loadMessages(true)
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
-    const interval = setInterval(() => loadMessages(true), 45000)
+    const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
   }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
 
@@ -2043,21 +1908,13 @@ export default function CollaborationApp() {
     // 3) When the user manually switches a thread (channel/DM), do an instant jump to latest
     if (justSwitchedThreadRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
-      updateIsAtBottom(true)
+      setIsAtBottom(true)
       justSwitchedThreadRef.current = false
       return
     }
 
     // 3.5) When restoring from Contexts/Files/Decisions back to Messages, don't auto-jump.
     if (restoreMessageScrollRef.current || pendingTabScrollRestoreRef.current) {
-      return
-    }
-
-    if (skipNextAutoScrollRef.current) {
-      skipNextAutoScrollRef.current = false
-      if (messagesContainerRef.current) {
-        prevScrollHeightRef.current = messagesContainerRef.current.scrollHeight
-      }
       return
     }
 
@@ -2068,9 +1925,10 @@ export default function CollaborationApp() {
 
     if (isAtBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      updateIsAtBottom(true)
+      setIsAtBottom(true)
       // record current height so future incoming messages can preserve scroll position
       try { prevScrollHeightRef.current = el.scrollHeight } catch (e) {}
+      try { setVisibleDateLabel(messageDateLabel || "Today") } catch (e) {}
     } else {
       // Preserve scroll position: adjust scrollTop by the increase in scrollHeight
       try {
@@ -2087,8 +1945,49 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     ;(async () => {
-      if (showAddToSpaceModal && activeView === "channel") {
+      const existingFriendIds = new Set([
+        ...(Array.isArray(currentUser?.friends) ? currentUser.friends : []),
+        ...(Array.isArray(friends) ? friends.map(friend => friend.id).filter(Boolean) : [])
+      ])
+
+      // 1. "Add Friend" Modal: Global Search for NEW friends
+      if (showAddFriendModal && debouncedInviteSearchQuery.length > 0) {
+        try {
+          const q = debouncedInviteSearchQuery.toLowerCase()
+          // Fast client-side matches from cached `users` for immediate responsiveness
+          const localMatches = Array.isArray(users)
+            ? users.filter(
+                u =>
+                  u.name &&
+                  u.name.toLowerCase().includes(q) &&
+                  u.id !== currentUser?.id &&
+                  !existingFriendIds.has(u.id)
+              )
+            : []
+          // show a limited set immediately to avoid UI jank
+          setInviteSearchResults(localMatches.slice(0, 50))
+
+          // For longer queries, fetch server-side results to improve coverage
+          if (q.length >= 3) {
+            const remote = await Storage.searchUsersByName(debouncedInviteSearchQuery)
+            const safeUsers = Array.isArray(remote) ? remote : []
+            const results = safeUsers.filter(
+              u => u.id !== currentUser?.id && !existingFriendIds.has(u.id)
+            )
+            setInviteSearchResults(results)
+          }
+        } catch (e) {
+          console.error("searchUsersByName failed", e)
+          // keep local matches if available, otherwise clear
+          setInviteSearchResults(prev => (Array.isArray(prev) && prev.length ? prev : []))
+        }
+      }
+      // 2. "Invite to Channel" Modal: Filter EXISTING friends only
+      else if (showAddToSpaceModal && activeView === "channel") {
         const currentCh = getCurrentChannels().find(c => c.id === activeChannel)
+        // We only show friends who are NOT in the current channel
+        // If inviteSearchQuery is empty, we show all eligible friends
+        // If inviteSearchQuery is set, we filter friends by name
         const eligibleFriends = friends.filter(friend => {
           const isMember = currentCh
             ? currentCh.members.includes(friend.id)
@@ -2104,7 +2003,9 @@ export default function CollaborationApp() {
       }
     })()
   }, [
+    debouncedInviteSearchQuery,
     inviteSearchQuery,
+    showAddFriendModal,
     showAddToSpaceModal,
     currentUser,
     activeChannel,
@@ -2368,15 +2269,6 @@ export default function CollaborationApp() {
     )
   }
 
-  const handleReconnectGoogleDocs = () => {
-    GoogleService.removeGoogleAccessToken()
-    setGoogleAccessToken(null)
-    setDocsError(null)
-    setGoogleDocs([])
-    setGmailAttachments([])
-    handleConnectGoogleDocs()
-  }
-
   const handleConnectSpecificApp = (appType) => {
     if (!googleAccessToken) {
       handleConnectGoogleDocs()
@@ -2465,38 +2357,25 @@ export default function CollaborationApp() {
     })
   }
 
-  const handleSelectDocumentsFilter = nextFilter => {
-    setSelectedAppFilter(nextFilter)
-    if (!googleAccessToken) return
-    if (nextFilter === "all" || nextFilter === "shared") {
-      loadGoogleDocs(googleAccessToken)
-      return
-    }
-    loadGoogleDocs(googleAccessToken, nextFilter)
-  }
-
-  const handleDocsClick = (nextFilter = "all") => {
-    setActiveView("documents")
-    setActiveSpace(null)
-    setSelectedAppFilter(nextFilter)
-    if (isMobile) setMobileView("chat")
-
+  const handleDocsClick = () => {
+    setShowDocsModal(true)
+    
     if (googleAccessToken) {
-      if (nextFilter === "all" || nextFilter === "shared") loadGoogleDocs(googleAccessToken)
-      else loadGoogleDocs(googleAccessToken, nextFilter)
+      loadGoogleDocs(googleAccessToken)
     }
+    // Populate shared chat docs from currently loaded messages
     setSharedChatDocs(extractSharedChatDocs(messages))
   }
 
-  // Keep shared chat docs up-to-date while Documents Hub is active
+  // Keep shared chat docs up-to-date while the modal is open
   useEffect(() => {
-    if (activeView !== "documents") return
+    if (!showDocsModal) return
     setSharedChatDocs(extractSharedChatDocs(messages))
-  }, [activeView, messages])
+  }, [showDocsModal, messages])
 
   // Real-time Gmail sync - periodically check for new attachments
   useEffect(() => {
-    if (!googleAccessToken || activeView !== "documents") return
+    if (!googleAccessToken || !showDocsModal) return
     
     const checkNewGmail = async () => {
       try {
@@ -2527,7 +2406,7 @@ export default function CollaborationApp() {
     const interval = setInterval(checkNewGmail, 30000)
     
     return () => clearInterval(interval)
-  }, [activeView, googleAccessToken, gmailLastCheckTime])
+  }, [googleAccessToken, showDocsModal, gmailLastCheckTime])
 
   // Add document as attachment to message input
   const addDocumentAsAttachment = (doc) => {
@@ -2615,225 +2494,6 @@ export default function CollaborationApp() {
     }
   }, [googleDocs, gmailAttachments, sharedChatDocs])
 
-  const formatDocsDate = value => {
-    if (!value) return "No recent activity"
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return "No recent activity"
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-  }
-
-  const formatDocsSize = value => {
-    const size = Number(value)
-    if (!Number.isFinite(size) || size <= 0) return "Unknown size"
-    if (size >= 1073741824) return `${(size / 1073741824).toFixed(1)} GB`
-    if (size >= 1048576) return `${(size / 1048576).toFixed(1)} MB`
-    if (size >= 1024) return `${Math.max(1, Math.round(size / 1024))} KB`
-    return `${size} B`
-  }
-
-  const docsCollectionSummary = {
-    all: {
-      label: "All sources",
-      detail: "Everything from Drive, shared chats, and Gmail in one command center.",
-      count: docsOverview.total,
-    },
-    drive: {
-      label: "Drive files",
-      detail: "Recent Google Drive files ready to open or drop into a conversation.",
-      count: sortedGoogleDocs.length,
-    },
-    docs: {
-      label: "Docs",
-      detail: "Collaborative documents pulled into a tighter review flow.",
-      count: sortedGoogleDocs.length,
-    },
-    sheets: {
-      label: "Sheets",
-      detail: "Spreadsheets surfaced for quick handoff and reuse.",
-      count: sortedGoogleDocs.length,
-    },
-    slides: {
-      label: "Slides",
-      detail: "Decks and presentation files ready for fast sharing.",
-      count: sortedGoogleDocs.length,
-    },
-    shared: {
-      label: "Shared in chats",
-      detail: "Files already moving through your workspace conversations.",
-      count: sharedChatDocs.length,
-    },
-    gmail: {
-      label: "Gmail attachments",
-      detail: "Inbox files staged for download or instant attachment.",
-      count: gmailAttachments.length,
-    },
-  }[selectedAppFilter] || {
-    label: "Library",
-    detail: "Everything synced into one place.",
-    count: docsOverview.total,
-  }
-
-  const docsOverviewCards = [
-    {
-      label: 'Total assets',
-      value: docsOverview.total,
-      note: 'Everything accessible right now',
-      tone: isDarkMode ? 'border-white/10 bg-white/[0.05] text-white' : 'border-white/70 bg-white/90 text-slate-900',
-    },
-    {
-      label: 'Drive files',
-      value: docsOverview.drive,
-      note: 'Fresh from your Google workspace',
-      tone: isDarkMode ? 'border-cyan-400/15 bg-cyan-400/10 text-cyan-100' : 'border-sky-100 bg-gradient-to-br from-sky-50 to-cyan-50 text-sky-800',
-    },
-    {
-      label: 'Shared docs',
-      value: docsOverview.shared,
-      note: 'Already circulating in team chats',
-      tone: isDarkMode ? 'border-emerald-400/15 bg-emerald-400/10 text-emerald-100' : 'border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 text-emerald-800',
-    },
-    {
-      label: 'Gmail files',
-      value: docsOverview.gmail,
-      note: 'Inbox attachments ready to drop in',
-      tone: isDarkMode ? 'border-rose-400/15 bg-rose-400/10 text-rose-100' : 'border-rose-100 bg-gradient-to-br from-rose-50 to-orange-50 text-rose-800',
-    },
-  ]
-
-  const docsViewportMessage = isMobile
-    ? 'Your files lead on mobile now. Scan, open, and attach from one focused browser.'
-    : windowWidth < 1280
-      ? 'The library takes the lead while controls and context stay tucked to the side.'
-      : 'The browser is the primary stage. Scan, open, and attach without the controls eating the viewport.'
-
-  const docsFilterButtons = (
-    <>
-      <button
-        onClick={() => {
-          setSelectedAppFilter('all')
-          loadGoogleDocs(googleAccessToken)
-        }}
-        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-          selectedAppFilter === 'all'
-            ? 'border-sky-600 bg-sky-600 text-white shadow-[0_12px_30px_rgba(2,132,199,0.28)]'
-            : isDarkMode
-              ? 'border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]'
-              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-        }`}
-      >
-        <Grid3x3 className="h-4 w-4" />
-        All
-      </button>
-      <button
-        onClick={() => {
-          setSelectedAppFilter('drive')
-          loadGoogleDocs(googleAccessToken, 'drive')
-        }}
-        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-          selectedAppFilter === 'drive'
-            ? isDarkMode
-              ? 'border-cyan-300/30 bg-cyan-300/90 text-slate-950 shadow-[0_12px_30px_rgba(34,211,238,0.2)]'
-              : 'border-slate-900 bg-slate-900 text-white'
-            : isDarkMode
-              ? 'border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]'
-              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-        }`}
-      >
-        <SmartImage src="/google-drive.png" alt="Drive" className="h-4 w-4" />
-        Drive
-      </button>
-      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
-        <button
-          onClick={() => {
-            setSelectedAppFilter('docs')
-            loadGoogleDocs(googleAccessToken, 'docs')
-          }}
-          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-            selectedAppFilter === 'docs'
-              ? 'border-blue-600 bg-blue-600 text-white'
-              : isDarkMode
-                ? 'border-blue-400/20 bg-blue-400/10 text-blue-200 hover:bg-blue-400/15'
-                : 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100'
-          }`}
-        >
-          <SmartImage src="/google-docs.png" alt="Docs" className="h-4 w-4" />
-          Docs
-        </button>
-      )}
-      <button
-        onClick={() => {
-          setSelectedAppFilter('shared')
-        }}
-        className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-          selectedAppFilter === 'shared'
-            ? isDarkMode
-              ? 'border-emerald-300/30 bg-emerald-300/90 text-slate-950'
-              : 'border-emerald-500 bg-emerald-500 text-white'
-            : isDarkMode
-              ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/15'
-              : 'border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-        }`}
-      >
-        <SmartImage src="/shared.png.png" alt="Shared" className="h-4 w-4" />
-        Shared
-      </button>
-      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
-        <button
-          onClick={() => {
-            setSelectedAppFilter('sheets')
-            loadGoogleDocs(googleAccessToken, 'sheets')
-          }}
-          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-            selectedAppFilter === 'sheets'
-              ? 'border-green-600 bg-green-600 text-white'
-              : isDarkMode
-                ? 'border-green-400/20 bg-green-400/10 text-green-200 hover:bg-green-400/15'
-                : 'border-green-100 bg-green-50 text-green-700 hover:bg-green-100'
-          }`}
-        >
-          <SmartImage src="/google-sheets.png" alt="Sheets" className="h-4 w-4" />
-          Sheets
-        </button>
-      )}
-      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
-        <button
-          onClick={() => {
-            setSelectedAppFilter('slides')
-            loadGoogleDocs(googleAccessToken, 'slides')
-          }}
-          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-            selectedAppFilter === 'slides'
-              ? 'border-amber-500 bg-amber-500 text-white'
-              : isDarkMode
-                ? 'border-amber-400/20 bg-amber-400/10 text-amber-200 hover:bg-amber-400/15'
-                : 'border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100'
-          }`}
-        >
-          <SmartImage src="/slides.png" alt="Slides" className="h-4 w-4" />
-          Slides
-        </button>
-      )}
-      {gmailAttachments.length > 0 && (
-        <button
-          onClick={() => {
-            setSelectedAppFilter('gmail')
-            loadGoogleDocs(googleAccessToken, 'gmail')
-          }}
-          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-            selectedAppFilter === 'gmail'
-              ? 'border-rose-600 bg-rose-600 text-white'
-              : isDarkMode
-                ? 'border-rose-400/20 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15'
-                : 'border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100'
-          }`}
-        >
-          <SmartImage src="/gmail.png" alt="Gmail" className="h-4 w-4" />
-          Gmail
-        </button>
-      )}
-    </>
-  )
-
   const homeFiles = useMemo(() => {
     const sharedFiles = extractSharedChatDocs(messages).map(file => ({
       ...file,
@@ -2868,7 +2528,6 @@ export default function CollaborationApp() {
   const handleHomeSectionChange = nextSection => {
     setActiveView("home")
     setHomeSection(nextSection)
-    if (nextSection === "connect") setHomeConnectPane("discover")
     if (nextSection === "files" && googleAccessToken) {
       loadGoogleDocs(googleAccessToken).catch(error => console.warn("Failed to refresh home files", error))
     }
@@ -2886,37 +2545,6 @@ export default function CollaborationApp() {
   const openTaskDetailView = task => {
     setActiveView("tasks")
     setActiveSpace(null)
-  }
-
-  const handleCompleteTask = async task => {
-    if (!task || task.status === "completed") return
-
-    const taskId = task.id || task.timestamp
-    if (!taskId) return
-
-    setCompletingTaskId(String(taskId))
-    setTasksList(prev =>
-      prev.map(item =>
-        String(item.id || item.timestamp) === String(taskId)
-          ? { ...item, status: "completed" }
-          : item
-      )
-    )
-
-    try {
-      await TasksService.updateTask(taskId, { status: "completed" })
-    } catch (error) {
-      console.warn("task update failed", error)
-      setTasksList(prev =>
-        prev.map(item =>
-          String(item.id || item.timestamp) === String(taskId)
-            ? { ...item, status: task.status || "pending" }
-            : item
-        )
-      )
-    } finally {
-      setCompletingTaskId(currentId => (currentId === String(taskId) ? null : currentId))
-    }
   }
 
   // Connect Google Calendar
@@ -3798,30 +3426,15 @@ export default function CollaborationApp() {
 
   const refreshRelationshipState = async (userId = currentUser?.id) => {
     if (!userId) return null
-    const bootstrap = await Storage.getBootstrap({ forceRefresh: true }).catch(() => null)
-    const updatedUser = bootstrap?.user || null
+    const allUsers = await Storage.getUsers({ forceRefresh: true }).catch(() => [])
+    const normalizedUsers = Array.isArray(allUsers) ? allUsers : []
+    setUsers(normalizedUsers)
+    const updatedUser = normalizedUsers.find(u => String(u.id) === String(userId))
     if (!updatedUser) return null
     const filteredUser = filterDismissedUser(updatedUser)
     setCurrentUser(filteredUser)
-    const friendsList = Array.isArray(bootstrap?.friends)
-      ? bootstrap.friends
-      : await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
+    const friendsList = await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
     setFriends(Array.isArray(friendsList) ? friendsList : [])
-    setUsers(prev => {
-      const merged = new Map()
-      ;(Array.isArray(prev) ? prev : []).forEach(user => {
-        if (user?.id === undefined || user?.id === null) return
-        merged.set(String(user.id), user)
-      })
-      ;[filteredUser, ...(Array.isArray(friendsList) ? friendsList : [])].forEach(user => {
-        if (user?.id === undefined || user?.id === null) return
-        merged.set(String(user.id), {
-          ...(merged.get(String(user.id)) || {}),
-          ...user,
-        })
-      })
-      return Array.from(merged.values())
-    })
     return filteredUser
   }
 
@@ -3851,11 +3464,6 @@ export default function CollaborationApp() {
   const currentChannels = useMemo(
     () => currentSpace?.channels || [],
     [currentSpace]
-  )
-
-  const workspaceChannels = useMemo(
-    () => spaces.flatMap(space => space?.channels || []),
-    [spaces]
   )
 
   const getCurrentSpace = () => currentSpace
@@ -3969,22 +3577,6 @@ export default function CollaborationApp() {
       setActiveView("channel")
     }
     setHomeSection("overview")
-  }
-
-  const openConnectHome = () => {
-    setActiveDraftId(null)
-    setActiveView("home")
-    setHomeSection("connect")
-    setHomeConnectPane("discover")
-    if (isMobile) setMobileView("chat")
-  }
-
-  const openManageProfileHome = () => {
-    setActiveDraftId(null)
-    setActiveView("home")
-    setHomeSection("connect")
-    setHomeConnectPane("profile")
-    if (isMobile) setMobileView("chat")
   }
 
   const openHomeDM = async (partnerId, options = {}) => {
@@ -4300,7 +3892,8 @@ export default function CollaborationApp() {
       pendingTabScrollRestoreRef.current = null
       previousChannelTabRef.current = "messages"
       prevScrollHeightRef.current = 0
-      updateIsAtBottom(true)
+      setIsAtBottom(true)
+      setVisibleDateLabel("Today")
       setTargetMessageId(null)
       setPinnedMessageId(null)
       if (activeChannelTab !== "messages") {
@@ -4336,26 +3929,6 @@ export default function CollaborationApp() {
     return usersById[String(userId)]
   }
 
-  useEffect(() => {
-    if (!activeDMUser || getUser(activeDMUser)) return
-
-    let cancelled = false
-
-    ;(async () => {
-      try {
-        const matches = await Storage.getUsersByIds([activeDMUser], { forceRefresh: true })
-        if (cancelled || !Array.isArray(matches) || matches.length === 0) return
-        syncUserCollections(matches[0])
-      } catch (error) {
-        console.warn("Failed to load DM partner details", error)
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeDMUser, usersById])
-
   const activeChannelData = useMemo(
     () => currentChannels.find(c => c.id === activeChannel) || null,
     [currentChannels, activeChannel]
@@ -4374,6 +3947,18 @@ export default function CollaborationApp() {
   }, [activeView, activeChannelData, activeDMUser, currentUser, usersById])
 
   const getActiveMembers = () => activeMembers
+
+  // Compute the current chat's date label (latest message) and update when relevant state changes
+  const messageDateLabel = useMemo(() => {
+    try {
+      const latest = currentMessages.length ? currentMessages[currentMessages.length - 1] : null
+      return formatDateLabel(latest?.timestamp, timeTicker)
+    } catch (e) {
+      return "Today"
+    }
+  }, [currentMessages, timeTicker])
+
+  // Visible date label (changes while scrolling to indicate the date of messages in view)
 
   const getChannelRole = (memberId) => {
     if (!activeChannelData) return 'member'
@@ -4574,7 +4159,6 @@ export default function CollaborationApp() {
       const user = getUser(activeDMUser)
       return user ? user.name : "Unknown User"
     } else if (activeView === "calendar") return "Calendar"
-    else if (activeView === "documents") return "Documents Hub"
     else if (activeView === "meeting") return "Meeting"
     return ""
   }
@@ -4690,19 +4274,6 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen && !composerAttachMenuOpen) return undefined
-    const handleEscape = event => {
-      if (event.key !== "Escape") return
-      setMessageActionMenu(null)
-      setMessageContextPicker(null)
-      setComposerAttachMenuOpen(false)
-      setComposerContextPickerOpen(false)
-    }
-    document.addEventListener("keydown", handleEscape)
-    return () => document.removeEventListener("keydown", handleEscape)
-  }, [messageActionMenu, messageContextPicker, composerAttachMenuOpen, composerContextPickerOpen])
-
-  useEffect(() => {
-    if (!messageActionMenu && !messageContextPicker && !composerContextPickerOpen && !composerAttachMenuOpen) return undefined
     const closeMenus = () => {
       setMessageActionMenu(null)
       setMessageContextPicker(null)
@@ -4718,27 +4289,6 @@ export default function CollaborationApp() {
     if (!chatId || (activeView !== "channel" && activeView !== "dm")) return []
     return contextItems.filter(context => String(context.channelId) === String(chatId))
   }, [activeView, activeChannel, activeDMUser, currentUser, contextItems])
-
-  const saveChannelContextStateImmediately = async (
-    chatId,
-    nextContextItems = contextItems,
-    nextContextDecisions = contextDecisions,
-    nextContextTasks = contextTasks
-  ) => {
-    if (!chatId) return null
-    const normalizedChatId = String(chatId)
-
-    if (contextSaveTimeoutRef.current) {
-      clearTimeout(contextSaveTimeoutRef.current)
-      contextSaveTimeoutRef.current = null
-    }
-
-    return Storage.saveContextState(normalizedChatId, {
-      contexts: nextContextItems.filter(context => String(context.channelId) === normalizedChatId),
-      decisions: nextContextDecisions.filter(item => String(item.channelId) === normalizedChatId),
-      tasks: nextContextTasks.filter(item => String(item.channelId) === normalizedChatId),
-    })
-  }
 
   const contextsById = useMemo(
     () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),
@@ -4779,11 +4329,6 @@ export default function CollaborationApp() {
     }
     const role = getChannelRole(currentUser.id)
     return String(context.ownerId) === String(currentUser.id) || role === "owner" || role === "admin"
-  }
-
-  const isContextOwner = context => {
-    if (!context || !currentUser) return false
-    return String(context.ownerId) === String(currentUser.id)
   }
 
   const patchMessage = async (messageId, updater) => {
@@ -5221,80 +4766,6 @@ export default function CollaborationApp() {
     setMessageContextPicker(null)
   }
 
-  const deleteContextPermanently = async contextId => {
-    const target = contextItems.find(context => String(context.id) === String(contextId))
-    if (!target || !isContextOwner(target)) return
-
-    const confirmed = window.confirm(`Delete "${target.title}" permanently? This will remove it from linked messages and the contexts page.`)
-    if (!confirmed) return
-
-    const targetChatId = String(target.channelId || getActiveChatId() || "")
-    if (!targetChatId) return
-
-    const previousContextItems = contextItems
-    const previousContextDecisions = contextDecisions
-    const previousContextTasks = contextTasks
-    const previousMessages = messages
-
-    const nextContextItems = previousContextItems.filter(context => String(context.id) !== String(contextId))
-    const nextContextDecisions = previousContextDecisions.filter(item => String(item.contextId) !== String(contextId))
-    const nextContextTasks = previousContextTasks.filter(item => String(item.contextId) !== String(contextId))
-    const previousChannelMessages = Array.isArray(previousMessages[targetChatId]) ? previousMessages[targetChatId] : []
-    const nextChannelMessages = previousChannelMessages.map(message => ({
-      ...message,
-      contextIds: Array.isArray(message.contextIds)
-        ? message.contextIds.filter(id => String(id) !== String(contextId))
-        : [],
-    }))
-    const changedMessages = nextChannelMessages.filter((message, index) => {
-      const previousMessage = previousChannelMessages[index]
-      const previousIds = Array.isArray(previousMessage?.contextIds) ? previousMessage.contextIds.map(String) : []
-      const nextIds = Array.isArray(message.contextIds) ? message.contextIds.map(String) : []
-      return previousIds.length !== nextIds.length
-    })
-    const nextMessages = {
-      ...previousMessages,
-      [targetChatId]: nextChannelMessages,
-    }
-
-    setContextItems(nextContextItems)
-    setContextDecisions(nextContextDecisions)
-    setContextTasks(nextContextTasks)
-    setMessages(nextMessages)
-
-    if (String(openContextId) === String(contextId)) {
-      setOpenContextId(null)
-    }
-    if (String(selectedComposerContextId) === String(contextId)) {
-      setSelectedComposerContextId(null)
-    }
-    if (String(editingContextId) === String(contextId)) {
-      setEditingContextId(null)
-      setContextDraft(null)
-    }
-
-    try {
-      await Promise.all(
-        changedMessages.map(message =>
-          Storage.updateMessage(targetChatId, sanitizeMessagePayload(message))
-        )
-      )
-      await saveChannelContextStateImmediately(
-        targetChatId,
-        nextContextItems,
-        nextContextDecisions,
-        nextContextTasks
-      )
-    } catch (error) {
-      console.error("Failed to delete context permanently", error)
-      setContextItems(previousContextItems)
-      setContextDecisions(previousContextDecisions)
-      setContextTasks(previousContextTasks)
-      setMessages(previousMessages)
-      window.alert("Could not delete this context from the backend. Please try again.")
-    }
-  }
-
   const currentContext = useMemo(
     () => (openContextId ? contextItems.find(context => String(context.id) === String(openContextId)) || null : null),
     [openContextId, contextItems]
@@ -5368,7 +4839,10 @@ export default function CollaborationApp() {
     const activeChatId = getActiveChatId()
     if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
-        saveMessageScrollPosition(activeChatId)
+        const container = messagesContainerRef.current
+        if (container) {
+          messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
+        }
       }
 
       if (activeChannelTab !== "messages" && nextTab === "messages") {
@@ -5387,6 +4861,13 @@ export default function CollaborationApp() {
     if (!activeChatId) return
 
     const previousTab = previousChannelTabRef.current
+    if (previousTab === "messages" && activeChannelTab !== "messages") {
+      const container = messagesContainerRef.current
+      if (container) {
+        messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
+      }
+    }
+
     if (previousTab !== "messages" && activeChannelTab === "messages") {
       restoreMessageScrollRef.current = true
     }
@@ -5406,36 +4887,16 @@ export default function CollaborationApp() {
       pendingTabScrollRestoreRef.current === String(activeChatId)
     if (!shouldRestore) return
 
-    let firstFrame = null
-    let secondFrame = null
-
-    const restoreScrollPosition = () => {
-      const latestContainer = messagesContainerRef.current
-      if (!latestContainer) return
-
-      const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
-      if (typeof savedScrollTop === "number") {
-        latestContainer.scrollTop = savedScrollTop
-        const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-        const atBottom =
-          latestContainer.scrollHeight - latestContainer.scrollTop - latestContainer.clientHeight < threshold
-        skipNextAutoScrollRef.current = true
-        updateIsAtBottom(atBottom)
-        prevScrollHeightRef.current = latestContainer.scrollHeight
-      }
-
-      restoreMessageScrollRef.current = false
-      pendingTabScrollRestoreRef.current = null
+    const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
+    if (typeof savedScrollTop === "number") {
+      container.scrollTop = savedScrollTop
+      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+      setIsAtBottom(atBottom)
+      prevScrollHeightRef.current = container.scrollHeight
     }
-
-    firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(restoreScrollPosition)
-    })
-
-    return () => {
-      if (firstFrame) cancelAnimationFrame(firstFrame)
-      if (secondFrame) cancelAnimationFrame(secondFrame)
-    }
+    restoreMessageScrollRef.current = false
+    pendingTabScrollRestoreRef.current = null
   }, [activeChannelTab, activeChannel, activeDMUser, messages])
 
   // --- Actions ---
@@ -6115,35 +5576,40 @@ export default function CollaborationApp() {
 
   const sendFriendRequest = async targetId => {
     if (!currentUser) return
-    const normalizedTargetId = String(targetId)
-    if (pendingFriendRequestIdsRef.current.has(normalizedTargetId)) return
+    const target = users.find(u => u.id === targetId)
+    if (!target) return
+    if (pendingFriendRequestIdsRef.current.has(target.id)) return
 
-    pendingFriendRequestIdsRef.current.add(normalizedTargetId)
-    setPendingFriendRequestIds(prev => (prev.includes(normalizedTargetId) ? prev : [...prev, normalizedTargetId]))
+    pendingFriendRequestIdsRef.current.add(target.id)
+    setPendingFriendRequestIds(prev => (prev.includes(target.id) ? prev : [...prev, target.id]))
 
     try {
-      return await Storage.sendFriendRequest(currentUser.id, currentUser.name, targetId)
+      await Storage.sendFriendRequest(currentUser.id, currentUser.name, target.id)
     } finally {
-      pendingFriendRequestIdsRef.current.delete(normalizedTargetId)
-      setPendingFriendRequestIds(prev => prev.filter(id => String(id) !== normalizedTargetId))
+      pendingFriendRequestIdsRef.current.delete(target.id)
+      setPendingFriendRequestIds(prev => prev.filter(id => id !== target.id))
     }
   }
 
-  const handleProfessionalProfileSave = async profileUpdates => {
-    if (!currentUser) return null
+  const handleBulkFriendInvite = async () => {
+    if (selectedFriendInvitees.length === 0) return
+    await Promise.all(selectedFriendInvitees.map(id => sendFriendRequest(id)))
 
-    const response = await Storage.updateProfessionalProfile(currentUser.id, profileUpdates)
-    const updatedUser = response && typeof response === "object"
-      ? { ...currentUser, ...(response.user || response) }
-      : null
+    setInviteSent(true)
+    setTimeout(() => {
+      setShowAddFriendModal(false)
+      setInviteSearchQuery("")
+      setSelectedFriendInvitees([])
+      setInviteSent(false)
+    }, 2000)
+  }
 
-    if (updatedUser) {
-      setCurrentUser(updatedUser)
-      saveAuth(updatedUser, getToken())
-      syncUserCollections(updatedUser)
-    }
-
-    return updatedUser
+  const toggleFriendSelection = userId => {
+    setSelectedFriendInvitees(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    )
+    // Hide the dropdown after a selection to reveal the Send button and avoid overlay issues
+    setInviteSearchResults([])
   }
 
   const addFriendsToChannel = async () => {
@@ -6390,7 +5856,7 @@ export default function CollaborationApp() {
             <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
               isDarkMode ? 'bg-white/5 ring-1 ring-white/10' : 'bg-slate-950 ring-1 ring-slate-900/10'
             }`}>
-              <SmartImage src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"} alt="Spaces logo" className="h-7 w-7 object-contain" loading="eager" fetchPriority="high" />
+              <SmartImage src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-7 w-7 object-contain" loading="eager" fetchPriority="high" />
             </div>
             <div>
               <p className="text-lg font-black tracking-tight">Spaces</p>
@@ -6658,7 +6124,7 @@ export default function CollaborationApp() {
           isDarkMode ? 'border-white/10' : 'border-slate-900/10'
         }`}>
           <div className="flex items-center gap-3">
-            <SmartImage src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" loading="eager" fetchPriority="high" />
+            <SmartImage src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" loading="eager" fetchPriority="high" />
             <span className="text-sm font-bold text-current">Spaces</span>
           </div>
           <p className="text-sm">Designed to show the real product, not hide it.</p>
@@ -7973,28 +7439,26 @@ export default function CollaborationApp() {
               <div>
                 <div className="mb-3 text-sm font-semibold text-slate-600">Choose an avatar</div>
                 <div className="grid grid-cols-4 gap-3">
-                  {avatarPresets.map(preset => {
-                    const isActive = selectedPreset === preset.src || avatarPreview === preset.src
+                  {avatarPresets.map((preset, i) => {
+                    const isActive = Array.isArray(selectedPreset) &&
+                      selectedPreset.length === preset.length &&
+                      selectedPreset.every((clr, idx) => clr === preset[idx])
                     return (
                       <button
-                        key={preset.id}
+                        key={i}
                         type="button"
                         onClick={() => {
-                          setSelectedPreset(preset.src)
-                          setAvatarPreview(preset.src)
+                          setSelectedPreset([...preset])
+                          setAvatarPreview(null)
                         }}
                         className={`w-16 h-16 rounded-full shadow-md flex items-center justify-center transition-all ${
                           isActive ? "ring-4 ring-sky-200 scale-105" : "ring-0"
                         }`}
+                        style={{ background: `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)` }}
                       >
-                        {renderAvatar(
-                          {
-                            name: currentUser?.name,
-                            avatar_url: preset.src,
-                            avatar_preset: preset.src
-                          },
-                          64
-                        )}
+                        <span className="text-white font-bold">
+                          {(currentUser?.name || "?")[0]?.toUpperCase() || "?"}
+                        </span>
                       </button>
                     )
                   })}
@@ -8162,7 +7626,7 @@ export default function CollaborationApp() {
               const chatId = getActiveChatId()
               const newMsg = {
                 id: `tmp-task-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-                userId: currentUserTaskId || currentUser?.id,
+                userId: currentUser?.id,
                 text: payload.message,
                 timestamp: payload.timestamp || new Date().toISOString(),
                 type: 'task',
@@ -8196,7 +7660,7 @@ export default function CollaborationApp() {
                           ...appendContextActivity(context, {
                             id: `activity-task-${payload.id}-${Date.now()}`,
                             type: "task_added",
-                            userId: currentUserTaskId || currentUser?.id,
+                            userId: currentUser.id,
                             taskId: taskId || payload.id,
                             timestamp: payload.timestamp || new Date().toISOString(),
                           }),
@@ -8522,9 +7986,9 @@ export default function CollaborationApp() {
           onOpenDirectMessages={openWorkspaceFriendsHome}
           onOpenDM={openHomeDM}
           onOpenAddConnection={() => {
-            setActiveView("home")
-            setHomeSection("connect")
-            setHomeConnectPane("discover")
+            setInviteSearchQuery("")
+            setSelectedFriendInvitees([])
+            setShowAddFriendModal(true)
           }}
           onOpenTask={openTaskDetailView}
           onOpenDraft={openDraft}
@@ -8540,57 +8004,12 @@ export default function CollaborationApp() {
             setAvatarPreview(currentUser?.avatar_url || null)
             setShowProfileModal(true)
           }}
-          onConnectUser={sendFriendRequest}
-          onSaveProfessionalProfile={handleProfessionalProfileSave}
-          connectPreferredPane={homeConnectPane}
-          setConnectPreferredPane={setHomeConnectPane}
           setDmInput={setHomeDMInput}
           isDarkMode={isDarkMode}
           isMobile={isMobile}
           apiBase={API_BASE}
           resolveProtectedFileUrl={fetchProtectedUrlAndCreateObjectURL}
           onThemeChange={setIsDarkMode}
-        />
-      ) : activeView === "documents" ? (
-        <DocumentsHub
-          isDarkMode={isDarkMode}
-          googleAccessToken={googleAccessToken}
-          loadingDocs={loadingDocs}
-          docsError={docsError}
-          selectedAppFilter={selectedAppFilter}
-          docsOverview={docsOverview}
-          docsCollectionSummary={docsCollectionSummary}
-          googleDocs={googleDocs}
-          sortedGoogleDocs={sortedGoogleDocs}
-          sharedChatDocs={sharedChatDocs}
-          gmailAttachments={gmailAttachments}
-          gmailLastCheckTime={gmailLastCheckTime}
-          formatDocsDate={formatDocsDate}
-          formatDocsSize={formatDocsSize}
-          onBackHome={() => {
-            setActiveView("home")
-            setHomeSection("files")
-          }}
-          onConnectGoogle={handleConnectGoogleDocs}
-          onReconnectGoogle={handleReconnectGoogleDocs}
-          onRefresh={() => handleSelectDocumentsFilter(selectedAppFilter)}
-          onSelectFilter={handleSelectDocumentsFilter}
-          onOpenAttachment={openAttachment}
-          onAddDocument={addDocumentAsAttachment}
-        />
-      ) : activeView === "tasks" ? (
-        <TasksHub
-          isDarkMode={isDarkMode}
-          tasks={tasksList}
-          messages={messages}
-          currentUser={currentUser}
-          channels={workspaceChannels}
-          completingTaskId={completingTaskId}
-          onBackHome={() => {
-            setActiveView("home")
-            setHomeSection("tasks")
-          }}
-          onMarkTaskComplete={handleCompleteTask}
         />
       ) : (
         <>
@@ -8605,15 +8024,15 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          isMobile ? "" : sidebarCollapsed ? "w-20" : "w-72"
-        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} flex-shrink-0 liquid-glass-sidebar`}
+          sidebarCollapsed ? "w-20" : "w-80"
+        } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left z-[70]" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "spaces" && (
           <div className="swipe-indicator mt-2" />
         )}
         {/* ... (Sidebar Content) ... */}
-        <div className={`px-5 ${isMobile ? 'pt-4 pb-4 h-[72px]' : 'py-4 h-[72px]'} flex items-center justify-between border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
+        <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           {(!sidebarCollapsed || isMobile) && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -8626,21 +8045,13 @@ export default function CollaborationApp() {
                 }
               }}
             >
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
-                  isDarkMode
-                    ? 'bg-white/[0.08] shadow-[0_10px_20px_rgba(17,24,39,0.14)]'
-                    : 'border border-[#e7edf4] bg-white/92 shadow-[0_10px_24px_rgba(148,163,184,0.14)]'
-                }`}
-              >
-                <SmartImage
-                  src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
-                  alt="Spaces logo"
-                  className="h-7 w-7 object-contain"
-                  loading="eager"
-                  fetchPriority="high"
-                />
-              </div>
+              <SmartImage
+                src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+                alt="Spaces logo"
+                className="h-8 w-auto object-contain"
+                loading="eager"
+                fetchPriority="high"
+              />
             </div>
           )}
           <div className="flex gap-2 ml-auto">
@@ -8660,15 +8071,6 @@ export default function CollaborationApp() {
                 title="Tasks"
               >
                 <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
-              </button>
-            )}
-            {isMobile && (
-              <button
-                onClick={() => handleDocsClick()}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
-                title="Documents Hub"
-              >
-                <FileText className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {isMobile && (
@@ -8714,15 +8116,6 @@ export default function CollaborationApp() {
                 <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
-            {!sidebarCollapsed && !isMobile && (
-              <button
-                onClick={() => handleDocsClick()}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
-                title="Documents Hub"
-              >
-                <FileText className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
-              </button>
-            )}
             {/* Admin dashboard access - visible to org admins of verified org */}
             {!sidebarCollapsed && !isMobile && currentUser?.role === 'org_admin' && orgInfo?.verified && (
               <button
@@ -8753,15 +8146,15 @@ export default function CollaborationApp() {
         </div>
 
         {(!sidebarCollapsed || isMobile) && (
-          <div className="px-4 pt-4 pb-2 animate-fade-in">
+          <div className="px-5 pt-6 pb-2 animate-fade-in">
             <div className="relative group">
-              <Search className="absolute left-3.5 top-3 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
+              <Search className="absolute left-4 top-3.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
               <input
                 type="text"
                 placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
+                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
                   isDarkMode
                     ? 'bg-slate-800/60 border border-slate-700/50 focus:bg-slate-800 focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500/50 text-slate-200 hover:bg-slate-800/80 placeholder:text-slate-500'
                     : 'bg-slate-100/60 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/25 focus:border-sky-300 text-slate-700 hover:bg-slate-100/80 hover:border-slate-200 placeholder:text-slate-400 shadow-sm'
@@ -8771,12 +8164,12 @@ export default function CollaborationApp() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3.5 space-y-5">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-6">
           {(!sidebarCollapsed || isMobile) ? (
             <div className="animate-fade-in">
               {/* Conditional Rendering: Show Search Results or Standard Tree */}
               {debouncedSearchQuery.trim().length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div className="px-2 mb-1 flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       Search Results
@@ -8786,7 +8179,7 @@ export default function CollaborationApp() {
                     </span>
                   </div>
                   {spaceSearchResults.length === 0 ? (
-                    <div className="text-center py-6 text-slate-500 text-xs font-medium">
+                    <div className="text-center py-8 text-slate-500 text-xs font-medium">
                       No results found
                     </div>
                   ) : (
@@ -8843,7 +8236,7 @@ export default function CollaborationApp() {
                             setActiveSpace(result.spaceId)
                           }
                         }}
-                        className="p-2.5 rounded-xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
+                        className="p-3 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
                       >
                         <div className="flex items-center gap-3 mb-1">
                           <span
@@ -8876,7 +8269,7 @@ export default function CollaborationApp() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-5">
+                <div className="space-y-6">
                   <button
                     onClick={() => {
                       if (!googleCalendarToken) {
@@ -8886,7 +8279,7 @@ export default function CollaborationApp() {
                         setActiveSpace(null)
                       }
                     }}
-                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-300 mb-4 group hover-lift ${
+                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
                       activeView === "calendar"
                         ? (isDarkMode
                             ? "bg-transparent border border-transparent text-slate-200"
@@ -8897,7 +8290,7 @@ export default function CollaborationApp() {
                     }`}
                   >
                     <div
-                        className={`p-2.5 rounded-xl transition-all duration-300 ${
+                      className={`p-2.5 rounded-xl transition-all duration-300 ${
                         activeView === "calendar"
                           ? (isDarkMode
                               ? "bg-[#2C2C2C] text-slate-200"
@@ -8914,7 +8307,7 @@ export default function CollaborationApp() {
                     </span>
                   </button>
 
-                  <div className="px-2 mb-2 flex items-center justify-between">
+                  <div className="px-2 mb-3 flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       Your Spaces
                     </span>
@@ -8924,9 +8317,9 @@ export default function CollaborationApp() {
                   </div>
 
                   {spaces.map(space => (
-                    <div key={space.id} className="mb-1.5">
+                    <div key={space.id} className="mb-2">
                       <div
-                        className={`flex items-center gap-2 p-2.5 rounded-[10px] cursor-pointer transition-colors duration-200 group ${
+                        className={`flex items-center gap-2 p-3 rounded-[10px] cursor-pointer transition-colors duration-200 group ${
                             activeView === "channel" && activeSpace === space.id
                               ? (isDarkMode
                                   ? "bg-[#2C2C2C] border border-slate-700/70 text-white"
@@ -8942,7 +8335,7 @@ export default function CollaborationApp() {
                         }}
                       >
                         <span
-                          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                             activeSpace === space.id
                               ? (isDarkMode ? "bg-[#3A3A3A] text-white" : "bg-white text-slate-700")
                               : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
@@ -8995,7 +8388,7 @@ export default function CollaborationApp() {
                       </div>
 
                       {space.expanded && (
-                        <div className="ml-5 pl-3 border-l-2 mt-1.5 space-y-0.5 border-slate-100">
+                        <div className="ml-6 pl-4 border-l-2 mt-2 space-y-1 border-slate-100">
                           {(space.channels || []).filter(channel => {
                             const chMembers = channel?.members || []
                             if (chMembers && chMembers.length > 0) {
@@ -9018,7 +8411,7 @@ export default function CollaborationApp() {
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
+                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
                                     ? (isDarkMode
@@ -9041,7 +8434,7 @@ export default function CollaborationApp() {
                                 </span>
 
                                 {/* Unread Indicator */}
-                                {hasUnreadChannel(channel.id) &&
+                                {unreadChannels.includes(channel.id) &&
                                   activeChannel !== channel.id && (
                                     <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
                                   )}
@@ -9084,7 +8477,7 @@ export default function CollaborationApp() {
                                 setActiveSpace(space.id)
                                 setShowChannelModal(true)
                               }}
-                              className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-xl text-[13px] transition-all group mt-1 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
+                              className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-[13px] transition-all group mt-1 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
                             >
                               <Plus className="w-4 h-4" />
                               <span>Add channel</span>
@@ -9598,16 +8991,16 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header - Desktop with Liquid Glass */}
-            <div className={`liquid-glass-navbar h-[78px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-3 sm:px-5 md:px-6 lg:px-8 mx-0 w-full mt-2`}>
+            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3`}>
               {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className={`liquid-glass-header flex items-center gap-4 cursor-pointer group py-2.5 px-4 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
+                className={`liquid-glass-header flex items-center gap-5 cursor-pointer group py-3 px-5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
-                  <div className="flex items-center gap-4 relative z-10">
+                  <div className="flex items-center gap-5 relative z-10">
                     <div className="relative">
-                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
                         {renderAvatar(getUser(activeDMUser), 48)}
                       </div>
                       <span
@@ -9619,7 +9012,7 @@ export default function CollaborationApp() {
                       ></span>
                     </div>
                     <div>
-                      <h2 className={`font-bold text-[1.65rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                         {getActiveViewName()}
                       </h2>
                       <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : isDarkMode ? 'text-slate-500' : "text-slate-400"}`}>
@@ -9629,12 +9022,12 @@ export default function CollaborationApp() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-4 relative z-10">
-                    <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
-                      <Hash className="w-5 h-5" />
+                  <div className="flex items-center gap-5 relative z-10">
+                    <div className={`w-12 h-12 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
+                      <Hash className="w-6 h-6" />
                     </div>
                     <div>
-                      <h2 className={`font-bold text-[1.65rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2`}>
+                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2.5`}>
                         {/* Header Breadcrumb Context */}
                         <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
                           {currentSpace?.name}
@@ -9659,12 +9052,12 @@ export default function CollaborationApp() {
               </div>
 
               {/* Action Buttons with Liquid Glass */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
                     onClick={handleDocsClick}
-                    className={`liquid-glass-nav-item p-3 transition-all relative group`}
+                    className={`liquid-glass-nav-item p-3.5 transition-all relative group`}
                     title="Documents"
                   >
                     <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
@@ -9678,7 +9071,7 @@ export default function CollaborationApp() {
                 <div className="relative">
                   <button
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
-                    className={`liquid-glass-nav-item p-3 transition-all group`}
+                    className={`liquid-glass-nav-item p-3.5 transition-all group`}
                     title="Google Apps"
                   >
                     <Grid3x3 className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
@@ -9744,7 +9137,7 @@ export default function CollaborationApp() {
                           setShowVideoModal(true)
                         }
                       }}
-                      className={`liquid-glass-nav-item p-3 transition-all group`}
+                      className={`liquid-glass-nav-item p-3.5 transition-all group`}
                       title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
                       <Video className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
@@ -9770,7 +9163,7 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(true)
                       }}
                       disabled={!canInvite}
-                      className={`hidden md:flex liquid-glass-nav-item p-3 transition-all group ${
+                      className={`hidden md:flex liquid-glass-nav-item p-3.5 transition-all group ${
                         canInvite ? '' : 'opacity-60 cursor-not-allowed'
                       }`}
                     >
@@ -9781,7 +9174,7 @@ export default function CollaborationApp() {
                   )
                 })()}
 
-                <div className={`h-9 w-px mx-1.5 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
+                <div className={`h-10 w-px mx-2 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
 
                 {/* Theme Toggle Button */}
                 <button
@@ -9805,7 +9198,7 @@ export default function CollaborationApp() {
                 <div className="relative z-50">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className={`liquid-glass-header flex items-center gap-3 pl-3.5 pr-3 py-2 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
+                    className={`liquid-glass-header flex items-center gap-4 pl-4 pr-3 py-2.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
                   >
                     {/* Only show name if at least one sidebar is collapsed */}
                     {!(sidebarCollapsed === false && friendsSidebarCollapsed === false) && (
@@ -9819,7 +9212,7 @@ export default function CollaborationApp() {
                       </div>
                     )}
                     <div className="relative z-10">
-                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
                         {renderAvatar(currentUser, 44)}
                       </div>
                       {currentUser?.notifications?.length ? (
@@ -9871,17 +9264,6 @@ export default function CollaborationApp() {
                           >
                             <div className="flex items-center gap-3">
                               <UserPlus className="w-4 h-4" /> Edit Profile
-                            </div>
-                          </button>
-                          <button
-                            onClick={() => {
-                              openManageProfileHome()
-                              setShowUserMenu(false)
-                            }}
-                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-sky-50 hover:text-sky-700'}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <Briefcase className="w-4 h-4" /> Manage Profile
                             </div>
                           </button>
                           <button
@@ -10106,22 +9488,6 @@ export default function CollaborationApp() {
                             </div>
                             Profile
                           </button>
-                          <button
-                            onClick={() => {
-                              openManageProfileHome()
-                              setShowMobileDrawer(false)
-                            }}
-                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
-                              isDarkMode
-                                ? 'text-slate-300 hover:bg-slate-700 active:bg-slate-600 border-slate-700'
-                                : 'text-slate-700 hover:bg-slate-50 active:bg-slate-100 border-slate-100'
-                            }`}
-                          >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-sky-400' : 'bg-slate-100 text-slate-500'}`}>
-                              <Briefcase className="w-4 h-4" />
-                            </div>
-                            Manage Profile
-                          </button>
                           
                           {/* Google Apps */}
                           <button
@@ -10232,16 +9598,15 @@ export default function CollaborationApp() {
                   />
                 )}
                 {/* Updated Container with Custom Pattern Background */}
+                {/* day label computed above via `messageDateLabel` */}
 
                 {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
-                  <div className="flex-1 overflow-y-auto py-1 pb-5">
+                  <div className="flex-1 overflow-y-auto py-2 pb-6">
                     {activeChannelTab === "contexts" && (
                       <ContextsTabView
                         contexts={currentChannelContexts}
                         isDarkMode={isDarkMode}
                         onOpen={openContext}
-                        onDelete={deleteContextPermanently}
-                        canDelete={isContextOwner}
                         renderOwner={getContextOwnerName}
                         formatUpdatedTime={formatContextTime}
                       />
@@ -10271,8 +9636,35 @@ export default function CollaborationApp() {
                 <div className={`${(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
                 <div
                   ref={messagesContainerRef}
-                  onScroll={handleMessagesScroll}
-                  className={`flex-1 overflow-y-auto p-4 sm:px-6 sm:py-5 space-y-6 scrollbar-thin relative`}
+                  onScroll={() => {
+                    const el = messagesContainerRef.current
+                    if (!el) return
+                    if (activeChatId) {
+                      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
+                    }
+                    const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+                    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+                    setIsAtBottom(atBottom)
+                    // keep track of latest scrollHeight for preserving position when new messages arrive
+                    prevScrollHeightRef.current = el.scrollHeight
+                    // Update the visible date label based on the message near the vertical center
+                    try {
+                      const mid = el.scrollTop + el.clientHeight / 2
+                      const nodes = el.querySelectorAll('[id^="msg-"]')
+                      let foundTs = null
+                      for (let i = 0; i < nodes.length; i++) {
+                        const n = nodes[i]
+                        if (n.offsetTop <= mid) {
+                          foundTs = n.dataset.timestamp || null
+                        } else break
+                      }
+                      if (foundTs) {
+                        const label = formatDateLabel(foundTs, timeTicker)
+                        setVisibleDateLabel(label)
+                      }
+                    } catch (e) {}
+                  }}
+                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
                       {currentMessages.length === 0 ? (
@@ -10300,7 +9692,7 @@ export default function CollaborationApp() {
                   ) : (
                     <>
                       {pinnedMessageId && (
-                      <div className={`sticky top-0 z-20 mb-3 flex items-center justify-between gap-4 rounded-xl px-3.5 py-2.5 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-cyan-600/30' : 'bg-white/90 border-slate-100'}`}>
+                        <div className={`sticky top-0 z-20 mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 border shadow-sm ${isDarkMode ? 'bg-slate-800/90 border-cyan-600/30' : 'bg-white/90 border-slate-100'}`}>
                           <div className="flex items-center gap-3">
                             <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : ''}`}>Pinned Search Result</div>
                             <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Reviewing highlighted message</div>
@@ -10329,6 +9721,12 @@ export default function CollaborationApp() {
                         </div>
                       )}
 
+                      <div className="sticky top-0 z-10 flex justify-center mb-6 pointer-events-none">
+                        <span className="text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
+                          {visibleDateLabel || messageDateLabel || 'Today'}
+                        </span>
+                      </div>
+
                       {currentMessages.map((msg, idx) => {
                         const user = getUser(msg.userId)
                         const isMe = String(msg.userId) === String(currentUser?.id)
@@ -10343,37 +9741,13 @@ export default function CollaborationApp() {
                         const messageStatus = msg.status || "sent"
                         const messageContexts = getMessageContexts(msg)
                         const isMessageSelected = selectedMessageIds.some(id => String(id) === String(msg.id))
-                        const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0
-                        const hasMessageText = Boolean(
-                          typeof msg.text === "string" ? msg.text.trim() : msg.text
-                        )
-                        const isAttachmentOnlyMessage =
-                          hasAttachments &&
-                          !hasMessageText &&
-                          msg.type !== "meet-invite" &&
-                          msg.type !== "task"
-                        const ownMetaTextClass = isAttachmentOnlyMessage
-                          ? isDarkMode
-                            ? "text-slate-400"
-                            : "text-slate-500"
-                          : "text-sky-100"
-                        const ownRetryTextClass = isAttachmentOnlyMessage
-                          ? isDarkMode
-                            ? "text-rose-400"
-                            : "text-rose-500"
-                          : "text-rose-200"
-                        const ownSpinnerBorderClass = isAttachmentOnlyMessage
-                          ? isDarkMode
-                            ? "border-slate-500/50"
-                            : "border-slate-400/60"
-                          : "border-white/40"
                         const statusLabel = (() => {
                           if (!isMe) return null
                           if (messageStatus === "failed") {
                             return (
                               <button
                                 onClick={() => retryFailedMessage(getActiveChatId(), msg)}
-                                className={`flex items-center gap-1 text-[9px] underline underline-offset-2 ${ownRetryTextClass}`}
+                                className="flex items-center gap-1 text-[9px] text-rose-200 underline underline-offset-2"
                               >
                                 <XCircle className="w-3 h-3" />
                                 Retry send
@@ -10382,14 +9756,14 @@ export default function CollaborationApp() {
                           }
                           if (messageStatus === "sending" || messageStatus === "retrying") {
                             return (
-                              <span className={`flex items-center gap-1 text-[9px] ${ownMetaTextClass}`}>
-                                <span className={`w-3 h-3 rounded-full border ${ownSpinnerBorderClass} border-t-transparent animate-spin`}></span>
+                              <span className="flex items-center gap-1 text-[9px] text-sky-100">
+                                <span className="w-3 h-3 rounded-full border border-white/40 border-t-transparent animate-spin"></span>
                                 {messageStatus === "retrying" ? "Retrying" : "Sending"}
                               </span>
                             )
                           }
                           return (
-                            <span className={`flex items-center gap-1 text-[9px] ${ownMetaTextClass}`}>
+                            <span className="flex items-center gap-1 text-[9px] text-sky-100">
                               Sent
                               <Check className="w-3 h-3" />
                             </span>
@@ -10408,7 +9782,7 @@ export default function CollaborationApp() {
                         return (
                           <React.Fragment key={msg.id}>
                             {showDateSeparator && (
-                              <div className="w-full flex justify-center mb-3">
+                              <div className="w-full flex justify-center mb-4">
                                 <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
                                   isDarkMode 
                                     ? 'bg-slate-800/90 border-slate-700 text-slate-400' 
@@ -10421,19 +9795,19 @@ export default function CollaborationApp() {
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`relative flex gap-3 ${
+                              className={`relative flex gap-4 ${
                                 isMe ? "flex-row-reverse" : ""
                               } ${
-                                isSequence ? "mt-0.5" : "mt-4"
+                                isSequence ? "mt-1" : "mt-6"
                               } ${
                                 isActionMenuOpen || isContextPickerOpen || isEditingThisMessage ? "z-40" : "z-0"
                               } group animate-fade-in`}
                             >
                             {/* Avatar only for first in sequence */}
-                            <div className="flex-shrink-0 w-9 flex flex-col items-center">
+                            <div className="flex-shrink-0 w-10 flex flex-col items-center">
                               {!isSequence ? (
                                 <div
-                                  className={`w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
+                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
                                     isMe
                                       ? isDarkMode 
                                         ? "bg-gradient-to-br from-sky-500/30 to-cyan-500/30 border-sky-500/50 ring-slate-800/50" 
@@ -10446,18 +9820,18 @@ export default function CollaborationApp() {
                                   {renderAvatar(user, 36)}
                                 </div>
                               ) : (
-                                <div className="w-9" />
+                                <div className="w-10" />
                               )}
                             </div>
 
                             <div
-                              className={`chat-message-shell flex flex-col ${
+                              className={`flex flex-col max-w-[70%] ${
                                 isMe ? "items-end" : "items-start"
                               }`}
                             >
                               {/* Name only for first in sequence */}
                               {!isSequence && !isMe && (
-                                <div className="ml-1 mb-1 flex items-baseline gap-1.5">
+                                <div className="ml-1 mb-1.5 flex items-baseline gap-2">
                                   <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                     {user?.name}
                                   </span>
@@ -10475,20 +9849,20 @@ export default function CollaborationApp() {
                               )}
 
                               <div
+                              onMouseEnter={() => setHoveredMessageId(msg.id)}
+                              onMouseLeave={() => setHoveredMessageId(null)}
                               onTouchStart={() => {
                                 longPressTimerRef.current = setTimeout(() => setShowEmojiPickerFor(msg.id), 600)
                               }}
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative overflow-visible break-words transition-all duration-200 ${
-                                  isAttachmentOnlyMessage
-                                    ? "bg-transparent shadow-none border-0"
-                                    : isMe
-                                      ? "liquid-glass-message-own text-white rounded-[18px] rounded-tr-[6px]" 
-                                      : isDarkMode 
-                                        ? "liquid-glass-message text-slate-100 rounded-[18px] rounded-tl-[6px]" 
-                                        : "liquid-glass-message text-slate-800 rounded-[18px] rounded-tl-[6px]"
+                              className={`relative overflow-visible px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 ${
+                                  isMe
+                                    ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
+                                    : isDarkMode 
+                                      ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm" 
+                                      : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-sky-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 <div
@@ -10496,81 +9870,70 @@ export default function CollaborationApp() {
                                   onClick={e => e.stopPropagation()}
                                 >
                                   <MessageActionButton
-                                    buttonRef={node => setMessageActionButtonRef(msg.id, node)}
-                                    isActive={isActionMenuOpen || isContextPickerOpen}
                                     isDarkMode={isDarkMode}
                                     onClick={() =>
                                       setMessageActionMenu(prev =>
-                                        prev?.messageId === msg.id
-                                          ? null
-                                          : {
-                                              messageId: msg.id,
-                                              preferredAlign: isMe ? "left" : "right",
-                                            }
+                                        prev?.messageId === msg.id ? null : { messageId: msg.id }
                                       )
                                     }
                                   />
                                   {isActionMenuOpen && (
-                                    <MessageActionsMenu
-                                      anchorEl={messageActionButtonRefs.current.get(String(msg.id))}
-                                      boundaryEl={messagesContainerRef.current}
-                                      preferredAlign={messageActionMenu?.preferredAlign || (isMe ? "left" : "right")}
-                                      isDarkMode={isDarkMode}
-                                      isSelected={isMessageSelected}
-                                      emojis={EMOJIS}
-                                      onClose={() => setMessageActionMenu(null)}
-                                      onReact={emoji => {
-                                        toggleReaction(getActiveChatId(), msg.id, emoji)
-                                        setMessageActionMenu(null)
-                                      }}
-                                      onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
-                                      onDelete={() => {
-                                        const chatId = getActiveChatId()
-                                        if (!chatId) return
-                                        setShowDeleteConfirm({
-                                          type: "message",
-                                          id: msg.id,
-                                          chatId,
-                                          optimistic: Boolean(msg.optimistic),
-                                        })
-                                        setMessageActionMenu(null)
-                                      }}
-                                      onToggleSelection={() => {
-                                        toggleMessageSelection(msg.id)
-                                        setMessageActionMenu(null)
-                                      }}
-                                      onCreateContext={() => {
-                                        openCreateContextModal([msg.id])
-                                        setMessageActionMenu(null)
-                                      }}
-                                      onAddToContext={() => {
-                                        setMessageActionMenu(null)
-                                        setMessageContextPicker({ messageId: msg.id })
-                                      }}
-                                      onMarkDecision={activeView === "channel" ? (() => {
-                                        markMessageDecision(msg)
-                                        setMessageActionMenu(null)
-                                      }) : undefined}
-                                      onCreateTask={() => {
-                                        openTaskFromMessage(msg)
-                                        setMessageActionMenu(null)
-                                      }}
-                                    />
+                                    <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
+                                      <MessageActionsMenu
+                                        isDarkMode={isDarkMode}
+                                        isSelected={isMessageSelected}
+                                        emojis={EMOJIS}
+                                        onReact={emoji => {
+                                          toggleReaction(getActiveChatId(), msg.id, emoji)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
+                                        onDelete={() => {
+                                          const chatId = getActiveChatId()
+                                          if (!chatId) return
+                                          setShowDeleteConfirm({
+                                            type: "message",
+                                            id: msg.id,
+                                            chatId,
+                                            optimistic: Boolean(msg.optimistic),
+                                          })
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onToggleSelection={() => {
+                                          toggleMessageSelection(msg.id)
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onCreateContext={() => {
+                                          openCreateContextModal([msg.id])
+                                          setMessageActionMenu(null)
+                                        }}
+                                        onAddToContext={() => {
+                                          setMessageContextPicker({ messageId: msg.id })
+                                        }}
+                                        onMarkDecision={activeView === "channel" ? (() => {
+                                          markMessageDecision(msg)
+                                          setMessageActionMenu(null)
+                                        }) : undefined}
+                                        onCreateTask={() => {
+                                          openTaskFromMessage(msg)
+                                          setMessageActionMenu(null)
+                                        }}
+                                      />
+                                    </div>
                                   )}
                                   {isContextPickerOpen && (
-                                    <AddToContextPopover
-                                      anchorEl={messageActionButtonRefs.current.get(String(msg.id))}
-                                      boundaryEl={messagesContainerRef.current}
-                                      preferredAlign={isMe ? "left" : "right"}
-                                      isDarkMode={isDarkMode}
-                                      contexts={currentChannelContexts}
-                                      onClose={() => setMessageContextPicker(null)}
-                                      onSelect={contextId => {
-                                        addMessageToContext(contextId, msg.id)
-                                        setMessageContextPicker(null)
-                                        setMessageActionMenu(null)
-                                      }}
-                                    />
+                                    <div className={`absolute top-11 z-40 ${isMe ? 'left-[calc(100%+0.5rem)] max-sm:left-0' : 'right-[calc(100%+0.5rem)] max-sm:right-0'} max-sm:top-[calc(100%+0.5rem)]`}>
+                                      <AddToContextPopover
+                                        isDarkMode={isDarkMode}
+                                        contexts={currentChannelContexts}
+                                        onClose={() => setMessageContextPicker(null)}
+                                        onSelect={contextId => {
+                                          addMessageToContext(contextId, msg.id)
+                                          setMessageContextPicker(null)
+                                          setMessageActionMenu(null)
+                                        }}
+                                      />
+                                    </div>
                                   )}
                                 </div>
                                 {/* Meet Invite Message */}
@@ -10655,7 +10018,7 @@ export default function CollaborationApp() {
                                     </div>
                                   </div>
                                 ) : (
-                                  hasMessageText && msg.type !== 'meet-invite' && (
+                                  msg.text && msg.type !== 'meet-invite' && (
                                     <div>
                                       {renderWithHighlight(
                                         msg.text,
@@ -10714,7 +10077,7 @@ export default function CollaborationApp() {
                                 {msg.attachments && msg.attachments.length > 0 && (
                                   <div
                                     className={`flex flex-wrap gap-2 ${
-                                      hasMessageText ? "mt-3" : ""
+                                      msg.text ? "mt-3" : ""
                                     }`}
                                   >
                                     {msg.attachments.map(att => (
@@ -10865,7 +10228,7 @@ export default function CollaborationApp() {
                               
                                 {/* Timestamp for Me inside bubble, slightly cleaner */}
                                 {isMe && (
-                                  <div className={`text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-1.5 flex-wrap ${ownMetaTextClass}`}>
+                                  <div className="text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-2 text-sky-100 flex-wrap">
                                     <span>
                                       {msg.timestamp
                                         ? formatTime(msg.timestamp)
@@ -10888,7 +10251,7 @@ export default function CollaborationApp() {
                     <button
                       onClick={() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-                        updateIsAtBottom(true)
+                        setIsAtBottom(true)
                         setPinnedMessageId(null)
                         setHighlightTerm("")
                       }}
@@ -10902,10 +10265,10 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={`px-4 pb-4 pt-1.5 sm:px-6 ${isMobile ? "pb-20" : ""}`}>
+                <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`rounded-[1.75rem] p-1.5 relative transition-all duration-300 ${
+                    className={`rounded-[2rem] p-2 relative transition-all duration-300 ${
                       isDarkMode
                         ? 'bg-[#191b1f] border border-slate-700/50'
                         : 'bg-[#e9eef6]'
@@ -10913,7 +10276,7 @@ export default function CollaborationApp() {
                   >
                     {/* Attachments Preview */}
                     {selectedFiles.length > 0 && (
-                      <div className={`flex gap-3 p-2.5 mb-1.5 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
+                      <div className={`flex gap-3 p-3 mb-2 overflow-x-auto border-b ${isDarkMode ? 'border-slate-700/80' : 'border-slate-100/80'}`}>
                         {selectedFiles.map(file => (
                           <div
                             key={file.id}
@@ -10949,7 +10312,7 @@ export default function CollaborationApp() {
                     )}
 
                     {selectedComposerContext && (
-                      <div className={`flex items-center gap-2 px-3 pt-2.5 pb-0.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <div className={`flex items-center gap-2 px-3 pt-3 pb-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                         <span className={`text-[10px] font-bold uppercase tracking-[0.24em] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                           Context
                         </span>
@@ -10966,10 +10329,9 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
-                    <div className="flex items-end gap-1.5 px-1.5 pb-0.5 relative">
+                    <div className="flex items-end gap-2 px-2 pb-1 relative">
                       <div className="relative">
                         <button
-                          ref={composerAttachTriggerRef}
                           onClick={e => {
                             e.stopPropagation()
                             setComposerAttachMenuOpen(prev => !prev)
@@ -10977,7 +10339,7 @@ export default function CollaborationApp() {
                             setMessageActionMenu(null)
                             setMessageContextPicker(null)
                           }}
-                          className={`p-2.5 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                          className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                         >
                           <Paperclip className="w-5 h-5" />
                         </button>
@@ -11033,18 +10395,20 @@ export default function CollaborationApp() {
                         )}
 
                         {(activeView === "channel" || activeView === "dm") && composerContextPickerOpen && (
-                          <AddToContextPopover
-                            anchorEl={composerAttachTriggerRef.current}
-                            boundaryEl={messagesContainerRef.current}
-                            preferredAlign="left"
-                            isDarkMode={isDarkMode}
-                            contexts={currentChannelContexts}
-                            onClose={() => setComposerContextPickerOpen(false)}
-                            onSelect={contextId => {
-                              setSelectedComposerContextId(contextId)
-                              setComposerContextPickerOpen(false)
-                            }}
-                          />
+                          <div
+                            className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <AddToContextPopover
+                              isDarkMode={isDarkMode}
+                              contexts={currentChannelContexts}
+                              onClose={() => setComposerContextPickerOpen(false)}
+                              onSelect={contextId => {
+                                setSelectedComposerContextId(contextId)
+                                setComposerContextPickerOpen(false)
+                              }}
+                            />
+                          </div>
                         )}
 
                         {showEmojiPickerFor === 'input' && (
@@ -11083,15 +10447,15 @@ export default function CollaborationApp() {
                             sendMessage()
                           }
                         }}
-                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-2.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
-                        style={{ minHeight: "44px" }}
+                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
+                        style={{ minHeight: "48px" }}
                       />
 
                       {(activeView === "channel" || activeView === "dm") && (
                         <button
                           onClick={saveWorkspaceDraft}
                           disabled={!messageInput.trim()}
-                          className={`mb-1 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-all duration-300 ${
+                          className={`mb-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition-all duration-300 ${
                             isDarkMode
                               ? 'border-slate-700 text-slate-300 hover:bg-slate-800 disabled:text-slate-500'
                               : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:text-slate-400'
@@ -11107,7 +10471,7 @@ export default function CollaborationApp() {
                           (!messageInput.trim() && selectedFiles.length === 0) ||
                           isUploading
                         }
-                        className={`p-3 mb-1 rounded-xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
+                        className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
                           isDarkMode
                             ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
                             : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
@@ -11117,7 +10481,7 @@ export default function CollaborationApp() {
                       </button>
                     </div>
                   </div>
-                  <div className={`text-center mt-2 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                     Press <strong>Enter</strong> to send
                   </div>
                 </div>
@@ -11166,7 +10530,7 @@ export default function CollaborationApp() {
                   onClose={() => setOpenContextId(null)}
                   formatTime={formatContextTime}
                   panelStyle={{
-                    top: activeView === "channel" || activeView === "dm" ? 64 : 16,
+                    top: activeView === "channel" || activeView === "dm" ? 72 : 16,
                     right: 16,
                     bottom: activeChannelTab === "messages"
                       ? (messageInputRef.current?.offsetHeight || 120) + 16
@@ -11179,11 +10543,11 @@ export default function CollaborationApp() {
               <div
                 className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-cyan-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
-                    ? "w-[22rem] translate-x-0 opacity-100"
-                      : "w-[22rem] translate-x-full opacity-0 pointer-events-none"
+                    ? "w-96 translate-x-0 opacity-100"
+                      : "w-96 translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
-                <div className={`h-[72px] flex items-center justify-between px-5 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
+                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
                   <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
@@ -11193,9 +10557,9 @@ export default function CollaborationApp() {
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
-                  <div className="text-center mb-8">
-                    <div className="inline-block relative mb-4">
+                <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+                  <div className="text-center mb-10">
+                    <div className="inline-block relative mb-5">
                       {activeView === "dm" ? (
                         <div className="drop-shadow-2xl filter">
                           {renderAvatar(getUser(activeDMUser), 96)}
@@ -11217,7 +10581,7 @@ export default function CollaborationApp() {
                   </div>
 
                   {activeView === "channel" && (
-                    <div className="mb-6">
+                    <div className="mb-8">
                       <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                         Topic
                       </h4>
@@ -11239,7 +10603,7 @@ export default function CollaborationApp() {
                         {activeMembers.length}
                       </span>
                     </h4>
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {activeMembers.map(member => {
                         const isMe = member.id === currentUser?.id
                         const isFriend = Array.isArray(currentUser?.friends)
@@ -11389,7 +10753,7 @@ export default function CollaborationApp() {
                   >
                     <Hash className="w-4 h-4 flex-shrink-0" />
                     <span className="truncate flex-1 text-left">{channel.name}</span>
-                    {hasUnreadChannel(channel.id) && activeChannel !== channel.id && (
+                    {unreadChannels.includes(channel.id) && activeChannel !== channel.id && (
                       <span className="collapsed-space-channel-dot" />
                     )}
                   </button>
@@ -11405,12 +10769,12 @@ export default function CollaborationApp() {
         )}
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right" : "hidden") : "hidden lg:flex"} flex-col ${isMobile ? "" : friendsSidebarCollapsed ? "w-20" : "w-72"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 ${isMobile ? "z-[70]" : "z-40"} liquid-glass-sidebar-right`}>
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right z-[70]" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "friends" && (
           <div className="swipe-indicator mt-2" />
         )}
-        <div className={`px-5 ${isMobile ? 'pt-4 pb-4 h-[72px]' : 'py-4 h-[72px]'} border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-cyan-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-sky-50/30'}`}>
+        <div className={`p-6 ${isMobile ? 'pt-4' : ''} h-[80px] border-b flex items-center justify-between ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-transparent to-cyan-900/20' : 'border-slate-100/60 bg-gradient-to-r from-transparent to-sky-50/30'}`}>
           {isMobile && (
             <button
               onClick={() => setMobileView("chat")}
@@ -11425,7 +10789,11 @@ export default function CollaborationApp() {
           <div className="flex gap-2 ml-auto">
             {!friendsSidebarCollapsed && !isMobile && (
               <button
-                onClick={openConnectHome}
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -11433,7 +10801,11 @@ export default function CollaborationApp() {
             )}
             {isMobile && (
               <button
-                onClick={openConnectHome}
+                onClick={() => {
+                  setInviteSearchQuery("")
+                  setSelectedFriendInvitees([])
+                  setShowAddFriendModal(true)
+                }}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -11451,21 +10823,21 @@ export default function CollaborationApp() {
         </div>
 
         {(!friendsSidebarCollapsed || isMobile) && (
-          <div className="px-4 pt-4 pb-2 animate-fade-in">
+          <div className="px-5 pt-6 pb-2 animate-fade-in">
             <div className="relative group">
-              <Search className={`absolute left-3.5 top-3 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-cyan-400' : 'text-slate-400 group-focus-within:text-sky-500'}`} />
+              <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-cyan-400' : 'text-slate-400 group-focus-within:text-sky-500'}`} />
               <input
                 type="text"
                 placeholder="Filter friends..."
                 value={dmSearchQuery}
                 onChange={e => setDmSearchQuery(e.target.value)}
-                className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
+                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
               />
             </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3.5 space-y-2">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2">
           {(!friendsSidebarCollapsed || isMobile) ? (
             <>
               {dmSearchResults.length > 0 ? (
@@ -11490,7 +10862,7 @@ export default function CollaborationApp() {
                         }
                       }
                     }}
-                    className={`flex items-center gap-3 p-2.5 rounded-[10px] cursor-pointer transition-all border ${
+                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all border ${
                       activeView === "dm" && activeDMUser === result.userId
                         ? isDarkMode ? "bg-transparent border-transparent text-slate-200" : "bg-[#eeedec] border-transparent text-slate-700 shadow-sm"
                         : isDarkMode ? "bg-transparent border-transparent hover:bg-[#2C2C2C]" : "bg-white/60 border-transparent hover:bg-[#f1f0ef] hover:shadow-sm"
@@ -11534,7 +10906,7 @@ export default function CollaborationApp() {
                     No friends yet.
                   </p>
                   <button
-                    onClick={openConnectHome}
+                    onClick={() => setShowAddFriendModal(true)}
                     className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`}
                   >
                     Find people
@@ -11552,7 +10924,7 @@ export default function CollaborationApp() {
                       justSwitchedThreadRef.current = true
                       if (isMobile) setMobileView("chat")
                     }}
-                    className={`flex items-center gap-3 p-2.5 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
+                    className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
                       activeView === "dm" && activeDMUser === friend.id
                         ? isDarkMode 
                           ? "bg-transparent border-transparent"
@@ -11594,7 +10966,7 @@ export default function CollaborationApp() {
             <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
               {friends.length === 0 ? (
                 <button
-                  onClick={openConnectHome}
+                  onClick={() => setShowAddFriendModal(true)}
                   className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                   title="Add Friend"
                 >
@@ -11640,7 +11012,7 @@ export default function CollaborationApp() {
                     </button>
                   ))}
                   <button
-                    onClick={openConnectHome}
+                    onClick={() => setShowAddFriendModal(true)}
                     className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                     title="Add Friend"
                   >
@@ -12116,6 +11488,256 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {/* Add Friend Modal - UPDATED FOR BULK SELECTION */}
+      {showAddFriendModal && (
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
+        }`}>
+          <div className={`w-full max-w-4xl rounded-[26px] overflow-hidden shadow-[0_40px_110px_rgba(15,23,42,0.28)] border ${
+            isDarkMode
+              ? 'bg-slate-900 border-slate-700/80'
+              : 'bg-white border-slate-200/90'
+          }`}>
+            <div className="relative p-7 sm:p-9">
+              <button
+                onClick={() => setShowAddFriendModal(false)}
+                className={`absolute right-5 top-5 p-2.5 rounded-full transition-all ${
+                  isDarkMode
+                    ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+                }`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="pr-14">
+                <h3 className={`text-[2rem] leading-tight font-bold ${
+                  isDarkMode ? 'text-white' : 'text-slate-900'
+                }`}>
+                  Invite friends to Spacess
+                </h3>
+              </div>
+
+              {!inviteSent ? (
+                <div className="mt-8">
+                  <label className={`block text-sm font-semibold mb-2 ${
+                    isDarkMode ? 'text-slate-200' : 'text-slate-800'
+                  }`}>
+                    To:
+                  </label>
+
+                  <div className={`rounded-[22px] border-2 px-4 py-4 min-h-[110px] transition-all ${
+                    isDarkMode
+                      ? 'border-sky-500/80 bg-slate-950 shadow-[0_0_0_4px_rgba(14,165,233,0.12)]'
+                      : 'border-sky-500 bg-white shadow-[0_0_0_4px_rgba(59,130,246,0.10)]'
+                  }`}>
+                    <div className="relative">
+                      <Search className={`absolute left-0 top-1 w-5 h-5 ${
+                        isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                      }`} />
+                      <input
+                        type="text"
+                        value={inviteSearchQuery}
+                        onChange={e => {
+                          setInviteSearchQuery(e.target.value)
+                        }}
+                        placeholder="Search by name..."
+                        className={`w-full pl-8 pr-2 bg-transparent text-2xl sm:text-[2rem] leading-tight border-0 outline-none focus:outline-none focus:ring-0 ${
+                          isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'
+                        }`}
+                      />
+                    </div>
+
+                    {selectedFriendInvitees.length > 0 && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {selectedFriendInvitees.map(id => {
+                          const u =
+                            inviteSearchResults.find(r => r.id === id) ||
+                            users.find(us => us.id === id)
+                          return (
+                            <div
+                              key={id}
+                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
+                                isDarkMode
+                                  ? 'bg-sky-500/12 text-sky-100 border border-sky-400/20'
+                                  : 'bg-sky-100 text-sky-800 border border-sky-200'
+                              }`}
+                            >
+                              <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-transparent">
+                                {u ? renderAvatar(u, 22) : <UserIcon className="w-4 h-4" />}
+                              </span>
+                              {u?.name || 'Selected user'}
+                              <button
+                                type="button"
+                                onClick={() => toggleFriendSelection(id)}
+                                className={`rounded-full p-0.5 ${
+                                  isDarkMode ? 'hover:bg-white/10' : 'hover:bg-sky-200/70'
+                                }`}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="my-8 flex items-center gap-4">
+                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                    <span className={`text-sm ${
+                      isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
+                      OR
+                    </span>
+                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                  </div>
+
+                  <div className={`rounded-2xl border p-4 ${
+                    isDarkMode ? 'border-slate-700 bg-slate-950/40' : 'border-slate-200 bg-slate-50/60'
+                  }`}>
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-0.5 w-10 h-10 rounded-xl flex items-center justify-center ${
+                        isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600 border border-slate-200'
+                      }`}>
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className={`text-xl font-semibold ${
+                          isDarkMode ? 'text-white' : 'text-slate-900'
+                        }`}>
+                          Find people from your network
+                        </p>
+                        <p className={`mt-1 text-base ${
+                          isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                        }`}>
+                          Select one or more friends and send requests together.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5">
+                      <p className={`text-sm mb-3 ${
+                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                      }`}>
+                        Suggestions
+                      </p>
+
+                      <div className={`rounded-2xl border overflow-hidden ${
+                        isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
+                      }`}>
+                        {inviteSearchResults.length > 0 ? (
+                          <div className="max-h-[220px] overflow-y-auto">
+                            {inviteSearchResults.map((u, index) => {
+                              const isSelected = selectedFriendInvitees.includes(u.id)
+                              return (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onClick={() => toggleFriendSelection(u.id)}
+                                  className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors ${
+                                    index !== inviteSearchResults.length - 1
+                                      ? isDarkMode ? 'border-b border-slate-800' : 'border-b border-slate-100'
+                                      : ''
+                                  } ${
+                                    isSelected
+                                      ? isDarkMode ? 'bg-sky-500/10' : 'bg-sky-50'
+                                      : isDarkMode ? 'hover:bg-slate-800/80' : 'hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center ${
+                                      isDarkMode ? 'bg-slate-800' : 'bg-slate-100'
+                                    }`}>
+                                      {renderAvatar(u, 32)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className={`font-medium truncate ${
+                                        isDarkMode ? 'text-slate-100' : 'text-slate-800'
+                                      }`}>
+                                        {u.name}
+                                      </p>
+                                      <p className={`text-sm ${
+                                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                                      }`}>
+                                        {isSelected ? 'Selected' : 'Click to add'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
+                                    isSelected
+                                      ? isDarkMode
+                                        ? 'border-sky-400 bg-sky-400 text-slate-950'
+                                        : 'border-sky-500 bg-sky-500 text-white'
+                                      : isDarkMode
+                                        ? 'border-slate-600'
+                                        : 'border-slate-300'
+                                  }`}>
+                                    {isSelected && <CheckCircle className="w-4 h-4" />}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="px-6 py-10 text-center">
+                            <p className={`font-medium ${
+                              isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                            }`}>
+                              {inviteSearchQuery.trim() ? 'No matching people found' : 'Start typing to find friends'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex items-center justify-between gap-4 flex-wrap">
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
+                        isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'
+                      }`}
+                    >
+                      <UserPlus className="w-5 h-5" />
+                      Copy invite link
+                    </button>
+
+                    <button
+                      onClick={handleBulkFriendInvite}
+                      disabled={selectedFriendInvitees.length === 0}
+                      className={`min-w-[128px] rounded-2xl px-8 py-3.5 text-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                        isDarkMode
+                          ? 'bg-slate-200 text-slate-900 hover:bg-white'
+                          : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
+                      }`}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-16 text-center">
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 ${
+                    isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600'
+                  }`}>
+                    <Check className="w-10 h-10" />
+                  </div>
+                  <h4 className={`text-3xl font-bold mb-2 ${
+                    isDarkMode ? 'text-white' : 'text-slate-900'
+                  }`}>
+                    Requests sent
+                  </h4>
+                  <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
+                    Your friend invites have been delivered successfully.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add To Channel Modal - Invite Member logic */}
       {showAddToSpaceModal && (
         <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
@@ -12166,7 +11788,7 @@ export default function CollaborationApp() {
                     <button
                       onClick={() => {
                         setShowAddToSpaceModal(false)
-                        openConnectHome()
+                        setShowAddFriendModal(true)
                       }}
                       className={`inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-lg font-semibold transition-all ${
                         isDarkMode
@@ -12353,7 +11975,7 @@ export default function CollaborationApp() {
                       <button
                         onClick={() => {
                           setShowAddToSpaceModal(false)
-                          openConnectHome()
+                          setShowAddFriendModal(true)
                         }}
                         className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
                           isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'
@@ -12584,309 +12206,306 @@ export default function CollaborationApp() {
 
       {/* Docs Modal */}
       {showDocsModal && (
-        <div className={`fixed inset-0 z-50 p-2 sm:p-5 lg:p-6 animate-fade-in ${
-          isDarkMode ? 'bg-slate-950/75 backdrop-blur-xl' : 'bg-slate-950/45 backdrop-blur-xl'
+        <div className={`fixed inset-0 z-50 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'
         }`}>
-          <div className={`mx-auto flex h-full w-full max-w-[1700px] flex-col overflow-hidden rounded-[24px] border shadow-[0_28px_90px_rgba(15,23,42,0.28)] sm:rounded-[30px] ${
-            isDarkMode ? 'border-white/10 bg-[#07111f]/95 text-white' : 'border-white/70 bg-[#f7fbff]/95 text-slate-900'
+          <div className={`h-full w-full p-4 sm:p-6 md:p-8 flex flex-col ${
+            isDarkMode 
+              ? 'bg-slate-900/95' 
+              : 'bg-slate-50/95'
           }`}>
-            <div className="relative flex h-full flex-col overflow-hidden">
-              <div className={`pointer-events-none absolute -left-24 top-0 h-64 w-64 rounded-full blur-3xl ${
-                isDarkMode ? 'bg-cyan-500/18' : 'bg-sky-200/70'
-              }`} />
-              <div className={`pointer-events-none absolute right-0 top-20 h-72 w-72 rounded-full blur-3xl ${
-                isDarkMode ? 'bg-fuchsia-500/10' : 'bg-cyan-100/90'
-              }`} />
-
-              <div className={`relative border-b px-4 py-2.5 sm:px-6 sm:py-3 lg:px-8 ${
-                isDarkMode ? 'border-white/10' : 'border-slate-200/80'
-              }`}>
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start gap-3">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] shadow-[0_14px_28px_rgba(14,165,233,0.22)] sm:h-12 sm:w-12 sm:rounded-[18px] ${
-                        isDarkMode ? 'bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-600' : 'bg-gradient-to-br from-sky-500 via-cyan-500 to-blue-600'
+            <div className={`mb-4 sm:mb-6 border-b pb-4 sm:pb-6 ${
+              isDarkMode
+                ? 'border-slate-800'
+                : 'border-slate-200'
+            }`}>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
+                      isDarkMode 
+                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 shadow-cyan-500/20' 
+                        : 'bg-gradient-to-r from-sky-500 to-sky-600 shadow-sky-300/40'
+                    }`}>
+                      <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
+                        isDarkMode 
+                          ? 'bg-gradient-to-r from-white to-sky-400' 
+                          : 'bg-gradient-to-r from-slate-800 to-sky-700'
                       }`}>
-                        <FileText className="h-5 w-5 text-white sm:h-6 sm:w-6" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${
-                          isDarkMode ? 'bg-white/[0.06] text-slate-300' : 'bg-white/80 text-slate-600 shadow-sm'
-                        }`}>
-                          Workspace library
-                        </div>
-                        <h3 className={`mt-1.5 text-[1.2rem] font-semibold tracking-[-0.05em] sm:mt-2 sm:text-[1.9rem] ${
-                          isDarkMode ? 'text-white' : 'text-slate-900'
-                        }`}>
-                          Documents Hub
-                        </h3>
-                        <p className={`mt-1 max-w-[42rem] text-[12px] leading-5 sm:mt-1.5 sm:max-w-[48rem] sm:text-[13px] sm:leading-6 ${
-                          isDarkMode ? 'text-slate-300' : 'text-slate-600'
-                        }`}>
-                          {isMobile
-                            ? 'Open, scan, and attach Drive, shared workspace files, and Gmail attachments from one focused view.'
-                            : 'A sharper command center for Drive, workspace attachments, and Gmail files. Faster scanning, cleaner actions, and less visual noise.'}
-                        </p>
-                        {googleAccessToken && (
-                          <div className="mt-2 flex flex-wrap gap-2 sm:mt-3">
-                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
-                              isDarkMode ? 'bg-white/[0.05] text-slate-200' : 'bg-white text-slate-700 shadow-sm'
-                            }`}>
-                              {docsCollectionSummary.count} items in focus
-                            </span>
-                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
-                              isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'
-                            }`}>
-                              {docsCollectionSummary.label}
-                            </span>
-                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
-                              isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              Live sync {gmailLastCheckTime ? `updated ${formatDocsDate(gmailLastCheckTime)}` : 'ready'}
-                            </span>
-                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium ${
-                              isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              {docsOverview.total} assets in library
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                        Documents Hub
+                      </h3>
+                      <p className={`text-xs sm:text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Browse Drive files, shared workspace docs, and Gmail attachments in one place.
+                      </p>
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                    {googleAccessToken && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('drive')
-                            loadGoogleDocs(googleAccessToken, 'drive')
-                          }}
-                          className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
-                            isDarkMode
-                              ? 'border-white/12 bg-white/[0.06] text-slate-100 hover:border-cyan-400/35 hover:bg-white/[0.1]'
-                              : 'border-slate-200 bg-white/90 text-slate-700 hover:border-sky-200 hover:bg-white'
-                          }`}
-                          title="Show Drive Files"
-                        >
-                          <SmartImage src="/google-drive.png" alt="Drive" className="h-5 w-5" />
-                          <span>{isMobile ? 'Drive' : 'Open Drive'}</span>
-                        </button>
-                        <button
-                          onClick={() => setShowConnectAppsModal(true)}
-                          className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
-                            isDarkMode
-                              ? 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-400/15'
-                              : 'border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 text-sky-700 hover:from-cyan-100 hover:to-sky-100'
-                          }`}
-                        >
-                          <Plus className="h-4 w-4" />
-                          <span>{isMobile ? 'Connect apps' : 'Connect More Apps'}</span>
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={() => setShowDocsModal(false)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
-                        isDarkMode
-                          ? 'border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:bg-white/[0.08] hover:text-white'
-                          : 'border-slate-200 bg-white/90 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-700'
-                      }`}
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
+                </div>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  {googleAccessToken && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('drive')
+                          loadGoogleDocs(googleAccessToken, 'drive')
+                        }}
+                        className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200 border-slate-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
+                        title="Show Drive Files"
+                      >
+                        <SmartImage src="/google-drive.png" alt="Drive" className="w-5 h-5" />
+                        <span className="hidden sm:inline">Open Drive</span>
+                      </button>
+                      <button
+                        onClick={() => setShowConnectAppsModal(true)}
+                        className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
+                          isDarkMode 
+                            ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border-sky-500/30 hover:shadow-lg hover:shadow-sky-500/20' 
+                            : 'bg-gradient-to-r from-sky-50 to-cyan-50 text-sky-600 hover:from-sky-100 hover:to-cyan-100 border-sky-100 hover:shadow-lg hover:shadow-sky-100/50'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">Connect More Apps</span>
+                        <span className="sm:hidden">Connect</span>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setShowDocsModal(false)}
+                    className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
+                      isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <X className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </button>
                 </div>
               </div>
 
-              {!googleAccessToken ? (
-                <div className="relative flex flex-1 items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
-                  <div className={`w-full max-w-3xl rounded-[32px] border p-8 text-center shadow-[0_24px_70px_rgba(15,23,42,0.14)] sm:p-10 ${
-                    isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/92'
-                  }`}>
-                    <div className={`mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] border ${
-                      isDarkMode ? 'border-cyan-400/20 bg-gradient-to-br from-cyan-400/18 to-sky-500/18' : 'border-cyan-100 bg-gradient-to-br from-sky-50 to-cyan-50'
-                    }`}>
-                      <FileText className={`h-11 w-11 ${isDarkMode ? 'text-cyan-300' : 'text-sky-600'}`} />
+              {googleAccessToken && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+                  {[
+                    { label: 'Total assets', value: docsOverview.total, tone: isDarkMode ? 'bg-slate-900/70 border-slate-700 text-white' : 'bg-white/80 border-slate-200 text-slate-900' },
+                    { label: 'Drive files', value: docsOverview.drive, tone: isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : 'bg-blue-50 border-blue-100 text-blue-700' },
+                    { label: 'Shared docs', value: docsOverview.shared, tone: isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-200' : 'bg-sky-50 border-sky-100 text-sky-700' },
+                    { label: 'Gmail files', value: docsOverview.gmail, tone: isDarkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 'bg-rose-50 border-rose-100 text-rose-700' },
+                  ].map(stat => (
+                    <div key={stat.label} className={`rounded-2xl border px-4 py-3 ${stat.tone}`}>
+                      <p className="text-[11px] uppercase tracking-[0.2em] opacity-70">{stat.label}</p>
+                      <p className="mt-2 text-2xl font-bold">{stat.value}</p>
                     </div>
-                    <h4 className={`mt-6 text-3xl font-semibold tracking-[-0.04em] ${
-                      isDarkMode ? 'text-white' : 'text-slate-900'
-                    }`}>
-                      Connect your Google account
-                    </h4>
-                    <p className={`mx-auto mt-3 max-w-xl text-sm leading-7 sm:text-[15px] ${
-                      isDarkMode ? 'text-slate-300' : 'text-slate-600'
-                    }`}>
-                      Pull Gmail attachments and Google Drive files into one focused workspace view, then attach what you need directly into chats and channels.
-                    </p>
-                    <p className={`mt-3 text-xs ${
-                      isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                    }`}>
-                      You will be asked for Gmail and Drive permissions.
-                    </p>
-                    <button
-                      onClick={handleConnectGoogleDocs}
-                      className={`mx-auto mt-8 inline-flex items-center gap-3 rounded-full px-7 py-3.5 text-sm font-semibold text-white shadow-lg transition ${
-                        isDarkMode ? 'bg-cyan-500 hover:bg-cyan-400 shadow-cyan-500/20' : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
-                      }`}
-                    >
-                      <svg className="h-5 w-5" viewBox="0 0 24 24">
-                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                      </svg>
-                      Connect Google Account
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="relative flex flex-1 min-h-0 flex-col px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
-                  {loadingDocs ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <div className="text-center">
-                        <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
-                          isDarkMode ? 'border-sky-500' : 'border-sky-600'
-                        }`}></div>
-                        <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
-                      </div>
+              )}
+            </div>
+
+            {!googleAccessToken ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-16">
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border-2 ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-br from-sky-500/20 to-cyan-500/20 border-sky-500/30' 
+                    : 'bg-gradient-to-br from-sky-50 to-cyan-50 border-sky-100'
+                }`}>
+                  <FileText className={`w-12 h-12 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
+                </div>
+                <h4 className={`text-2xl font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Connect Your Google Account</h4>
+                <p className={`mb-6 text-center max-w-md ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Connect your Google account to access <strong>Gmail attachments</strong> and <strong>Google Drive files</strong> in one unified view.
+                </p>
+                <p className={`text-xs mb-4 text-center ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  You'll be asked to grant permissions for Gmail and Drive access.
+                </p>
+                <button
+                  onClick={handleConnectGoogleDocs}
+                  className={`px-8 py-4 font-bold rounded-2xl transition-all flex items-center gap-3 text-white shadow-lg ${
+                    isDarkMode 
+                      ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-500/20' 
+                      : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
+                  }`}
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  Connect Google Account
+                </button>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {loadingDocs ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
+                        isDarkMode ? 'border-sky-500' : 'border-sky-600'
+                      }`}></div>
+                      <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
                     </div>
-                  ) : docsError ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <div className="text-center px-4">
-                        <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                          isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
-                        }`}>
-                          <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
+                  </div>
+                ) : docsError ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center px-4">
+                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                        isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
+                      }`}>
+                        <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
+                      </div>
+                      <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
+                      <button
+                        onClick={() => {
+                          // If token expired, re-authenticate
+                          if (docsError.includes('expired') || docsError.includes('Invalid')) {
+                            setGoogleAccessToken(null)
+                            GoogleService.removeGoogleAccessToken()
+                            setDocsError(null)
+                            handleConnectGoogleDocs()
+                          } else {
+                            loadGoogleDocs(googleAccessToken)
+                          }
+                        }}
+                        className={`px-6 py-3 font-bold rounded-xl text-white ${
+                          isDarkMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-sky-600 hover:bg-sky-700'
+                        }`}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className={`mb-4 rounded-2xl border p-3 sm:p-4 ${
+                      isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'
+                    }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                        <div>
+                          <p className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Collections</p>
+                          <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            Switch between connected sources without leaving the workspace.
+                          </p>
                         </div>
-                        <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
+                        <div className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                          {docsOverview.total} items available
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('all')
+                          loadGoogleDocs(googleAccessToken)
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all ${
+                          selectedAppFilter === 'all'
+                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        All
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('drive')
+                          loadGoogleDocs(googleAccessToken, 'drive')
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          selectedAppFilter === 'drive'
+                            ? isDarkMode ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <SmartImage src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
+                      </button>
+                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
                         <button
                           onClick={() => {
-                            if (docsError.includes('expired') || docsError.includes('Invalid')) {
-                              setGoogleAccessToken(null)
-                              GoogleService.removeGoogleAccessToken()
-                              setDocsError(null)
-                              handleConnectGoogleDocs()
-                            } else {
-                              loadGoogleDocs(googleAccessToken)
-                            }
+                            setSelectedAppFilter('docs')
+                            loadGoogleDocs(googleAccessToken, 'docs')
                           }}
-                          className={`px-6 py-3 font-bold rounded-xl text-white ${
-                            isDarkMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-sky-600 hover:bg-sky-700'
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                            selectedAppFilter === 'docs'
+                              ? 'bg-blue-600 text-white'
+                              : isDarkMode ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
                           }`}
                         >
-                          Retry
+                          <SmartImage src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
                         </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setSelectedAppFilter('shared')
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                          selectedAppFilter === 'shared'
+                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
+                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                        >
+                        <SmartImage src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
+                      </button>
+                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
+                        <button
+                          onClick={() => {
+                            setSelectedAppFilter('sheets')
+                            loadGoogleDocs(googleAccessToken, 'sheets')
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                            selectedAppFilter === 'sheets'
+                              ? 'bg-green-600 text-white'
+                              : isDarkMode ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-green-50 text-green-600 hover:bg-green-100'
+                          }`}
+                        >
+                          <SmartImage src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
+                        </button>
+                      )}
+                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
+                        <button
+                          onClick={() => {
+                            setSelectedAppFilter('slides')
+                            loadGoogleDocs(googleAccessToken, 'slides')
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                            selectedAppFilter === 'slides'
+                              ? 'bg-yellow-600 text-white'
+                              : isDarkMode ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
+                          }`}
+                          >
+                          <SmartImage src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
+                        </button>
+                      )}
+                      {gmailAttachments.length > 0 && (
+                        <button
+                          onClick={() => {
+                            setSelectedAppFilter('gmail')
+                            loadGoogleDocs(googleAccessToken, 'gmail')
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
+                            selectedAppFilter === 'gmail'
+                              ? 'bg-red-600 text-white'
+                              : isDarkMode ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
+                          }`}
+                        >
+                          <SmartImage src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
+                        </button>
+                      )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_280px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
-                      <section className={`order-1 flex min-h-0 flex-col overflow-hidden rounded-[26px] border ${
-                        isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/88 shadow-[0_12px_34px_rgba(15,23,42,0.06)]'
-                      }`}>
-                        <div className={`border-b px-4 py-3 sm:px-5 sm:py-4 lg:px-6 ${
-                          isDarkMode ? 'border-white/10' : 'border-slate-200/80'
+
+                    {/* Documents Grid */}
+                    <div className="flex-1 overflow-y-auto pr-2">
+                      {/* Shared Files View */}
+                      {selectedAppFilter === 'shared' && (
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
                         }`}>
-                          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                            <div>
-                              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
-                                isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                              }`}>
-                                Main library
-                              </p>
-                              <h4 className={`mt-2 text-[1.35rem] font-semibold tracking-[-0.05em] sm:text-[1.55rem] ${
-                                isDarkMode ? 'text-white' : 'text-slate-900'
-                              }`}>
-                                {docsCollectionSummary.label}
-                              </h4>
-                              <p className={`mt-1.5 max-w-2xl text-[13px] leading-6 ${
-                                isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                              }`}>
-                                {docsViewportMessage}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
-                                isDarkMode ? 'bg-white/[0.05] text-slate-300' : 'bg-slate-100 text-slate-600'
-                              }`}>
-                                {docsCollectionSummary.count} in focus
-                              </span>
-                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
-                                isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'
-                              }`}>
-                                {docsOverview.total} total
-                              </span>
-                            </div>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared Files
+                            </h4>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {sharedChatDocs.length} items
+                            </span>
                           </div>
-
-                          <div className={`mt-4 rounded-[22px] border p-3 sm:p-4 ${
-                            isDarkMode ? 'border-white/10 bg-slate-950/35' : 'border-slate-200/80 bg-slate-50/90'
-                          }`}>
-                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                              <div className="min-w-0">
-                                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
-                                  isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                                }`}>
-                                  Source switcher
-                                </p>
-                                <p className={`mt-1 text-xs leading-5 sm:text-[13px] ${
-                                  isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                                }`}>
-                                  Jump between Drive, shared workspace files, Docs, Sheets, Slides, and Gmail without leaving the browser.
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 md:justify-end">
-                                <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
-                                  isDarkMode ? 'bg-white/[0.05] text-slate-300' : 'bg-white text-slate-600 shadow-sm'
-                                }`}>
-                                  {docsCollectionSummary.label}
-                                </span>
-                                <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
-                                  isDarkMode ? 'bg-white/[0.05] text-slate-400' : 'bg-slate-100 text-slate-600'
-                                }`}>
-                                  Updated {gmailLastCheckTime ? formatDocsDate(gmailLastCheckTime) : 'now'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
-                              {docsFilterButtons}
-                            </div>
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-2 gap-2 lg:hidden">
-                            {docsOverviewCards.map(stat => (
-                              <div key={stat.label} className={`relative overflow-hidden rounded-[18px] border px-3 py-2.5 ${stat.tone}`}>
-                                <div className="pointer-events-none absolute right-0 top-0 h-14 w-14 rounded-full bg-white/10 blur-2xl" />
-                                <p className="relative text-[10px] font-semibold uppercase tracking-[0.24em] opacity-70">{stat.label}</p>
-                                <div className="relative mt-1.5 flex items-end justify-between gap-2">
-                                  <p className="text-[1.35rem] font-semibold leading-none tracking-[-0.04em]">{stat.value}</p>
-                                  <div className="hidden max-w-[8rem] text-right text-[10px] leading-4 opacity-75 sm:block">{stat.note}</div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4 lg:px-6">
-                          <div className="space-y-4 pb-4">
-                        {/* Shared Files View */}
-                        {selectedAppFilter === 'shared' && (
-                          <div className={`rounded-[28px] border p-4 sm:p-5 ${
-                            isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
-                          }`}>
-                            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                              <div>
-                                <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Shared files</h4>
-                                <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                  Workspace attachments already moving through conversations.
-                                </p>
-                              </div>
-                              <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
-                                {sharedChatDocs.length} items
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {sharedChatDocs.map((attachment, idx) => {
                                     const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
                                     const attAppIcon = GoogleService.getAppIcon(attAppType)
@@ -12968,21 +12587,21 @@ export default function CollaborationApp() {
                       )}
 
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'drive' || selectedAppFilter === 'docs' || selectedAppFilter === 'sheets' || selectedAppFilter === 'slides') && googleDocs.length > 0 && (
-                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
-                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
                         }`}>
-                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                          <div className="flex items-center justify-between mb-3">
                             <div>
-                              <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Google Workspace files</h4>
-                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <h4 className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Google Workspace Files</h4>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                                 Recently updated files from Drive, Docs, Sheets, and Slides.
                               </p>
                             </div>
-                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-cyan-400/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'}`}>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
                               {googleDocs.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                           {sortedGoogleDocs.map((doc) => {
                             const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
                             const appIcon = GoogleService.getAppIcon(appType)
@@ -13031,23 +12650,18 @@ export default function CollaborationApp() {
 
                       {/* Shared Chat Documents */}
                       {selectedAppFilter === 'all' && sharedChatDocs.length > 0 && (
-                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
-                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
                         }`}>
-                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                            <div>
-                              <h4 className={`text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                                Shared in chats
-                              </h4>
-                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                Files teammates already dropped into threads and channels.
-                              </p>
-                            </div>
-                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared in Chats
+                            </h4>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
                               {sharedChatDocs.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {sharedChatDocs.map((attachment, idx) => {
                               const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
                               const attAppIcon = GoogleService.getAppIcon(attAppType)
@@ -13102,23 +12716,23 @@ export default function CollaborationApp() {
 
                       {/* Gmail Attachments Grid */}
                       {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
-                        <div className={`rounded-[28px] border p-4 sm:p-5 ${
-                          isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/85 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+                        <div className={`mb-6 rounded-2xl border p-4 ${
+                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
                         }`}>
-                          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                          <div className="flex items-center justify-between mb-3">
                             <div>
-                              <h4 className={`flex items-center gap-2 text-lg font-semibold tracking-[-0.03em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                                <Mail className="h-5 w-5 text-rose-500" /> Gmail attachments
+                              <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                                <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
                               </h4>
-                              <p className={`mt-1 text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                                 Recent email files ready to add into chats and channels.
                               </p>
                             </div>
-                            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? 'bg-rose-400/10 text-rose-200' : 'bg-rose-50 text-rose-700'}`}>
+                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
                               {gmailAttachments.length} items
                             </span>
                           </div>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {gmailAttachments.map((attachment, idx) => {
                               const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
                               const gmailAppIcon = GoogleService.getAppIcon(gmailAppType)
@@ -13245,84 +12859,21 @@ export default function CollaborationApp() {
                       )}
 
                       {docsOverview.total === 0 && (
-                        <div className={`flex items-center justify-center rounded-[28px] border px-6 py-16 text-center ${
-                          isDarkMode ? 'border-white/10 bg-white/[0.03]' : 'border-white/70 bg-white/85'
-                        }`}>
-                          <div>
-                            <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] ${isDarkMode ? 'bg-white/[0.05]' : 'bg-slate-100'}`}>
-                              <FileText className={`h-8 w-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                        <div className="flex-1 flex items-center justify-center py-16">
+                          <div className="text-center">
+                            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                              <FileText className={`w-8 h-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                             </div>
-                            <p className={`mt-5 text-lg font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>No documents found</p>
-                            <p className={`mt-2 text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Try connecting more apps or switching collections.</p>
+                            <p className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>No documents found</p>
+                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Try connecting more apps or changing filters</p>
                           </div>
                         </div>
                       )}
-                      </div>
                     </div>
-                  </section>
-
-                  <aside className={`order-2 hidden min-h-0 flex-col gap-3 lg:flex ${
-                    isDarkMode ? 'text-white' : 'text-slate-900'
-                  }`}>
-                    <div className={`rounded-[24px] border p-4 ${
-                      isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/82 shadow-[0_12px_32px_rgba(15,23,42,0.06)]'
-                    }`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
-                        isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                      }`}>
-                        Library overview
-                      </p>
-                      <div className="mt-3 grid gap-2">
-                        {docsOverviewCards.map(stat => (
-                          <div key={stat.label} className={`relative overflow-hidden rounded-[18px] border px-3.5 py-3 ${stat.tone}`}>
-                            <div className="pointer-events-none absolute right-0 top-0 h-14 w-14 rounded-full bg-white/10 blur-2xl" />
-                            <p className="relative text-[10px] font-semibold uppercase tracking-[0.24em] opacity-70">{stat.label}</p>
-                            <div className="relative mt-1.5 flex items-end justify-between gap-2">
-                              <p className="text-[1.6rem] font-semibold leading-none tracking-[-0.04em]">{stat.value}</p>
-                              <div className="max-w-[8rem] text-right text-[10px] leading-4 opacity-75">{stat.note}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className={`rounded-[24px] border p-4 ${
-                      isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-white/70 bg-white/82 shadow-[0_12px_32px_rgba(15,23,42,0.06)]'
-                    }`}>
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${
-                        isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                      }`}>
-                        Active collection
-                      </p>
-                      <div className={`mt-2.5 text-[1.5rem] font-semibold tracking-[-0.04em] ${
-                        isDarkMode ? 'text-white' : 'text-slate-900'
-                      }`}>
-                        {docsCollectionSummary.label}
-                      </div>
-                      <p className={`mt-2 text-[13px] leading-6 ${
-                        isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                      }`}>
-                        {docsCollectionSummary.detail}
-                      </p>
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <div className={`rounded-xl px-3 py-2.5 ${isDarkMode ? 'bg-white/[0.05]' : 'bg-white shadow-sm'}`}>
-                          <div className={`text-[11px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>In focus</div>
-                          <div className={`mt-1.5 text-[1.45rem] font-semibold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{docsCollectionSummary.count}</div>
-                        </div>
-                        <div className={`rounded-xl px-3 py-2.5 ${isDarkMode ? 'bg-white/[0.05]' : 'bg-white shadow-sm'}`}>
-                          <div className={`text-[11px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>Live sync</div>
-                          <div className={`mt-1.5 text-sm font-semibold ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                            {gmailLastCheckTime ? formatDocsDate(gmailLastCheckTime) : 'Ready'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </aside>
-                </div>
+                  </>
                 )}
               </div>
             )}
-            </div>
           </div>
         </div>
       )}
