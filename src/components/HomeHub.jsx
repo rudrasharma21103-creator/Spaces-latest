@@ -1281,14 +1281,11 @@ export default function HomeHub({
   const showSidebar = !isMobile
 
   return (
-   <div 
-      className={cx("min-h-[111.12dvh] w-full overflow-x-hidden transition-colors", ui.page)}
-      style={{ zoom: 0.9 }}
-    >
-      <div className="flex min-h-[111.12dvh] flex-col lg:h-[111.12dvh] lg:flex-row lg:overflow-hidden">
+    <div className={cx("min-h-[100dvh] w-full overflow-x-hidden transition-colors", ui.page)}>
+      <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
         {showSidebar && (
-          <div className={cx("relative transition-[width] duration-300 lg:flex lg:h-full lg:min-h-0 lg:flex-shrink-0", homeSidebarCollapsed ? "lg:w-[92px] lg:min-w-[92px]" : "lg:w-[272px] lg:min-w-[272px]")}>
-            <aside className={cx("w-full border-b lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-b-0 lg:border-r", ui.sidebar, ui.border)}>
+        <div className={cx("relative transition-[width] duration-300 lg:flex lg:h-full lg:min-h-0 lg:flex-shrink-0", homeSidebarCollapsed ? "lg:w-[92px] lg:min-w-[92px]" : "lg:w-[272px] lg:min-w-[272px]")}>
+          <aside className={cx("w-full border-b lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-b-0 lg:border-r", ui.sidebar, ui.border)}>
             <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-5 lg:py-4", ui.border)}>
               <div className={cx("flex items-center", homeSidebarCollapsed ? "justify-center" : "gap-3")}>
                 <button onClick={() => onSectionChange("overview")} className={cx("flex items-center gap-3 text-left", homeSidebarCollapsed && "justify-center")}>
