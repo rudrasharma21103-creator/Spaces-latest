@@ -67,6 +67,7 @@ const contextRequestCache = new Map()
 const eventsRequestCache = new Map()
 const usersRequestCache = new Map()
 const usersByIdsRequestCache = new Map()
+const bootstrapRequestCache = new Map()
 const userSearchRequestCache = new Map()
 const userSearchResponseCache = new Map()
 
@@ -232,6 +233,7 @@ export const invalidateUsersCache = () => {
   removeSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
   usersRequestCache.clear()
   usersByIdsRequestCache.clear()
+  bootstrapRequestCache.clear()
   userSearchRequestCache.clear()
   userSearchResponseCache.clear()
 }
@@ -332,7 +334,6 @@ export const getCurrentUser = async (options = {}) => {
 
   if (!forceRefresh) {
     if (cachedUser && Date.now() - timestamp < cacheTtl) return cachedUser
-    if (storedUser && storedUserId) return storedUser
   }
 
   if (usersByIdsRequestCache.has(requestKey)) {
@@ -362,6 +363,72 @@ export const getCurrentUser = async (options = {}) => {
     })
 
   usersByIdsRequestCache.set(requestKey, request)
+  return request
+}
+
+export const getBootstrap = async (options = {}) => {
+  const { forceRefresh = false, cacheTtl = 5000 } = options
+  const requestKey = "bootstrap"
+  const storedUser = getStoredUser()
+  const storedUserId = normalizeUserId(storedUser?.id || storedUser?._id || storedUser?.userId)
+  const { data: cachedUsers, timestamp } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  const cachedById = new Map(
+    (Array.isArray(cachedUsers) ? cachedUsers : [])
+      .filter(user => normalizeUserId(user?.id))
+      .map(user => [normalizeUserId(user.id), user])
+  )
+  const cachedUser = storedUserId ? cachedById.get(storedUserId) || storedUser : null
+
+  if (!forceRefresh && cachedUser && Date.now() - timestamp < cacheTtl) {
+    const cachedFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
+    if (cachedFriendIds.every(id => cachedById.has(id))) {
+      return {
+        user: cachedUser,
+        friends: cachedFriendIds.map(id => cachedById.get(id)).filter(Boolean),
+      }
+    }
+  }
+
+  if (bootstrapRequestCache.has(requestKey)) {
+    return bootstrapRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/users/bootstrap`)
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to load bootstrap data (${res.status})`)
+    }
+
+    const user = data?.user || null
+    const friends = ensureArray(data?.friends)
+
+    mergeUsersIntoCache([user, ...friends].filter(Boolean))
+    const token = getToken()
+    if (user?.id !== undefined && user?.id !== null && token) {
+      saveAuth(user, token)
+    }
+
+    return {
+      user,
+      friends,
+    }
+  })()
+    .catch(err => {
+      if (cachedUser) {
+        const fallbackFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
+        return {
+          user: cachedUser,
+          friends: fallbackFriendIds.map(id => cachedById.get(id)).filter(Boolean),
+        }
+      }
+      throw err
+    })
+    .finally(() => {
+      bootstrapRequestCache.delete(requestKey)
+    })
+
+  bootstrapRequestCache.set(requestKey, request)
   return request
 }
 

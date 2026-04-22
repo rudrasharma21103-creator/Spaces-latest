@@ -15,6 +15,23 @@ from app.ws_manager import manager
 logger = logging.getLogger("app.routes.users")
 
 USER_LIST_PROJECTION = {"_id": 0, "password": 0, "notifications": 0}
+FRIEND_CARD_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "name": 1,
+    "email": 1,
+    "professionalProfile": 1,
+    "companyName": 1,
+    "position": 1,
+    "linkedInUrl": 1,
+    "linkedinUrl": 1,
+    "linkedinURL": 1,
+    "avatar_url": 1,
+    "avatar_preset": 1,
+    "isOnline": 1,
+    "status": 1,
+    "lastActive": 1,
+}
 USER_SEARCH_PROJECTION = {
     "_id": 0,
     "id": 1,
@@ -187,12 +204,42 @@ def serialize_user(user, include_notifications=False):
     for key in PROFILE_FIELD_ALIASES:
         sanitized.pop(key, None)
 
+    if not sanitized.get("status"):
+        if user.get("isOnline") is True:
+            sanitized["status"] = "online"
+        elif user.get("isOnline") is False:
+            sanitized["status"] = "offline"
+
     if include_notifications:
         sanitized["notifications"] = sanitize(user.get("notifications") or [])
     else:
         sanitized.pop("notifications", None)
 
     return sanitized
+
+
+def build_bootstrap_payload(requester):
+    serialized_user = serialize_user(requester, include_notifications=True)
+    friend_ids = requester.get("friends") or []
+
+    friends_raw = fetch_users_by_ids(friend_ids, FRIEND_CARD_PROJECTION)
+    friends_by_id = {str(friend.get("id")): friend for friend in friends_raw if friend.get("id") is not None}
+
+    ordered_friends = []
+    seen = set()
+    for raw_id in friend_ids:
+        friend_id = str(raw_id)
+        if friend_id in seen:
+            continue
+        seen.add(friend_id)
+        friend = friends_by_id.get(friend_id)
+        if friend:
+            ordered_friends.append(serialize_user(friend))
+
+    return {
+        "user": serialized_user,
+        "friends": ordered_friends,
+    }
 
 
 def get_user_by_id(user_id, projection=None):
@@ -456,10 +503,24 @@ def get_current_user(request: Request):
     return serialize_user(requester, include_notifications=True)
 
 
+@router.get("/bootstrap")
+def get_bootstrap_data(request: Request):
+    requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        return build_bootstrap_payload(requester)
+    except PyMongoError as exc:
+        logger.error("Failed to build bootstrap payload for %s: %s", requester.get("id"), exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
+
+
 @router.post("/by-ids")
 def get_users_by_ids(user_ids: list, request: Request):
     requester = resolve_requester(request)
     requester_id = str(requester.get("id")) if requester else None
+    requester_friend_ids = {str(friend_id) for friend_id in (requester.get("friends") or [])} if requester else set()
 
     try:
         users_raw = fetch_users_by_ids(user_ids, USER_LIST_PROJECTION)
@@ -482,7 +543,10 @@ def get_users_by_ids(user_ids: list, request: Request):
             continue
 
         candidate = users_by_id.get(user_id)
-        if candidate and can_requester_see_user(requester, candidate):
+        if candidate and (
+            user_id in requester_friend_ids
+            or can_requester_see_user(requester, candidate)
+        ):
             ordered_users.append(serialize_user(candidate))
 
     return ordered_users

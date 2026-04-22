@@ -1354,14 +1354,18 @@ export default function CollaborationApp() {
     let refreshTimeout = null
 
     if (isAuthenticated && currentUser) {
-      const loadInitialData = async () => {
-        const freshCurrentUser = await Storage.getCurrentUser().catch(() => currentUser)
+      const loadInitialData = async (forceRefresh = false) => {
+        const bootstrap = await Storage.getBootstrap({ forceRefresh }).catch(() => null)
+        const freshCurrentUser = bootstrap?.user || currentUser
         const effectiveUser = filterDismissedUser(freshCurrentUser || currentUser)
+        const bootstrapFriends = Array.isArray(bootstrap?.friends) ? bootstrap.friends : []
 
         // Load core chat data first so UI becomes interactive quickly.
         const [userSpaces, friendsList] = await Promise.all([
           Storage.getSpacesForUser(effectiveUser?.spaces || []).catch(() => []),
-          Storage.getFriends(effectiveUser?.friends || []).catch(() => [])
+          bootstrapFriends.length > 0
+            ? Promise.resolve(bootstrapFriends)
+            : Storage.getFriends(effectiveUser?.friends || []).catch(() => [])
         ])
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
@@ -1413,7 +1417,7 @@ export default function CollaborationApp() {
       }
 
       ;(async () => {
-        const enrichedSpaces = await loadInitialData()
+        const enrichedSpaces = await loadInitialData(false)
 
         if (
           enrichedSpaces.length > 0 &&
@@ -1440,7 +1444,7 @@ export default function CollaborationApp() {
         
         // Refresh once shortly after first paint to pick up background-cached updates.
         refreshTimeout = setTimeout(async () => {
-          const refreshedSpaces = await loadInitialData()
+          const refreshedSpaces = await loadInitialData(true)
           // Update active space if we didn't have any before but now we do
           if (refreshedSpaces.length > 0 && !activeSpace) {
             const firstSpace = refreshedSpaces[0]
@@ -3794,11 +3798,14 @@ export default function CollaborationApp() {
 
   const refreshRelationshipState = async (userId = currentUser?.id) => {
     if (!userId) return null
-    const updatedUser = await Storage.getCurrentUser({ forceRefresh: true }).catch(() => null)
+    const bootstrap = await Storage.getBootstrap({ forceRefresh: true }).catch(() => null)
+    const updatedUser = bootstrap?.user || null
     if (!updatedUser) return null
     const filteredUser = filterDismissedUser(updatedUser)
     setCurrentUser(filteredUser)
-    const friendsList = await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
+    const friendsList = Array.isArray(bootstrap?.friends)
+      ? bootstrap.friends
+      : await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
     setFriends(Array.isArray(friendsList) ? friendsList : [])
     setUsers(prev => {
       const merged = new Map()
@@ -4328,6 +4335,26 @@ export default function CollaborationApp() {
     if (userId === undefined || userId === null) return undefined
     return usersById[String(userId)]
   }
+
+  useEffect(() => {
+    if (!activeDMUser || getUser(activeDMUser)) return
+
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const matches = await Storage.getUsersByIds([activeDMUser], { forceRefresh: true })
+        if (cancelled || !Array.isArray(matches) || matches.length === 0) return
+        syncUserCollections(matches[0])
+      } catch (error) {
+        console.warn("Failed to load DM partner details", error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeDMUser, usersById])
 
   const activeChannelData = useMemo(
     () => currentChannels.find(c => c.id === activeChannel) || null,
