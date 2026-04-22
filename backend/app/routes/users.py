@@ -205,6 +205,44 @@ def get_user_by_id(user_id, projection=None):
         return None
 
 
+def expand_user_ids_for_query(user_ids):
+    query_ids = []
+    seen = set()
+
+    for raw_id in user_ids or []:
+        if raw_id is None:
+            continue
+
+        candidates = [raw_id]
+        string_id = str(raw_id)
+        if string_id != raw_id:
+            candidates.append(string_id)
+
+        try:
+            int_id = int(raw_id)
+        except (TypeError, ValueError):
+            int_id = None
+
+        if int_id is not None and int_id != raw_id:
+            candidates.append(int_id)
+
+        for candidate in candidates:
+            marker = (type(candidate).__name__, str(candidate))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            query_ids.append(candidate)
+
+    return query_ids
+
+
+def fetch_users_by_ids(user_ids, projection=None):
+    query_ids = expand_user_ids_for_query(user_ids)
+    if not query_ids:
+        return []
+    return list(users_collection.find({"id": {"$in": query_ids}}, projection))
+
+
 def resolve_requester(request: Request):
     requester = None
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -408,6 +446,46 @@ def get_users(request: Request):
             users.append(serialize_user(user))
 
     return users
+
+
+@router.get("/me")
+def get_current_user(request: Request):
+    requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return serialize_user(requester, include_notifications=True)
+
+
+@router.post("/by-ids")
+def get_users_by_ids(user_ids: list, request: Request):
+    requester = resolve_requester(request)
+    requester_id = str(requester.get("id")) if requester else None
+
+    try:
+        users_raw = fetch_users_by_ids(user_ids, USER_LIST_PROJECTION)
+    except PyMongoError as exc:
+        logger.error("Failed to load users by ids %s: %s", user_ids, exc)
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
+
+    users_by_id = {str(user.get("id")): user for user in users_raw if user.get("id") is not None}
+    ordered_users = []
+    seen = set()
+
+    for raw_id in user_ids or []:
+        user_id = str(raw_id)
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+
+        if requester and user_id == requester_id:
+            ordered_users.append(serialize_user(requester, include_notifications=True))
+            continue
+
+        candidate = users_by_id.get(user_id)
+        if candidate and can_requester_see_user(requester, candidate):
+            ordered_users.append(serialize_user(candidate))
+
+    return ordered_users
 
 
 @router.post("/signup")

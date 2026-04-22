@@ -1164,12 +1164,11 @@ export default function CollaborationApp() {
     const pollData = async () => {
       try {
         const isPageHidden = typeof document !== "undefined" && document.hidden
-        const [storedUsers, availableSpaces, storedEvents] = await Promise.all([
-          Storage.getUsers(),
+        const [freshUser, availableSpaces, storedEvents] = await Promise.all([
+          Storage.getCurrentUser(),
           activeSpace || !isPageHidden ? Storage.getSpaces() : Promise.resolve([]),
           isPageHidden ? Promise.resolve(events) : Storage.getEvents()
         ])
-        const freshUser = storedUsers.find(u => u.id === currentUser.id)
 
         if (freshUser) {
           if (!freshUser.friends) freshUser.friends = []
@@ -1356,11 +1355,13 @@ export default function CollaborationApp() {
 
     if (isAuthenticated && currentUser) {
       const loadInitialData = async () => {
+        const freshCurrentUser = await Storage.getCurrentUser().catch(() => currentUser)
+        const effectiveUser = filterDismissedUser(freshCurrentUser || currentUser)
+
         // Load core chat data first so UI becomes interactive quickly.
-        const [userSpaces, allUsers, friendsList] = await Promise.all([
-          Storage.getSpacesForUser(currentUser.spaces).catch(() => []),
-          Storage.getUsers().catch(() => []),
-          Storage.getFriends(currentUser.friends || []).catch(() => [])
+        const [userSpaces, friendsList] = await Promise.all([
+          Storage.getSpacesForUser(effectiveUser?.spaces || []).catch(() => []),
+          Storage.getFriends(effectiveUser?.friends || []).catch(() => [])
         ])
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
@@ -1378,7 +1379,24 @@ export default function CollaborationApp() {
         }))
 
         setSpaces(enrichedSpaces)
-        setUsers(Array.isArray(allUsers) ? allUsers : [])
+        setCurrentUser(prev => {
+          if (!prev) return effectiveUser
+          const hasSameIdentity = String(prev.id) === String(effectiveUser?.id)
+          const hasSameAvatar =
+            prev.avatar_url === effectiveUser?.avatar_url &&
+            prev.avatar_preset === effectiveUser?.avatar_preset
+          const hasSameCounts =
+            (prev.friends?.length || 0) === (effectiveUser?.friends?.length || 0) &&
+            (prev.notifications?.length || 0) === (effectiveUser?.notifications?.length || 0) &&
+            (prev.spaces?.length || 0) === (effectiveUser?.spaces?.length || 0)
+          const hasSameNames =
+            prev.name === effectiveUser?.name &&
+            prev.email === effectiveUser?.email
+          return hasSameIdentity && hasSameAvatar && hasSameCounts && hasSameNames
+            ? prev
+            : effectiveUser
+        })
+        setUsers(Storage.peekUsers())
         setFriends(Array.isArray(friendsList) ? friendsList : [])
 
         // Non-blocking: load secondary data after core UI is ready.
@@ -1627,8 +1645,13 @@ export default function CollaborationApp() {
               // Refresh authoritative users list to avoid stale cached data
               ;(async () => {
                 try {
-                  const allUsers = await (await import("./services/storage")).getUsers()
-                  if (Array.isArray(allUsers)) setUsers(allUsers)
+                  if (String(data.userId) === String(currentUser?.id)) {
+                    const refreshedCurrentUser = await (await import("./services/storage")).getCurrentUser({ forceRefresh: true })
+                    if (refreshedCurrentUser) setCurrentUser(filterDismissedUser(refreshedCurrentUser))
+                  } else {
+                    const refreshedUsers = await (await import("./services/storage")).getUsersByIds([data.userId], { forceRefresh: true })
+                    if (Array.isArray(refreshedUsers) && refreshedUsers[0]) syncUserCollections(refreshedUsers[0])
+                  }
                 } catch (e) {
                   // ignore refresh errors
                 }
@@ -1656,11 +1679,13 @@ export default function CollaborationApp() {
                   name: incoming.avatarData.name
                 }
                 syncUserCollections(updatedUser)
-                // Also refresh users and friends list to ensure real-time avatar sync
+                // Refresh only the affected user and friend list instead of the full directory.
                 ;(async () => {
                   try {
-                    const allUsers = await Storage.getUsers({ forceRefresh: true })
-                    if (Array.isArray(allUsers)) setUsers(allUsers)
+                    const refreshedUsers = await Storage.getUsersByIds([incoming.userId], { forceRefresh: true })
+                    if (Array.isArray(refreshedUsers) && refreshedUsers[0]) {
+                      syncUserCollections(refreshedUsers[0])
+                    }
                     if (currentUser?.friends?.length > 0) {
                       const friendsList = await Storage.getFriends(currentUser.friends, { forceRefresh: true })
                       if (Array.isArray(friendsList)) setFriends(friendsList)
@@ -1717,11 +1742,13 @@ export default function CollaborationApp() {
                   console.error('Failed to refresh users after incoming friend notification', e)
                 })
               } else {
-                // Also refresh users list so friend lists / counts stay in sync
+                // Refresh only the signed-in user for notification counts/state.
                 ;(async () => {
                   try {
-                    const allUsers = await Storage.getUsers({ forceRefresh: true })
-                    setUsers(Array.isArray(allUsers) ? allUsers : [])
+                    const refreshedCurrentUser = await Storage.getCurrentUser({ forceRefresh: true })
+                    if (refreshedCurrentUser) {
+                      setCurrentUser(filterDismissedUser(refreshedCurrentUser))
+                    }
                   } catch (e) {
                     console.error('Failed to refresh users after incoming notification', e)
                   }
@@ -3767,15 +3794,27 @@ export default function CollaborationApp() {
 
   const refreshRelationshipState = async (userId = currentUser?.id) => {
     if (!userId) return null
-    const allUsers = await Storage.getUsers({ forceRefresh: true }).catch(() => [])
-    const normalizedUsers = Array.isArray(allUsers) ? allUsers : []
-    setUsers(normalizedUsers)
-    const updatedUser = normalizedUsers.find(u => String(u.id) === String(userId))
+    const updatedUser = await Storage.getCurrentUser({ forceRefresh: true }).catch(() => null)
     if (!updatedUser) return null
     const filteredUser = filterDismissedUser(updatedUser)
     setCurrentUser(filteredUser)
     const friendsList = await Storage.getFriends(filteredUser.friends || [], { forceRefresh: true }).catch(() => [])
     setFriends(Array.isArray(friendsList) ? friendsList : [])
+    setUsers(prev => {
+      const merged = new Map()
+      ;(Array.isArray(prev) ? prev : []).forEach(user => {
+        if (user?.id === undefined || user?.id === null) return
+        merged.set(String(user.id), user)
+      })
+      ;[filteredUser, ...(Array.isArray(friendsList) ? friendsList : [])].forEach(user => {
+        if (user?.id === undefined || user?.id === null) return
+        merged.set(String(user.id), {
+          ...(merged.get(String(user.id)) || {}),
+          ...user,
+        })
+      })
+      return Array.from(merged.values())
+    })
     return filteredUser
   }
 
@@ -6248,10 +6287,7 @@ export default function CollaborationApp() {
       await Storage.deleteNotification(currentUser.id, notificationId)
     } catch (e) {
       console.error('dismissNotification failed', e)
-      // On failure, refetch full user to ensure consistency and re-apply dismissed filter
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+      const updatedUser = await Storage.getCurrentUser({ forceRefresh: true }).catch(() => null)
       if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
     }
   }
@@ -6275,10 +6311,7 @@ export default function CollaborationApp() {
       await Promise.all(infos.map(n => Storage.deleteNotification(currentUser.id, n.id)))
     } catch (e) {
       console.error('clearAllNotifications failed', e)
-      // On failure, refetch full user to ensure consistency and re-apply filter
-      const allUsers = await Storage.getUsers()
-      setUsers(Array.isArray(allUsers) ? allUsers : [])
-      const updatedUser = (allUsers || []).find(u => u.id === currentUser.id)
+      const updatedUser = await Storage.getCurrentUser({ forceRefresh: true }).catch(() => null)
       if (updatedUser) setCurrentUser(filterDismissedUser(updatedUser))
     }
   }

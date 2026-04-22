@@ -65,6 +65,8 @@ const spacesRequestCache = new Map()
 const spacesForUserRequestCache = new Map()
 const contextRequestCache = new Map()
 const eventsRequestCache = new Map()
+const usersRequestCache = new Map()
+const usersByIdsRequestCache = new Map()
 const userSearchRequestCache = new Map()
 const userSearchResponseCache = new Map()
 
@@ -127,6 +129,39 @@ const writeMessageCountCache = (chatId, count) => {
     localStorage.setItem(`messages_count_${chatId}`, JSON.stringify(Number(count) || 0))
     localStorage.setItem(`messages_count_time_${chatId}`, String(Date.now()))
   } catch (e) {}
+}
+
+const normalizeUserId = value => {
+  if (value === undefined || value === null || value === "") return null
+  return String(value)
+}
+
+const mergeUsersIntoCache = users => {
+  const incoming = Array.isArray(users) ? users.filter(user => normalizeUserId(user?.id)) : []
+  if (incoming.length === 0) return peekUsers()
+
+  const { data: existing } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  const mergedById = new Map()
+
+  if (Array.isArray(existing)) {
+    existing.forEach(user => {
+      const id = normalizeUserId(user?.id)
+      if (id) mergedById.set(id, user)
+    })
+  }
+
+  incoming.forEach(user => {
+    const id = normalizeUserId(user?.id)
+    if (!id) return
+    mergedById.set(id, {
+      ...(mergedById.get(id) || {}),
+      ...user,
+    })
+  })
+
+  const merged = Array.from(mergedById.values())
+  writeSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY, merged)
+  return merged
 }
 
 export const peekMessages = chatId => {
@@ -195,6 +230,8 @@ const authFetch = async (url, options = {}) => {
 
 export const invalidateUsersCache = () => {
   removeSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  usersRequestCache.clear()
+  usersByIdsRequestCache.clear()
   userSearchRequestCache.clear()
   userSearchResponseCache.clear()
 }
@@ -224,10 +261,10 @@ const clearContextCache = chatId => {
 }
 
 export const getUsers = async (options = {}) => {
-  const { forceRefresh = false } = options
+  const { forceRefresh = false, cacheTtl = 5000 } = options
   const cacheKey = USERS_CACHE_KEY
   const cacheTimeKey = USERS_CACHE_TIME_KEY
-  const CACHE_TTL = 5000 // 5 seconds TTL for faster updates
+  const requestKey = "all"
   
   if (!forceRefresh) {
     try {
@@ -236,13 +273,13 @@ export const getUsers = async (options = {}) => {
       
       if (Array.isArray(cached) && cached.length > 0) {
         // Return cached data immediately, refresh in background if stale
-        if (Date.now() - cacheTime > CACHE_TTL) {
+        if (Date.now() - cacheTime > cacheTtl) {
           ;(async () => {
             try {
               const res = await authFetch(`${API_BASE}/users/`)
               const data = await safeJson(res)
               const arr = ensureArray(data)
-              writeSimpleCache(cacheKey, cacheTimeKey, arr)
+              mergeUsersIntoCache(arr)
             } catch (e) {}
           })()
         }
@@ -253,19 +290,135 @@ export const getUsers = async (options = {}) => {
     invalidateUsersCache()
   }
 
+  if (usersRequestCache.has(requestKey)) {
+    return usersRequestCache.get(requestKey)
+  }
+
   // No cache - fetch fresh
-  const res = await authFetch(`${API_BASE}/users/`)
-  const data = await safeJson(res)
-  const arr = ensureArray(data)
-  try {
-    writeSimpleCache(cacheKey, cacheTimeKey, arr)
-  } catch(e){}
-  return arr
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/users/`)
+    const data = await safeJson(res)
+    const arr = ensureArray(data)
+    mergeUsersIntoCache(arr)
+    return arr
+  })()
+    .catch(err => {
+      const { data: cached } = readSimpleCache(cacheKey, cacheTimeKey)
+      if (Array.isArray(cached)) return cached
+      throw err
+    })
+    .finally(() => {
+      usersRequestCache.delete(requestKey)
+    })
+
+  usersRequestCache.set(requestKey, request)
+  return request
 }
 
 export const peekUsers = () => {
   const { data } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
   return Array.isArray(data) ? data : []
+}
+
+export const getCurrentUser = async (options = {}) => {
+  const { forceRefresh = false, cacheTtl = 5000 } = options
+  const requestKey = "me"
+  const storedUser = getStoredUser()
+  const storedUserId = normalizeUserId(storedUser?.id || storedUser?._id || storedUser?.userId)
+  const { data: cachedUsers, timestamp } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  const cachedUser = Array.isArray(cachedUsers)
+    ? cachedUsers.find(user => normalizeUserId(user?.id) === storedUserId)
+    : null
+
+  if (!forceRefresh) {
+    if (cachedUser && Date.now() - timestamp < cacheTtl) return cachedUser
+    if (storedUser && storedUserId) return storedUser
+  }
+
+  if (usersByIdsRequestCache.has(requestKey)) {
+    return usersByIdsRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/users/me`)
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to load current user (${res.status})`)
+    }
+    if (data?.id !== undefined && data?.id !== null) {
+      mergeUsersIntoCache([data])
+      const token = getToken()
+      if (token) saveAuth(data, token)
+    }
+    return data || null
+  })()
+    .catch(err => {
+      if (cachedUser) return cachedUser
+      if (storedUser && storedUserId) return storedUser
+      throw err
+    })
+    .finally(() => {
+      usersByIdsRequestCache.delete(requestKey)
+    })
+
+  usersByIdsRequestCache.set(requestKey, request)
+  return request
+}
+
+export const getUsersByIds = async (userIds, options = {}) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) return []
+
+  const { forceRefresh = false, cacheTtl = 15000 } = options
+  const normalizedIds = Array.from(
+    new Set(
+      userIds
+        .map(normalizeUserId)
+        .filter(Boolean)
+    )
+  )
+
+  if (normalizedIds.length === 0) return []
+
+  const requestKey = normalizedIds.slice().sort().join(",")
+  const { data: cachedUsers, timestamp } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  const cachedById = new Map(
+    (Array.isArray(cachedUsers) ? cachedUsers : [])
+      .filter(user => normalizeUserId(user?.id))
+      .map(user => [normalizeUserId(user.id), user])
+  )
+
+  if (!forceRefresh && Date.now() - timestamp < cacheTtl && normalizedIds.every(id => cachedById.has(id))) {
+    return normalizedIds.map(id => cachedById.get(id)).filter(Boolean)
+  }
+
+  if (usersByIdsRequestCache.has(requestKey)) {
+    return usersByIdsRequestCache.get(requestKey)
+  }
+
+  const request = (async () => {
+    const res = await authFetch(`${API_BASE}/users/by-ids`, {
+      method: "POST",
+      body: JSON.stringify(normalizedIds),
+    })
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(data?.detail || `Failed to load users (${res.status})`)
+    }
+    const arr = ensureArray(data)
+    mergeUsersIntoCache(arr)
+    return arr
+  })()
+    .catch(err => {
+      const fallback = normalizedIds.map(id => cachedById.get(id)).filter(Boolean)
+      if (fallback.length > 0) return fallback
+      throw err
+    })
+    .finally(() => {
+      usersByIdsRequestCache.delete(requestKey)
+    })
+
+  usersByIdsRequestCache.set(requestKey, request)
+  return request
 }
 
 export const saveUser = async user => {
@@ -706,13 +859,7 @@ export const saveContextState = async (chatId, payload) => {
 
 export const getFriends = async (friendIds, options = {}) => {
   if (!Array.isArray(friendIds) || friendIds.length === 0) return []
-  const users = await getUsers(options)
-  // Normalize IDs to strings for comparison to handle type mismatches
-  const normalizedIds = friendIds.map(id => String(id))
-  return users.filter(u => {
-    const uId = String(u.id || u._id || '')
-    return normalizedIds.includes(uId)
-  })
+  return getUsersByIds(friendIds, options)
 }
 
 export const sendFriendRequest = async (fromId, fromName, toUserId) => {
@@ -1023,9 +1170,8 @@ export const getCalls = async () => _readCalls()
 
 export const deleteNotification = async (userId, notificationId) => {
   try {
-    // Fetch current user from backend
-    const users = await getUsers()
-    const user = users.find(u => String(u.id) === String(userId))
+    const user = await getCurrentUser({ forceRefresh: true })
+    if (String(user?.id) !== String(userId)) return null
     if (!user) return null
     const updated = { ...user, notifications: (user.notifications || []).filter(n => n.id !== notificationId) }
     const res = await authFetch(`${API_BASE}/users/${userId}`, {
