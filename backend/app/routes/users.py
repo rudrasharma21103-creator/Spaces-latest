@@ -15,6 +15,7 @@ from app.ws_manager import manager
 logger = logging.getLogger("app.routes.users")
 
 USER_LIST_PROJECTION = {"_id": 0, "password": 0, "notifications": 0}
+SPACE_LIST_PROJECTION = {"_id": 0}
 FRIEND_CARD_PROJECTION = {
     "_id": 0,
     "id": 1,
@@ -91,6 +92,28 @@ def extract_email_domain(email):
         return None
     match = re.search(r"@([A-Za-z0-9.-]+)$", str(email))
     return match.group(1).lower() if match else None
+
+
+def normalize_email(value):
+    cleaned = clean_optional_text(value, 320)
+    return cleaned.lower() if cleaned else None
+
+
+def normalize_search_name(value):
+    cleaned = clean_optional_text(value, 200)
+    if not cleaned:
+        return None
+    return re.sub(r"\s+", " ", cleaned).lower()
+
+
+def build_user_index_fields(source):
+    email = source.get("email") if isinstance(source, dict) else None
+    name = source.get("name") if isinstance(source, dict) else None
+    return {
+        "email_normalized": normalize_email(email),
+        "email_domain": extract_email_domain(email),
+        "name_search": normalize_search_name(name),
+    }
 
 
 def normalize_linkedin_url(value):
@@ -194,6 +217,9 @@ def serialize_user(user, include_notifications=False):
 
     sanitized = sanitize(user)
     sanitized.pop("password", None)
+    sanitized.pop("email_normalized", None)
+    sanitized.pop("email_domain", None)
+    sanitized.pop("name_search", None)
 
     profile = normalize_professional_profile(sanitized)
     if profile:
@@ -221,6 +247,7 @@ def serialize_user(user, include_notifications=False):
 def build_bootstrap_payload(requester):
     serialized_user = serialize_user(requester, include_notifications=True)
     friend_ids = requester.get("friends") or []
+    space_ids = requester.get("spaces") or []
 
     friends_raw = fetch_users_by_ids(friend_ids, FRIEND_CARD_PROJECTION)
     friends_by_id = {str(friend.get("id")): friend for friend in friends_raw if friend.get("id") is not None}
@@ -236,9 +263,23 @@ def build_bootstrap_payload(requester):
         if friend:
             ordered_friends.append(serialize_user(friend))
 
+    spaces_raw = fetch_spaces_by_ids(space_ids)
+    spaces_by_id = {str(space.get("id")): space for space in spaces_raw if space.get("id") is not None}
+    ordered_spaces = []
+    seen_space_ids = set()
+    for raw_id in space_ids:
+        space_id = str(raw_id)
+        if space_id in seen_space_ids:
+            continue
+        seen_space_ids.add(space_id)
+        space = spaces_by_id.get(space_id)
+        if space:
+            ordered_spaces.append(space)
+
     return {
         "user": serialized_user,
         "friends": ordered_friends,
+        "spaces": ordered_spaces,
     }
 
 
@@ -288,6 +329,47 @@ def fetch_users_by_ids(user_ids, projection=None):
     if not query_ids:
         return []
     return list(users_collection.find({"id": {"$in": query_ids}}, projection))
+
+
+def normalize_space_record(space):
+    if not isinstance(space, dict):
+        return space
+
+    owner_id = space.get("ownerId")
+    if owner_id:
+        members = list(space.get("members") or [])
+        owner_present = any(str(member) == str(owner_id) for member in members)
+        if not owner_present:
+            members.append(owner_id)
+        space["members"] = members
+
+        channels = list(space.get("channels") or [])
+        for channel in channels:
+            if not isinstance(channel, dict):
+                continue
+
+            channel_members = list(channel.get("members") or [])
+            owner_in_channel = any(str(member) == str(owner_id) for member in channel_members)
+            if not owner_in_channel:
+                channel_members.append(owner_id)
+            channel["members"] = channel_members
+
+            roles = dict(channel.get("roles") or {})
+            if not any(role == "owner" for role in roles.values()):
+                roles[str(owner_id)] = "owner"
+            channel["roles"] = roles
+
+        space["channels"] = channels
+
+    return space
+
+
+def fetch_spaces_by_ids(space_ids):
+    query_ids = expand_user_ids_for_query(space_ids)
+    if not query_ids:
+        return []
+    spaces = list(spaces_collection.find({"id": {"$in": query_ids}}, SPACE_LIST_PROJECTION))
+    return [normalize_space_record(space) for space in spaces]
 
 
 def resolve_requester(request: Request):
@@ -395,8 +477,12 @@ def search_users_core(query: str, request: Request, limit: int = 25):
         return []
 
     escaped_query = re.escape(normalized_query)
+    search_query = normalize_search_name(normalized_query) or normalized_query.lower()
+    escaped_search_query = re.escape(search_query)
     prefix_pattern = f"^{escaped_query}"
+    indexed_prefix_pattern = f"^{escaped_search_query}"
     contains_pattern = escaped_query
+    indexed_contains_pattern = escaped_search_query
     query_length = len(normalized_query)
     should_run_contains_fallback = query_length >= 3
 
@@ -404,10 +490,30 @@ def search_users_core(query: str, request: Request, limit: int = 25):
         prefix_limit = safe_limit if query_length > 1 else min(safe_limit, 10)
         candidates = list(
             users_collection.find(
-                {"name": {"$regex": prefix_pattern, "$options": "i"}},
+                {"name_search": {"$regex": indexed_prefix_pattern}},
                 USER_SEARCH_PROJECTION,
             ).limit(prefix_limit)
         )
+
+        if len(candidates) < prefix_limit:
+            existing_ids = {str(candidate.get("id")) for candidate in candidates}
+            legacy_prefix_candidates = list(
+                users_collection.find(
+                    {
+                        "name": {"$regex": prefix_pattern, "$options": "i"},
+                        "id": {"$nin": [candidate.get("id") for candidate in candidates if candidate.get("id") is not None]},
+                    },
+                    USER_SEARCH_PROJECTION,
+                ).limit(prefix_limit)
+            )
+            for candidate in legacy_prefix_candidates:
+                candidate_id = str(candidate.get("id"))
+                if candidate_id in existing_ids:
+                    continue
+                candidates.append(candidate)
+                existing_ids.add(candidate_id)
+                if len(candidates) >= prefix_limit:
+                    break
 
         if should_run_contains_fallback and len(candidates) < safe_limit:
             existing_ids = {str(candidate.get("id")) for candidate in candidates}
@@ -416,7 +522,7 @@ def search_users_core(query: str, request: Request, limit: int = 25):
             fallback_candidates = list(
                 users_collection.find(
                     {
-                        "name": {"$regex": contains_pattern, "$options": "i"},
+                        "name_search": {"$regex": indexed_contains_pattern},
                         "id": {"$nin": [candidate.get("id") for candidate in candidates if candidate.get("id") is not None]},
                     },
                     USER_SEARCH_PROJECTION,
@@ -431,6 +537,26 @@ def search_users_core(query: str, request: Request, limit: int = 25):
                 existing_ids.add(candidate_id)
                 if len(candidates) >= safe_limit:
                     break
+
+            if len(candidates) < safe_limit:
+                legacy_fallback_candidates = list(
+                    users_collection.find(
+                        {
+                            "name": {"$regex": contains_pattern, "$options": "i"},
+                            "id": {"$nin": [candidate.get("id") for candidate in candidates if candidate.get("id") is not None]},
+                        },
+                        USER_SEARCH_PROJECTION,
+                    )
+                    .limit(fallback_limit)
+                )
+                for candidate in legacy_fallback_candidates:
+                    candidate_id = str(candidate.get("id"))
+                    if candidate_id in existing_ids:
+                        continue
+                    candidates.append(candidate)
+                    existing_ids.add(candidate_id)
+                    if len(candidates) >= safe_limit:
+                        break
     except PyMongoError as exc:
         logger.error("Failed to search users for query %s: %s", normalized_query, exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
@@ -447,7 +573,7 @@ def discover_people_core(request: Request, limit: int = 8):
 
     try:
         candidates = list(
-            users_collection.find({}, USER_SEARCH_PROJECTION).sort("name", 1).limit(200)
+            users_collection.find({}, USER_SEARCH_PROJECTION).sort("name_search", 1).limit(200)
         )
     except PyMongoError as exc:
         logger.error("Failed to load discover users: %s", exc)
@@ -555,9 +681,12 @@ def get_users_by_ids(user_ids: list, request: Request):
 @router.post("/signup")
 def signup(user: dict):
     logger.info("[users.signup] received signup for: %s", user.get("email"))
-    existing = users_collection.find_one(
-        {"email": {"$regex": f"^{re.escape(user['email'])}$", "$options": "i"}}
-    )
+    normalized_email = normalize_email(user.get("email"))
+    existing = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
+    if not existing and user.get("email"):
+        existing = users_collection.find_one(
+            {"email": {"$regex": f"^{re.escape(user['email'])}$", "$options": "i"}}
+        )
     if existing:
         return {"error": "Email already registered"}
 
@@ -587,6 +716,8 @@ def signup(user: dict):
     if profile:
         user["professionalProfile"] = profile
 
+    user.update(build_user_index_fields(user))
+
     users_collection.insert_one(user)
     token = create_access_token({"user_id": user["id"]})
     return {"user": serialize_user(user, include_notifications=True), "token": token}
@@ -595,9 +726,20 @@ def signup(user: dict):
 @router.post("/login")
 def login(data: dict):
     logger.info("[users.login] login attempt for: %s", data.get("email"))
-    user = users_collection.find_one(
-        {"email": {"$regex": f"^{re.escape(data['email'])}$", "$options": "i"}}
-    )
+    normalized_email = normalize_email(data.get("email"))
+    user = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
+    if not user and data.get("email"):
+        user = users_collection.find_one(
+            {"email": {"$regex": f"^{re.escape(data['email'])}$", "$options": "i"}}
+        )
+        if user:
+            try:
+                users_collection.update_one(
+                    {"id": user.get("id")},
+                    {"$set": build_user_index_fields(user)},
+                )
+            except Exception:
+                pass
 
     if not user or not verify_password(data["password"], user.get("password")):
         return {"error": "Invalid credentials"}
@@ -609,10 +751,16 @@ def login(data: dict):
 @router.get("/by-email/{email}")
 def find_user_by_email(email: str):
     try:
+        normalized_email = normalize_email(email)
         user = users_collection.find_one(
-            {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+            {"email_normalized": normalized_email},
             USER_LIST_PROJECTION,
-        )
+        ) if normalized_email else None
+        if not user:
+            user = users_collection.find_one(
+                {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                USER_LIST_PROJECTION,
+            )
     except PyMongoError as exc:
         logger.error("Failed to look up user by email %s: %s", email, exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
@@ -636,9 +784,12 @@ def discover_people(request: Request, limit: int = Query(8, ge=1, le=24)):
 
 @router.get("/by-domain/{domain}")
 def users_by_domain(domain: str):
-    query = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
+    normalized_domain = str(domain or "").strip().lower()
     try:
-        users = list(users_collection.find(query, USER_LIST_PROJECTION))
+        users = list(users_collection.find({"email_domain": normalized_domain}, USER_LIST_PROJECTION))
+        if not users:
+            query = {"email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"}}
+            users = list(users_collection.find(query, USER_LIST_PROJECTION))
     except PyMongoError as exc:
         logger.error("Failed to list users for domain %s: %s", domain, exc)
         raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
@@ -652,7 +803,10 @@ def set_password(payload: dict):
     if not email or not password:
         raise HTTPException(status_code=400, detail="email and password required")
 
-    user = users_collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+    normalized_email = normalize_email(email)
+    user = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
+    if not user:
+        user = users_collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
 
     try:
         hashed = hash_password(password)
@@ -661,7 +815,10 @@ def set_password(payload: dict):
 
     if user:
         try:
-            users_collection.update_one({"id": user["id"]}, {"$set": {"password": hashed}})
+            users_collection.update_one(
+                {"id": user["id"]},
+                {"$set": {"password": hashed, **build_user_index_fields(user)}},
+            )
         except Exception:
             raise HTTPException(status_code=500, detail="Failed to set password")
         updated = users_collection.find_one({"id": user["id"]}, {"_id": 0})
@@ -680,6 +837,7 @@ def set_password(payload: dict):
             "friends": [],
             "notifications": [],
         }
+        new_user.update(build_user_index_fields(new_user))
         users_collection.insert_one(new_user)
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to create admin user")
@@ -748,6 +906,14 @@ async def update_user(user_id: str, user: dict, request: Request):
     update_ops = {}
     set_doc = dict(update_doc)
     unset_doc = {}
+
+    if "name" in update_doc or "email" in update_doc:
+        indexed_source = {**existing_user, **update_doc}
+        for key, value in build_user_index_fields(indexed_source).items():
+            if value is None:
+                unset_doc[key] = ""
+            else:
+                set_doc[key] = value
 
     if profile_fields_present:
         profile_ops = build_profile_update_ops(normalized_profile)

@@ -212,6 +212,7 @@ export default function CollaborationApp() {
   const [activeView, setActiveView] = useState("home")
   const [activeDMUser, setActiveDMUser] = useState(null)
   const [homeSection, setHomeSection] = useState("overview")
+  const [connectPreferredPane, setConnectPreferredPane] = useState("discover")
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
   const [homeDMSending, setHomeDMSending] = useState(false)
@@ -693,13 +694,28 @@ export default function CollaborationApp() {
     }
 
     if (preset) {
-      // simple gradient generation from preset id
-      const grad = `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)`
-      return (
-        <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
-          {initial}
-        </div>
-      )
+      if (Array.isArray(preset) && preset.length >= 2) {
+        const grad = `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)`
+        return (
+          <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
+            {initial}
+          </div>
+        )
+      }
+      if (typeof preset === "string" && preset.startsWith("/")) {
+        return (
+          <SmartImage
+            src={preset}
+            alt={name}
+            apiBase={API_BASE}
+            cacheKey={avatarCacheKey}
+            className="rounded-full object-cover"
+            style={sizeStyle}
+            loading="eager"
+            fetchPriority="high"
+          />
+        )
+      }
     }
     // fallback: emoji avatar or letter avatar with generated gradient
     const colors = ["#ff9a9e","#fad0c4","#f6d365","#f093fb","#a1c4fd","#c2e9fb","#d4fc79","#96fbc4"]
@@ -746,14 +762,14 @@ export default function CollaborationApp() {
   }
 
   const avatarPresets = [
-    ["#ff9a9e", "#fecfef"],
-    ["#a1c4fd", "#c2e9fb"],
-    ["#f6d365", "#fda085"],
-    ["#f093fb", "#f5576c"],
-    ["#96fbc4", "#f9f586"],
-    ["#c2e9fb", "#a1c4fd"],
-    ["#fddb92", "#d1fdff"],
-    ["#fbc2eb", "#a6c1ee"]
+    { id: "ellipse-2", url: "/Ellipse%202.png", label: "Ellipse 2" },
+    { id: "ellipse-3", url: "/Ellipse%203.png", label: "Ellipse 3" },
+    { id: "ellipse-4", url: "/Ellipse%204.png", label: "Ellipse 4" },
+    { id: "ellipse-5", url: "/Ellipse%205.png", label: "Ellipse 5" },
+    { id: "ellipse-6", url: "/Ellipse%206.png", label: "Ellipse 6" },
+    { id: "ellipse-7", url: "/Ellipse%207.png", label: "Ellipse 7" },
+    { id: "ellipse-8", url: "/Ellipse%208.png", label: "Ellipse 8" },
+    { id: "ellipse-9", url: "/Ellipse%209.png", label: "Ellipse 9" }
   ]
 
   const syncUserCollections = updatedUser => {
@@ -1035,11 +1051,17 @@ export default function CollaborationApp() {
     const pollData = async () => {
       try {
         const isPageHidden = typeof document !== "undefined" && document.hidden
-        const [bootstrap, availableSpaces, storedEvents] = await Promise.all([
+        const [bootstrap, storedEvents] = await Promise.all([
           Storage.getBootstrap({ forceRefresh: true }).catch(() => null),
-          activeSpace || !isPageHidden ? Storage.getSpaces() : Promise.resolve([]),
           isPageHidden ? Promise.resolve(events) : Storage.getEvents()
         ])
+        let availableSpaces = Array.isArray(bootstrap?.spaces) ? bootstrap.spaces : []
+        if (availableSpaces.length === 0 && (activeSpace || !isPageHidden)) {
+          availableSpaces = await Storage.getSpacesForUser(
+            bootstrap?.user?.spaces || currentUser.spaces || [],
+            { forceRefresh: true, cacheTtl: 0 }
+          ).catch(() => [])
+        }
         const freshUser = bootstrap?.user || null
 
         if (freshUser) {
@@ -1231,7 +1253,9 @@ export default function CollaborationApp() {
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
           : Storage.getFriends(effectiveUser.friends || []).catch(() => [])
-        const spacesPromise = Storage.getSpacesForUser(effectiveUser.spaces || []).catch(() => [])
+        const spacesPromise = Array.isArray(bootstrap?.spaces)
+          ? Promise.resolve(bootstrap.spaces)
+          : Storage.getSpacesForUser(effectiveUser.spaces || []).catch(() => [])
 
         setCurrentUser(prev => {
           if (!prev) return effectiveUser
@@ -7440,25 +7464,27 @@ export default function CollaborationApp() {
                 <div className="mb-3 text-sm font-semibold text-slate-600">Choose an avatar</div>
                 <div className="grid grid-cols-4 gap-3">
                   {avatarPresets.map((preset, i) => {
-                    const isActive = Array.isArray(selectedPreset) &&
-                      selectedPreset.length === preset.length &&
-                      selectedPreset.every((clr, idx) => clr === preset[idx])
+                    const isActive =
+                      avatarPreview === preset.url || selectedPreset === preset.id
                     return (
                       <button
                         key={i}
                         type="button"
                         onClick={() => {
-                          setSelectedPreset([...preset])
-                          setAvatarPreview(null)
+                          setSelectedPreset(preset.id)
+                          setAvatarPreview(preset.url)
                         }}
-                        className={`w-16 h-16 rounded-full shadow-md flex items-center justify-center transition-all ${
+                        className={`w-16 h-16 rounded-full shadow-md overflow-hidden flex items-center justify-center transition-all ${
                           isActive ? "ring-4 ring-sky-200 scale-105" : "ring-0"
                         }`}
-                        style={{ background: `linear-gradient(135deg, ${preset[0]} 0%, ${preset[1]} 100%)` }}
+                        aria-label={preset.label}
                       >
-                        <span className="text-white font-bold">
-                          {(currentUser?.name || "?")[0]?.toUpperCase() || "?"}
-                        </span>
+                        <SmartImage
+                          src={preset.url}
+                          alt={preset.label}
+                          className="w-full h-full object-cover"
+                          loading="eager"
+                        />
                       </button>
                     )
                   })}
@@ -8004,6 +8030,8 @@ export default function CollaborationApp() {
             setAvatarPreview(currentUser?.avatar_url || null)
             setShowProfileModal(true)
           }}
+          connectPreferredPane={connectPreferredPane}
+          setConnectPreferredPane={setConnectPreferredPane}
           setDmInput={setHomeDMInput}
           isDarkMode={isDarkMode}
           isMobile={isMobile}

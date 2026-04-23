@@ -36,8 +36,11 @@ organizations_collection = db["organizations"]
 # Create indexes for faster queries
 try:
     users_collection.create_index("name")
+    users_collection.create_index("name_search")
     users_collection.create_index([("name", 1), ("id", 1)])
     users_collection.create_index("email")
+    users_collection.create_index("email_normalized")
+    users_collection.create_index("email_domain")
     users_collection.create_index("id", unique=True)
     users_collection.create_index("friends")
     users_collection.create_index("professionalProfile.companyName")
@@ -45,9 +48,11 @@ try:
 
     spaces_collection.create_index("id", unique=True)
     spaces_collection.create_index("members")
+    spaces_collection.create_index("ownerId")
     spaces_collection.create_index("channels.id")
 
     messages_collection.create_index("chatId")
+    messages_collection.create_index("message.id")
     messages_collection.create_index([("chatId", 1), ("message.id", 1)])
     messages_collection.create_index([("chatId", 1), ("message.timestamp", 1)])
 

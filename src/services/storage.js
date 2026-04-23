@@ -263,7 +263,7 @@ const clearContextCache = chatId => {
 }
 
 export const getUsers = async (options = {}) => {
-  const { forceRefresh = false, cacheTtl = 5000 } = options
+  const { forceRefresh = false, cacheTtl = 30000 } = options
   const cacheKey = USERS_CACHE_KEY
   const cacheTimeKey = USERS_CACHE_TIME_KEY
   const requestKey = "all"
@@ -378,13 +378,24 @@ export const getBootstrap = async (options = {}) => {
       .map(user => [normalizeUserId(user.id), user])
   )
   const cachedUser = storedUserId ? cachedById.get(storedUserId) || storedUser : null
+  const { data: cachedSpaces, timestamp: spacesTimestamp } = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+  const cachedSpacesById = new Map(
+    (Array.isArray(cachedSpaces) ? cachedSpaces : [])
+      .filter(space => space?.id !== undefined && space?.id !== null)
+      .map(space => [String(space.id), space])
+  )
 
   if (!forceRefresh && cachedUser && Date.now() - timestamp < cacheTtl) {
     const cachedFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
-    if (cachedFriendIds.every(id => cachedById.has(id))) {
+    const cachedSpaceIds = Array.isArray(cachedUser?.spaces) ? cachedUser.spaces.map(normalizeUserId).filter(Boolean) : []
+    if (
+      cachedFriendIds.every(id => cachedById.has(id)) &&
+      (cachedSpaceIds.length === 0 || (Date.now() - spacesTimestamp < cacheTtl && cachedSpaceIds.every(id => cachedSpacesById.has(id))))
+    ) {
       return {
         user: cachedUser,
         friends: cachedFriendIds.map(id => cachedById.get(id)).filter(Boolean),
+        spaces: cachedSpaceIds.map(id => cachedSpacesById.get(id)).filter(Boolean),
       }
     }
   }
@@ -402,8 +413,20 @@ export const getBootstrap = async (options = {}) => {
 
     const user = data?.user || null
     const friends = ensureArray(data?.friends)
+    const spaces = ensureArray(data?.spaces)
 
     mergeUsersIntoCache([user, ...friends].filter(Boolean))
+    if (spaces.length > 0) {
+      try {
+        const existing = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY).data
+        const incomingIds = new Set(spaces.map(space => String(space?.id)))
+        const mergedSpaces = [
+          ...spaces,
+          ...(Array.isArray(existing) ? existing.filter(space => !incomingIds.has(String(space?.id))) : [])
+        ]
+        writeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY, mergedSpaces)
+      } catch (e) {}
+    }
     const token = getToken()
     if (user?.id !== undefined && user?.id !== null && token) {
       saveAuth(user, token)
@@ -412,14 +435,17 @@ export const getBootstrap = async (options = {}) => {
     return {
       user,
       friends,
+      spaces,
     }
   })()
     .catch(err => {
       if (cachedUser) {
         const fallbackFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
+        const fallbackSpaceIds = Array.isArray(cachedUser?.spaces) ? cachedUser.spaces.map(normalizeUserId).filter(Boolean) : []
         return {
           user: cachedUser,
           friends: fallbackFriendIds.map(id => cachedById.get(id)).filter(Boolean),
+          spaces: fallbackSpaceIds.map(id => cachedSpacesById.get(id)).filter(Boolean),
         }
       }
       throw err
