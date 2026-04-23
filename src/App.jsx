@@ -595,11 +595,11 @@ export default function CollaborationApp() {
   const messagesContainerRef = useRef(null)
   const prevScrollHeightRef = useRef(0)
   const messageScrollPositionsRef = useRef({})
+  const messageScrollStateRef = useRef({})
   const pendingTabScrollRestoreRef = useRef(null)
   const chatSocketRef = useRef(null)
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
-  const justSwitchedThreadRef = useRef(false)
   const previousActiveChatIdRef = useRef(null)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
@@ -608,6 +608,8 @@ export default function CollaborationApp() {
   const collapsedSpaceMenuRef = useRef(null)
   const protectedFileUrlCacheRef = useRef(new Map())
   const protectedFileInflightRef = useRef(new Map())
+  const messageActionButtonRefs = useRef({})
+  const composerAttachButtonRef = useRef(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
@@ -1929,15 +1931,7 @@ export default function CollaborationApp() {
       return
     }
 
-    // 3) When the user manually switches a thread (channel/DM), do an instant jump to latest
-    if (justSwitchedThreadRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
-      setIsAtBottom(true)
-      justSwitchedThreadRef.current = false
-      return
-    }
-
-    // 3.5) When restoring from Contexts/Files/Decisions back to Messages, don't auto-jump.
+    // 3) When restoring from another section or thread, don't auto-jump.
     if (restoreMessageScrollRef.current || pendingTabScrollRestoreRef.current) {
       return
     }
@@ -3911,13 +3905,9 @@ export default function CollaborationApp() {
     }
 
     if (previousActiveChatId !== normalizedActiveChatId) {
-      justSwitchedThreadRef.current = true
-      restoreMessageScrollRef.current = false
-      pendingTabScrollRestoreRef.current = null
-      previousChannelTabRef.current = "messages"
+      restoreMessageScrollRef.current = true
+      pendingTabScrollRestoreRef.current = normalizedActiveChatId
       prevScrollHeightRef.current = 0
-      setIsAtBottom(true)
-      setVisibleDateLabel("Today")
       setTargetMessageId(null)
       setPinnedMessageId(null)
       if (activeChannelTab !== "messages") {
@@ -4859,14 +4849,24 @@ export default function CollaborationApp() {
       })
     : []
 
+  const saveMessageScrollPosition = (chatId = getActiveChatId()) => {
+    const container = messagesContainerRef.current
+    if (!chatId || !container) return
+    const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+    messageScrollPositionsRef.current[String(chatId)] = container.scrollTop
+    messageScrollStateRef.current[String(chatId)] = {
+      scrollTop: container.scrollTop,
+      atBottom,
+    }
+    prevScrollHeightRef.current = container.scrollHeight
+  }
+
   const handleChannelTabChange = nextTab => {
     const activeChatId = getActiveChatId()
     if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
-        const container = messagesContainerRef.current
-        if (container) {
-          messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
-        }
+        saveMessageScrollPosition(activeChatId)
       }
 
       if (activeChannelTab !== "messages" && nextTab === "messages") {
@@ -4886,10 +4886,7 @@ export default function CollaborationApp() {
 
     const previousTab = previousChannelTabRef.current
     if (previousTab === "messages" && activeChannelTab !== "messages") {
-      const container = messagesContainerRef.current
-      if (container) {
-        messageScrollPositionsRef.current[String(activeChatId)] = container.scrollTop
-      }
+      saveMessageScrollPosition(activeChatId)
     }
 
     if (previousTab !== "messages" && activeChannelTab === "messages") {
@@ -4903,24 +4900,44 @@ export default function CollaborationApp() {
     if (activeChannelTab !== "messages") return
     const activeChatId = getActiveChatId()
     if (!activeChatId) return
+    const activeChatKey = String(activeChatId)
 
-    const container = messagesContainerRef.current
-    if (!container) return
     const shouldRestore =
       restoreMessageScrollRef.current ||
-      pendingTabScrollRestoreRef.current === String(activeChatId)
+      pendingTabScrollRestoreRef.current === activeChatKey
     if (!shouldRestore) return
+    if (!Object.prototype.hasOwnProperty.call(messages, activeChatKey)) return
 
-    const savedScrollTop = messageScrollPositionsRef.current[String(activeChatId)]
-    if (typeof savedScrollTop === "number") {
-      container.scrollTop = savedScrollTop
-      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
-      setIsAtBottom(atBottom)
-      prevScrollHeightRef.current = container.scrollHeight
+    const savedState = messageScrollStateRef.current[activeChatKey] || null
+    const savedScrollTop =
+      savedState && typeof savedState.scrollTop === "number"
+        ? savedState.scrollTop
+        : messageScrollPositionsRef.current[activeChatKey]
+    let frame = null
+    frame = requestAnimationFrame(() => {
+      const container = messagesContainerRef.current
+      if (container) {
+        if (savedState?.atBottom) {
+          container.scrollTop = container.scrollHeight
+          setIsAtBottom(true)
+        } else if (typeof savedScrollTop === "number") {
+          container.scrollTop = savedScrollTop
+          const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+          const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+          setIsAtBottom(atBottom)
+        } else {
+          container.scrollTop = container.scrollHeight
+          setIsAtBottom(true)
+        }
+        prevScrollHeightRef.current = container.scrollHeight
+      }
+      restoreMessageScrollRef.current = false
+      pendingTabScrollRestoreRef.current = null
+    })
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
     }
-    restoreMessageScrollRef.current = false
-    pendingTabScrollRestoreRef.current = null
   }, [activeChannelTab, activeChannel, activeDMUser, messages])
 
   // --- Actions ---
@@ -4950,8 +4967,6 @@ export default function CollaborationApp() {
     setCollapsedSpaceMenu(null)
     // When navigating to a channel, collapse the friends sidebar for focused view
     setFriendsSidebarCollapsed(true)
-    // Indicate a manual thread switch so scroll logic jumps directly to latest (no long smooth animation)
-    justSwitchedThreadRef.current = true
     if (isMobile) setMobileView("chat")
   } else {
     setShowAccessDeniedModal(true)
@@ -9672,6 +9687,12 @@ export default function CollaborationApp() {
                     }
                     const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
                     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+                    if (activeChatId) {
+                      messageScrollStateRef.current[String(activeChatId)] = {
+                        scrollTop: el.scrollTop,
+                        atBottom,
+                      }
+                    }
                     setIsAtBottom(atBottom)
                     // keep track of latest scrollHeight for preserving position when new messages arrive
                     prevScrollHeightRef.current = el.scrollHeight
@@ -9806,6 +9827,14 @@ export default function CollaborationApp() {
                         const isEditingThisMessage = editingMessageId === msg.id
                         const isActionMenuOpen = messageActionMenu?.messageId === msg.id
                         const isContextPickerOpen = messageContextPicker?.messageId === msg.id
+                        const isAttachmentOnlyMessage =
+                          Array.isArray(msg.attachments) &&
+                          msg.attachments.length > 0 &&
+                          !msg.text &&
+                          msg.type !== "meet-invite" &&
+                          msg.type !== "task"
+                        const messageActionAnchor =
+                          messageActionButtonRefs.current[String(msg.id)] || null
 
                         return (
                           <React.Fragment key={msg.id}>
@@ -9885,12 +9914,14 @@ export default function CollaborationApp() {
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative overflow-visible px-5 py-3.5 text-[15px] leading-relaxed break-words transition-all duration-200 ${
-                                  isMe
-                                    ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm" 
-                                    : isDarkMode 
-                                      ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm" 
-                                      : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm"
+                              className={`relative overflow-visible text-[15px] leading-relaxed break-words transition-all duration-200 ${
+                                  isAttachmentOnlyMessage
+                                    ? "bg-transparent shadow-none border-0 rounded-none px-0 py-0"
+                                    : isMe
+                                      ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm px-5 py-3.5" 
+                                      : isDarkMode 
+                                        ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm px-5 py-3.5" 
+                                        : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm px-5 py-3.5"
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-sky-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 <div
@@ -9898,19 +9929,34 @@ export default function CollaborationApp() {
                                   onClick={e => e.stopPropagation()}
                                 >
                                   <MessageActionButton
+                                    buttonRef={node => {
+                                      if (node) {
+                                        messageActionButtonRefs.current[String(msg.id)] = node
+                                      } else {
+                                        delete messageActionButtonRefs.current[String(msg.id)]
+                                      }
+                                    }}
+                                    isActive={isActionMenuOpen || isContextPickerOpen}
                                     isDarkMode={isDarkMode}
-                                    onClick={() =>
+                                    onClick={event => {
+                                      event.stopPropagation()
+                                      setMessageContextPicker(null)
+                                      setComposerAttachMenuOpen(false)
+                                      setComposerContextPickerOpen(false)
                                       setMessageActionMenu(prev =>
                                         prev?.messageId === msg.id ? null : { messageId: msg.id }
                                       )
-                                    }
+                                    }}
                                   />
                                   {isActionMenuOpen && (
                                     <div className={`absolute top-11 ${isMe ? 'left-0' : 'right-0'} z-30`}>
                                       <MessageActionsMenu
+                                        anchorEl={messageActionAnchor}
+                                        boundaryEl={messagesContainerRef.current}
                                         isDarkMode={isDarkMode}
                                         isSelected={isMessageSelected}
                                         emojis={EMOJIS}
+                                        onClose={() => setMessageActionMenu(null)}
                                         onReact={emoji => {
                                           toggleReaction(getActiveChatId(), msg.id, emoji)
                                           setMessageActionMenu(null)
@@ -9936,6 +9982,7 @@ export default function CollaborationApp() {
                                           setMessageActionMenu(null)
                                         }}
                                         onAddToContext={() => {
+                                          setMessageActionMenu(null)
                                           setMessageContextPicker({ messageId: msg.id })
                                         }}
                                         onMarkDecision={activeView === "channel" ? (() => {
@@ -9952,6 +9999,8 @@ export default function CollaborationApp() {
                                   {isContextPickerOpen && (
                                     <div className={`absolute top-11 z-40 ${isMe ? 'left-[calc(100%+0.5rem)] max-sm:left-0' : 'right-[calc(100%+0.5rem)] max-sm:right-0'} max-sm:top-[calc(100%+0.5rem)]`}>
                                       <AddToContextPopover
+                                        anchorEl={messageActionAnchor}
+                                        boundaryEl={messagesContainerRef.current}
                                         isDarkMode={isDarkMode}
                                         contexts={currentChannelContexts}
                                         onClose={() => setMessageContextPicker(null)}
@@ -10360,6 +10409,7 @@ export default function CollaborationApp() {
                     <div className="flex items-end gap-2 px-2 pb-1 relative">
                       <div className="relative">
                         <button
+                          ref={composerAttachButtonRef}
                           onClick={e => {
                             e.stopPropagation()
                             setComposerAttachMenuOpen(prev => !prev)
@@ -10428,6 +10478,8 @@ export default function CollaborationApp() {
                             onClick={e => e.stopPropagation()}
                           >
                             <AddToContextPopover
+                              anchorEl={composerAttachButtonRef.current}
+                              boundaryEl={messageInputRef.current || messagesContainerRef.current}
                               isDarkMode={isDarkMode}
                               contexts={currentChannelContexts}
                               onClose={() => setComposerContextPickerOpen(false)}
@@ -10949,7 +11001,6 @@ export default function CollaborationApp() {
                       setActiveView("dm")
                       // Collapse spaces sidebar when opening friends chat
                       setSidebarCollapsed(true)
-                      justSwitchedThreadRef.current = true
                       if (isMobile) setMobileView("chat")
                     }}
                     className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
@@ -11020,7 +11071,6 @@ export default function CollaborationApp() {
                         setActiveView("dm")
                         // Collapse spaces sidebar when opening friends chat
                         setSidebarCollapsed(true)
-                        justSwitchedThreadRef.current = true
                         if (isMobile) setMobileView("chat")
                       }}
                     >
