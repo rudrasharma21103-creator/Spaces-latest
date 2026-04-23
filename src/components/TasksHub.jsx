@@ -178,14 +178,14 @@ function SummaryMetric({ label, value, tone = "neutral", isDarkMode = false }) {
   return (
     <div
       className={cx(
-        "rounded-xl border px-4 py-3",
-        isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50"
+        "rounded-[18px] border px-3.5 py-3",
+        isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50/90"
       )}
     >
-      <div className={cx("text-xs font-medium", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+      <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
         {label}
       </div>
-      <div className={cx("mt-1 text-xl font-semibold", toneClass)}>{value}</div>
+      <div className={cx("mt-1.5 text-[1.15rem] font-semibold tracking-[-0.03em]", toneClass)}>{value}</div>
     </div>
   )
 }
@@ -561,48 +561,43 @@ export default function TasksHub({
 
   return (
     <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#0b0f14] text-slate-100" : "bg-[#edf3f8] text-slate-900")}>
-      <div className="flex min-h-[100dvh] w-full flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
-        {typeof onBackHome === "function" && (
-          <div className="flex items-center">
-            <button
-              onClick={onBackHome}
-              className={cx(
-                "inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium",
-                isDarkMode ? "border-[#2d323a] bg-[#121821] text-slate-200 hover:bg-[#17202a]" : "border-slate-200 bg-white/90 text-slate-700 hover:bg-white",
-                fastTransition
-              )}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </button>
-          </div>
-        )}
-
+      <div className="flex min-h-[100dvh] w-full flex-col px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
         <section
           className={cx(
-            "overflow-hidden rounded-[30px] border",
-            isDarkMode ? "border-white/10 bg-[#101720]" : "border-white/70 bg-white/85 shadow-[0_28px_80px_rgba(15,23,42,0.08)]"
+            "flex min-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[28px] border",
+            isDarkMode ? "border-white/10 bg-[#101720]" : "border-white/70 bg-white/88 shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
           )}
         >
-          <div className={cx("border-b px-5 py-5 sm:px-7 sm:py-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
-            <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-end 2xl:justify-between">
+          <div className={cx("border-b px-4 py-4 sm:px-5 lg:px-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0">
-                <div className="flex items-start gap-4">
-                  <div className={cx("flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.35rem]", isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700")}>
-                    <ClipboardList className="h-7 w-7" />
-                  </div>
+                <div className="flex items-start gap-3">
+                  {typeof onBackHome === "function" && (
+                    <button
+                      onClick={onBackHome}
+                      className={cx(
+                        "mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                        isDarkMode ? "border-[#2d323a] bg-[#121821] text-slate-200 hover:bg-[#17202a]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        fastTransition
+                      )}
+                      title="Back"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                  )}
+
                   <div className="min-w-0">
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.24em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
                       Workspace Tasks
                     </div>
-                    <h1 className={cx("mt-2 text-[2rem] font-semibold tracking-[-0.05em] sm:text-[2.4rem]", isDarkMode ? "text-white" : "text-slate-950")}>
-                      Task command center
+                    <h1 className={cx("mt-1.5 text-[1.45rem] font-semibold tracking-[-0.04em] sm:text-[1.6rem]", isDarkMode ? "text-white" : "text-slate-950")}>
+                      Tasks
                     </h1>
-                    <p className={cx("mt-3 max-w-4xl text-sm leading-7", isDarkMode ? "text-slate-400" : "text-slate-600")}>
-                      A full-page view for assignments, delegated work, and follow-ups across the workspace.
+                    <p className={cx("mt-1.5 max-w-2xl text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-600")}>
+                      Track assignments, delegated work, and follow-ups across the workspace in one focused queue.
                     </p>
                     {workspaceFallback && (
-                      <div className={cx("mt-4 inline-flex rounded-full px-3 py-1.5 text-xs font-medium", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600")}>
+                      <div className={cx("mt-3 inline-flex rounded-full px-3 py-1.5 text-xs font-medium", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600")}>
                         Showing visible workspace tasks because none are mapped directly to your profile yet.
                       </div>
                     )}
@@ -610,7 +605,7 @@ export default function TasksHub({
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:min-w-[760px]">
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:min-w-[520px] xl:grid-cols-4">
                 <SummaryMetric label="Total" value={totalCount} isDarkMode={isDarkMode} />
                 <SummaryMetric label="Completed" value={completedCount} tone="success" isDarkMode={isDarkMode} />
                 <SummaryMetric label="Pending" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
@@ -618,92 +613,86 @@ export default function TasksHub({
               </div>
             </div>
           </div>
-        </section>
 
-        <div className="grid flex-1 min-h-0 gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
-              <div className="px-5 py-5">
-                <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                  Filters
+          <div className="grid min-h-0 flex-1 gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:px-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+              <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#111922]" : "bg-white")}>
+                <div className="px-4 py-4">
+                  <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                    Controls
+                  </div>
+                  <h2 className={cx("mt-2 text-lg font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                    Refine the queue
+                  </h2>
+                  <div className="mt-4 space-y-3.5">
+                    <FilterField icon={<ListFilter className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
+                    <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
+                    <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
+                  </div>
                 </div>
-                <h2 className={cx("mt-2 text-[1.35rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                  Refine the queue
-                </h2>
-                <div className="mt-5 space-y-4">
-                  <FilterField icon={<ListFilter className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                  <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                  <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                </div>
-              </div>
-            </SurfaceCard>
+              </SurfaceCard>
 
-            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
-              <div className="px-5 py-5">
-                <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                  Overview
-                </div>
-                <div className="mt-4 space-y-4">
-                  <InsightRow label="Assigned to me" value={assignedTasks.length} note="Tasks where you are an assignee." isDarkMode={isDarkMode} />
-                  <InsightRow label="Created by me" value={createdTasks.length} note="Items you opened or delegated." isDarkMode={isDarkMode} />
-                  <InsightRow label="Filtered results" value={filteredTasks.length} note="Tasks matching the current filter set." isDarkMode={isDarkMode} />
-                </div>
+              <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#111922]" : "bg-white")}>
+                <div className="px-4 py-4">
+                  <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                    Overview
+                  </div>
+                  <div className="mt-4 space-y-4">
+                    <InsightRow label="Assigned to me" value={assignedTasks.length} note="Tasks where you are an assignee." isDarkMode={isDarkMode} />
+                    <InsightRow label="Created by me" value={createdTasks.length} note="Items you opened or delegated." isDarkMode={isDarkMode} />
+                    <InsightRow label="Visible now" value={filteredTasks.length} note="Tasks matching the active filters." isDarkMode={isDarkMode} />
+                  </div>
 
-                <div className="mt-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                      Progress
+                  <div className="mt-5 rounded-[18px] border px-3.5 py-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>Completion</div>
+                      <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>{completionRate}%</div>
                     </div>
-                    <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                      {completionRate}%
+                    <div className={cx("mt-3 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
+                      <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900", fastTransition)} style={{ width: `${completionRate}%` }} />
                     </div>
                   </div>
-                  <div className={cx("mt-3 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
-                    <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900", fastTransition)} style={{ width: `${completionRate}%` }} />
-                  </div>
                 </div>
-              </div>
-            </SurfaceCard>
-          </aside>
+              </SurfaceCard>
+            </aside>
 
-          <main className="min-h-0">
-            <SurfaceCard isDarkMode={isDarkMode} className={cx("flex min-h-full flex-col", isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
-              <div className={cx("border-b px-5 py-5 sm:px-6", isDarkMode ? "border-[#2a313a]" : "border-slate-200/80")}>
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                  <div className="min-w-0">
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                      Task Feed
+            <main className="min-h-0">
+              <SurfaceCard isDarkMode={isDarkMode} className={cx("flex min-h-full flex-col", isDarkMode ? "bg-[#111922]" : "bg-white")}>
+                <div className={cx("border-b px-4 py-4 sm:px-5", isDarkMode ? "border-[#2a313a]" : "border-slate-200/80")}>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="min-w-0">
+                      <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                        Task Feed
+                      </div>
+                      <h2 className={cx("mt-1.5 text-[1.2rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                        Full workspace list
+                      </h2>
+                      <p className={cx("mt-1.5 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                        Search, filter, and close out work without leaving the main queue.
+                      </p>
                     </div>
-                    <h2 className={cx("mt-2 text-[1.45rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                      Full workspace list
-                    </h2>
-                    <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                      Search, filter, and clear work without jumping between channels.
-                    </p>
+                    <div className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.05] text-slate-200" : "bg-slate-100 text-slate-700")}>
+                      {filteredTasks.length} visible
+                    </div>
                   </div>
-                  <div className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.05] text-slate-200" : "bg-slate-100 text-slate-700")}>
-                    {filteredTasks.length} visible
+
+                  <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(160px,1fr))]">
+                    <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
+                    <FilterField icon={<UserPlus className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
+                    <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
+                    <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
                   </div>
                 </div>
-              </div>
 
-              <div className="flex min-h-0 flex-1 flex-col px-5 py-5 sm:px-6">
-                <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.45fr)_repeat(3,minmax(180px,1fr))]">
-                  <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
-                  <FilterField icon={<UserPlus className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                  <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                  <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                </div>
-
-                <div className="mt-5 min-h-0 flex-1">
+                <div className="flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-5 sm:py-5">
                   {filteredTasks.length === 0 ? (
                     <EmptyState
                       title="No tasks match these filters"
-                      description="Try clearing one of the filters or widen the date range to surface more tasks."
+                      description="Try clearing one of the filters or widen the date range to surface more work."
                       isDarkMode={isDarkMode}
                     />
                   ) : (
-                    <div className="space-y-3 xl:max-h-[calc(100dvh-18.5rem)] xl:overflow-y-auto xl:pr-1">
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                       {filteredTasks.map(task => {
                         const taskId = String(task.id || task.timestamp || "")
                         return (
@@ -721,10 +710,10 @@ export default function TasksHub({
                     </div>
                   )}
                 </div>
-              </div>
-            </SurfaceCard>
-          </main>
-        </div>
+              </SurfaceCard>
+            </main>
+          </div>
+        </section>
       </div>
     </div>
   )

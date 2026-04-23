@@ -1,6 +1,7 @@
 import React from "react"
 import { createPortal } from "react-dom"
 import {
+  ArrowLeft,
   ArrowDown,
   Check,
   Clock3,
@@ -23,6 +24,8 @@ import {
 } from "lucide-react"
 import { CHANNEL_TABS, CONTEXT_STATUS_META } from "./LivingContext.helpers"
 import SmartImage from "./SmartImage"
+
+const cx = (...classes) => classes.filter(Boolean).join(" ")
 
 function getFileKind(file) {
   const mime = (file?.mimeType || "").toLowerCase()
@@ -851,6 +854,9 @@ function MessageFocusedContextPanel({
   ownerName,
   contributorNames,
   linkedMessages,
+  files,
+  decisions,
+  tasks,
   canEdit,
   canAddSelectedMessage,
   onAddSelectedMessage,
@@ -865,207 +871,262 @@ function MessageFocusedContextPanel({
   metrics,
   latestActivity,
 }) {
+  const visibleContributors = contributorNames.slice(0, 8)
+  const visibleFiles = files.slice(0, 3)
+  const visibleDecisions = decisions.slice(0, 3)
+  const visibleTasks = tasks.slice(0, 3)
+  const artifactCount = visibleFiles.length + visibleDecisions.length + visibleTasks.length
+
   return (
-    <div className="absolute inset-0 z-40">
-      <div className={`absolute inset-0 ${isDarkMode ? "bg-slate-950/58" : "bg-slate-900/20"} backdrop-blur-[10px]`} onClick={onClose} />
-      <section
-        className={`absolute inset-0 flex min-h-0 flex-col overflow-hidden animate-fade-in ${
-          isDarkMode ? "bg-[#071019]" : "bg-[#edf3f8]"
-        }`}
-        style={panelStyle}
-        onClick={event => event.stopPropagation()}
-      >
-        <div className={`relative shrink-0 overflow-hidden border-b ${isDarkMode ? "border-slate-800/90" : "border-slate-200/80"}`}>
-          <div className={`absolute inset-0 ${isDarkMode ? "bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_30%),linear-gradient(180deg,rgba(7,16,25,0.98),rgba(9,18,29,0.98))]" : "bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.10),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,248,252,0.98))]"}`} />
-          <div className="relative px-5 py-4 sm:px-6 sm:py-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600 shadow-sm"}`}>
-                    Context
-                  </span>
-                  <span className={`rounded-full border px-2.5 py-1 text-xs ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
-                    {linkedMessages.length} message{linkedMessages.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h3 className={`text-[1.45rem] font-semibold tracking-[-0.04em] sm:text-[1.8rem] ${isDarkMode ? "text-white" : "text-slate-950"}`}>
-                      {context.title}
-                    </h3>
-                    <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
-                      {summary || "Captured discussion, contributors, and follow-up actions collected in one tighter review surface."}
-                    </p>
-                    <div className={`mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                      <span className="inline-flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Owner {ownerName}
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        {contributorNames.length} contributor{contributorNames.length === 1 ? "" : "s"}
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <Clock3 className="h-4 w-4" />
-                        Updated {formatTime(context.updatedAt)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[420px] xl:grid-cols-4">
-                    {metrics.map(metric => {
-                      const MetricIcon = metric.icon
-                      return (
-                        <div key={metric.label} className={`rounded-[1.2rem] border px-3.5 py-3 ${isDarkMode ? "border-white/8 bg-white/[0.04]" : "border-white/80 bg-white/90 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"}`}>
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{metric.label}</div>
-                              <div className={`mt-1 text-[1.2rem] font-semibold tracking-[-0.03em] ${isDarkMode ? "text-white" : "text-slate-900"}`}>{metric.value}</div>
-                            </div>
-                            <span className={`flex h-9 w-9 items-center justify-center rounded-2xl ${isDarkMode ? "bg-sky-500/10 text-sky-300" : "bg-sky-50 text-sky-700"}`}>
-                              <MetricIcon className="h-4 w-4" />
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {contributorNames.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {contributorNames.slice(0, 8).map(name => (
-                      <span key={name} className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-700 shadow-sm"}`}>
-                        <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-600"}`}>
-                          {getNameInitials(name)}
-                        </span>
-                        {name}
-                      </span>
-                    ))}
-                  </div>
-                )}
+    <div className={`flex h-full min-h-0 w-full flex-col overflow-hidden animate-fade-in ${isDarkMode ? "bg-[#08111a]" : "bg-[#eff4f8]"}`} style={panelStyle}>
+      <section className="mx-auto flex min-h-0 h-full w-full max-w-[1540px] flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+        <header className={cx("shrink-0 border-b pb-5", isDarkMode ? "border-slate-800/90" : "border-slate-200/80")}>
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={onClose}
+                  className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium transition ${isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back
+                </button>
+                <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600 shadow-sm"}`}>
+                  Context
+                </span>
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>
+                  {statusMeta.label}
+                </span>
               </div>
 
-              <button onClick={onClose} className={`rounded-2xl p-2.5 transition ${isDarkMode ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-slate-500 hover:bg-white hover:text-slate-800"}`}>
-                <X className="w-5 h-5" />
-              </button>
+              <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <h1 className={`text-[1.7rem] font-semibold tracking-[-0.05em] sm:text-[2rem] ${isDarkMode ? "text-white" : "text-slate-950"}`}>
+                    {context.title}
+                  </h1>
+                  <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                    {summary || "Captured discussion, ownership, and follow-up work organized into one focused review workflow."}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2.5">
+                  {metrics.slice(0, 3).map(metric => (
+                    <div key={metric.label} className={`rounded-[18px] border px-3.5 py-3 ${isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200/80 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.05)]"}`}>
+                      <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                        {metric.label}
+                      </div>
+                      <div className={`mt-1.5 text-[1.15rem] font-semibold tracking-[-0.04em] ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                        {metric.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                <span className="inline-flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Owner {ownerName}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  {contributorNames.length} contributor{contributorNames.length === 1 ? "" : "s"}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Clock3 className="h-4 w-4" />
+                  Updated {formatTime(context.updatedAt)}
+                </span>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div className="flex-1 min-h-0 overflow-hidden px-4 py-4 sm:px-5 sm:py-5">
-          <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,2.3fr)_320px]">
-            <section className={`flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border ${isDarkMode ? "border-slate-800/90 bg-[#0b1218]" : "border-slate-200/80 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.06)]"}`}>
-              <div className={`shrink-0 border-b px-4 py-3.5 sm:px-5 ${isDarkMode ? "border-slate-800/80 bg-white/[0.02]" : "border-slate-200/80 bg-slate-50/85"}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${isDarkMode ? "bg-sky-500/10 text-sky-300" : "bg-sky-50 text-sky-700"}`}>
-                      <MessageSquare className="h-4.5 w-4.5" />
-                    </span>
-                    <div>
-                      <div className={`text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Context Messages</div>
-                      <div className={`text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>The conversation sits front and center in a tighter review feed.</div>
-                    </div>
-                  </div>
-                  <div className={`rounded-full px-3 py-1 text-xs font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600 shadow-sm"}`}>
-                    {linkedMessages.length}
-                  </div>
+            {canEdit && (
+              <button onClick={onEdit} className={`shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold transition ${isDarkMode ? "bg-sky-500 text-white hover:bg-sky-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
+                Edit context
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="grid min-h-0 flex-1 gap-6 pt-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <section className="flex min-h-0 flex-col">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                  Linked Messages
+                </div>
+                <div className={`mt-1 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                  Read the captured conversation in sequence, without the extra dashboard noise.
                 </div>
               </div>
+              <div className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600 shadow-sm"}`}>
+                {linkedMessages.length} in view
+              </div>
+            </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-                {linkedMessages.length === 0 ? (
-                  <div className={`flex min-h-[260px] items-center justify-center rounded-[1.4rem] border border-dashed px-6 text-center ${isDarkMode ? "border-slate-700/70 bg-[#0f1318] text-slate-500" : "border-slate-200 bg-slate-50/70 text-slate-500"}`}>
-                    No linked messages yet.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {linkedMessages.map((message, index) => (
-                      <article key={message.id} className={`overflow-hidden rounded-[1.25rem] border ${isDarkMode ? "border-slate-800/90 bg-[#0f1720]" : "border-slate-200/90 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.05)]"}`}>
-                        <div className={`px-4 py-3 sm:px-5 ${isDarkMode ? "border-b border-slate-800/80" : "border-b border-slate-200/80"}`}>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex min-w-0 items-center gap-3">
-                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.95rem] text-sm font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
-                                {getNameInitials(message.author)}
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+              {linkedMessages.length === 0 ? (
+                <div className={`flex min-h-[300px] items-center justify-center rounded-[24px] border border-dashed px-6 text-center ${isDarkMode ? "border-slate-700/70 bg-[#0d151d] text-slate-500" : "border-slate-200 bg-white/80 text-slate-500"}`}>
+                  No linked messages yet.
+                </div>
+              ) : (
+                <div className="space-y-4 pb-1">
+                  {linkedMessages.map((message, index) => (
+                    <div key={message.id} className="relative pl-5">
+                      {index < linkedMessages.length - 1 ? (
+                        <span className={cx("absolute left-[9px] top-16 bottom-[-18px] w-px", isDarkMode ? "bg-slate-800" : "bg-slate-200")} />
+                      ) : null}
+                      <span className={cx("absolute left-0 top-8 h-[10px] w-[10px] rounded-full", isDarkMode ? "bg-sky-400" : "bg-sky-500")} />
+
+                      <article className={`overflow-hidden rounded-[22px] border ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_14px_34px_rgba(15,23,42,0.05)]"}`}>
+                        <div className={`flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] text-sm font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
+                              {getNameInitials(message.author)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className={`truncate text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                                {message.author}
                               </div>
-                              <div className="min-w-0">
-                                <div className={`truncate text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>{message.author}</div>
-                                <div className={`mt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-                                  Message {String(index + 1).padStart(2, "0")}
-                                </div>
+                              <div className={`mt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                                Message {String(index + 1).padStart(2, "0")}
                               </div>
                             </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
                             <div className={`rounded-full px-3 py-1 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
                               {formatTime(message.timestamp)}
                             </div>
                           </div>
                         </div>
-                        <div className="px-4 py-4 sm:px-5">
-                          <p className={`whitespace-pre-wrap break-words text-[15px] leading-7 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+
+                        <div className="px-5 py-5">
+                          <p className={`whitespace-pre-wrap break-words text-[15px] leading-8 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
                             {getMessagePreview(message)}
                           </p>
                         </div>
                       </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
 
-            <aside className="min-h-0 overflow-y-auto">
+          <aside className="min-h-0">
+            <div className="h-full overflow-y-auto">
               <div className="space-y-4">
-                <section className={`rounded-[1.4rem] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0f161e]" : "border-slate-200/80 bg-white shadow-[0_14px_32px_rgba(15,23,42,0.05)]"}`}>
-                  <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Snapshot</div>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                  <div className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                    Snapshot
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                     {metrics.map(metric => {
                       const MetricIcon = metric.icon
                       return (
-                        <div key={metric.label} className={`rounded-[1.1rem] border p-3 ${isDarkMode ? "border-white/8 bg-white/[0.04]" : "border-slate-200 bg-slate-50/70"}`}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{metric.label}</div>
-                              <div className={`mt-1 text-[1.35rem] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>{metric.value}</div>
+                        <div key={metric.label} className={`flex items-center justify-between rounded-[16px] border px-3 py-2.5 ${isDarkMode ? "border-white/8 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
+                          <div>
+                            <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                              {metric.label}
                             </div>
-                            <span className={`flex h-9 w-9 items-center justify-center rounded-2xl ${isDarkMode ? "bg-sky-500/10 text-sky-300" : "bg-sky-50 text-sky-700"}`}>
-                              <MetricIcon className="h-4 w-4" />
-                            </span>
+                            <div className={`mt-1 text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                              {metric.value}
+                            </div>
                           </div>
+                          <span className={`flex h-8 w-8 items-center justify-center rounded-2xl ${isDarkMode ? "bg-sky-500/10 text-sky-300" : "bg-sky-50 text-sky-700"}`}>
+                            <MetricIcon className="h-4 w-4" />
+                          </span>
                         </div>
                       )
                     })}
                   </div>
                 </section>
 
-                <section className={`rounded-[1.4rem] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0f161e]" : "border-slate-200/80 bg-white shadow-[0_14px_32px_rgba(15,23,42,0.05)]"}`}>
-                  <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Contributors</div>
-                  <div className="mt-3 space-y-2">
-                    {contributorNames.length > 0 ? contributorNames.slice(0, 8).map(name => (
-                      <div key={name} className={`flex items-center gap-3 rounded-[1rem] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
-                        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-white text-slate-600"}`}>
-                          {getNameInitials(name)}
-                        </span>
-                        <span className="min-w-0 truncate text-sm font-medium">{name}</span>
-                      </div>
-                    )) : (
-                      <div className={isDarkMode ? "text-sm text-slate-500" : "text-sm text-slate-500"}>No contributors yet.</div>
-                    )}
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Supporting context</div>
+                    <div className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                      {artifactCount}
+                    </div>
+                  </div>
+
+                  <div className={`mt-4 border-t pt-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
+                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Files</div>
+                    <div className="mt-2 space-y-2">
+                      {visibleFiles.length > 0 ? visibleFiles.map(file => (
+                        <div key={file.id || file.fileId || file.name} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                          <div className="truncate text-sm font-medium">{file.name || "Untitled file"}</div>
+                          <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{file.sourceLabel || "Linked file"}</div>
+                        </div>
+                      )) : (
+                        <div className="text-sm text-slate-500">No files linked yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={`mt-4 border-t pt-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
+                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Decisions</div>
+                    <div className="mt-2 space-y-2">
+                      {visibleDecisions.length > 0 ? visibleDecisions.map(decision => (
+                        <div key={decision.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                          <div className="line-clamp-2 text-sm font-medium">{decision.text || "Decision captured"}</div>
+                          <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{decision.author || "Unknown"}</div>
+                        </div>
+                      )) : (
+                        <div className="text-sm text-slate-500">No decisions captured yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={`mt-4 border-t pt-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
+                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Tasks</div>
+                    <div className="mt-2 space-y-2">
+                      {visibleTasks.length > 0 ? visibleTasks.map(task => (
+                        <div key={task.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="line-clamp-2 text-sm font-medium">{task.text || task.message || "Untitled task"}</div>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${String(task.status) === "completed" ? (isDarkMode ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-100 text-emerald-700") : (isDarkMode ? "bg-amber-500/10 text-amber-300" : "bg-amber-100 text-amber-700")}`}>
+                              {String(task.status) === "completed" ? "Done" : "Open"}
+                            </span>
+                          </div>
+                          <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{task.assigneeLabel || "Unassigned"}</div>
+                        </div>
+                      )) : (
+                        <div className="text-sm text-slate-500">No tasks linked yet.</div>
+                      )}
+                    </div>
                   </div>
                 </section>
 
-                <section className={`rounded-[1.4rem] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0f161e]" : "border-slate-200/80 bg-white shadow-[0_14px_32px_rgba(15,23,42,0.05)]"}`}>
-                  <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Latest Activity</div>
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                  <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>People and activity</div>
                   <div className={`mt-3 text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
                     {latestActivity?.label || "No activity has been recorded for this context yet."}
                   </div>
+
+                  <div className={`mt-4 border-t pt-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
+                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Contributors</div>
+                    <div className="mt-2 space-y-2">
+                      {visibleContributors.length > 0 ? visibleContributors.map(name => (
+                        <div key={name} className={`flex items-center gap-3 rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                          <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-white text-slate-600"}`}>
+                            {getNameInitials(name)}
+                          </span>
+                          <span className="min-w-0 truncate text-sm font-medium">{name}</span>
+                        </div>
+                      )) : (
+                        <div className="text-sm text-slate-500">No contributors yet.</div>
+                      )}
+                    </div>
+                  </div>
                 </section>
               </div>
-            </aside>
-          </div>
+            </div>
+          </aside>
         </div>
 
-        <div className={`shrink-0 border-t px-4 py-3.5 sm:px-5 ${isDarkMode ? "border-slate-800/90 bg-[#08111a]" : "border-slate-200/80 bg-white/95"}`}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className={`mt-6 shrink-0 border-t pt-4 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/80"}`}>
+          <div className={`flex flex-col gap-3 rounded-[22px] border px-4 py-4 lg:flex-row lg:items-center lg:justify-between ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={onAddSelectedMessage}
@@ -1091,11 +1152,9 @@ function MessageFocusedContextPanel({
                 Create task
               </button>
             </div>
-            {canEdit && (
-              <button onClick={onEdit} className={`rounded-full px-4 py-2.5 text-sm font-semibold transition ${isDarkMode ? "bg-sky-500 text-white hover:bg-sky-400" : "bg-slate-900 text-white hover:bg-slate-800"}`}>
-                Edit context
-              </button>
-            )}
+            <button onClick={onClose} className={`rounded-full border px-4 py-2.5 text-sm font-medium transition ${isDarkMode ? "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+              Back to contexts
+            </button>
           </div>
         </div>
       </section>
@@ -1141,6 +1200,9 @@ export function LivingContextPanel({
       ownerName={ownerName}
       contributorNames={contributorNames}
       linkedMessages={linkedMessages}
+      files={files}
+      decisions={decisions}
+      tasks={tasks}
       canEdit={canEdit}
       canAddSelectedMessage={canAddSelectedMessage}
       onAddSelectedMessage={onAddSelectedMessage}

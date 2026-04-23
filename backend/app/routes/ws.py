@@ -51,7 +51,9 @@ async def websocket_endpoint(
 
             # Broadcast to all clients in this chat
             await manager.broadcast(chat_id, data)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
         # Remove from connection manager (pass user_id so presence updates)
         await manager.disconnect(chat_id, websocket, user_id=user_id)
 
@@ -88,6 +90,7 @@ async def websocket_notifications(websocket: WebSocket):
     # Determine user's domain and role (best-effort) to allow domain-scoped admin notifications
     domain = None
     role = None
+    u = None
     try:
         if user_id:
             u = users_collection.find_one({"id": user_id}) or users_collection.find_one({"id": int(user_id)})
@@ -150,11 +153,13 @@ async def websocket_notifications(websocket: WebSocket):
                     logger.info(f"WebRTC signaling: {msg_type} from {user_id} to {target_user_id}")
                     await manager.send_to_user(str(target_user_id), data)
                 continue
-            
+
             # For other notifications we route to the specific user id
             if user_id:
                 await manager.send_to_user(user_id, data)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
         # mark user offline and update lastActive
         try:
             if user_id:

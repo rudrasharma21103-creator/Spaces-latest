@@ -63,6 +63,7 @@ import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
 import TasksHub from "./components/TasksHub"
+import ContextsHub from "./components/ContextsHub"
 import DocumentsHub from "./components/DocumentsHub"
 import {
   AddToContextPopover,
@@ -214,6 +215,8 @@ export default function CollaborationApp() {
   const [activeView, setActiveView] = useState("home")
   const [activeDMUser, setActiveDMUser] = useState(null)
   const [homeSection, setHomeSection] = useState("overview")
+  const [dedicatedPageReturn, setDedicatedPageReturn] = useState(null)
+  const [contextsSourceView, setContextsSourceView] = useState(null)
   const [connectPreferredPane, setConnectPreferredPane] = useState("discover")
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
@@ -258,6 +261,133 @@ export default function CollaborationApp() {
   const [contextDraft, setContextDraft] = useState(null)
   const [editingContextId, setEditingContextId] = useState(null)
   const [taskModalDraft, setTaskModalDraft] = useState(null)
+
+  const pushAppRoute = path => {
+    if (typeof window === "undefined" || window.location.pathname === path) return
+    try {
+      window.history.pushState({}, "", path)
+    } catch (error) {
+      console.warn("Route navigation fallback", error)
+    }
+  }
+
+  const restoreFromDedicatedPage = React.useCallback(({ allowDedicated = true } = {}) => {
+    if (dedicatedPageReturn?.view === "channel" || dedicatedPageReturn?.view === "dm") {
+      setOpenContextId(null)
+      setActiveView(dedicatedPageReturn.view)
+      setActiveChannelTab(dedicatedPageReturn.channelTab || "messages")
+      return "/"
+    }
+    if (allowDedicated && dedicatedPageReturn?.view === "tasks") {
+      setOpenContextId(null)
+      setActiveView("tasks")
+      return "/tasks"
+    }
+    if (allowDedicated && dedicatedPageReturn?.view === "contexts") {
+      const targetContextId = dedicatedPageReturn.openContextId || null
+      setContextsSourceView(dedicatedPageReturn.contextsSourceView || "channel")
+      setOpenContextId(targetContextId)
+      setActiveChannelTab("messages")
+      setActiveView("contexts")
+      return targetContextId ? `/contexts/${encodeURIComponent(String(targetContextId))}` : "/contexts"
+    }
+    setOpenContextId(null)
+    setActiveView("home")
+    setHomeSection(dedicatedPageReturn?.homeSection || "overview")
+    return "/"
+  }, [dedicatedPageReturn])
+
+  const openTasksPage = React.useCallback(() => {
+    if (typeof window !== "undefined" && activeView === "tasks" && window.location.pathname === "/tasks") return
+    setDedicatedPageReturn({
+      view: activeView,
+      channelTab: activeChannelTab,
+      homeSection,
+      openContextId,
+      contextsSourceView,
+    })
+    setOpenContextId(null)
+    setActiveView("tasks")
+    pushAppRoute("/tasks")
+  }, [activeChannelTab, activeView, contextsSourceView, homeSection, openContextId])
+
+  const openContextsPage = React.useCallback((contextId = null) => {
+    const targetPath = contextId ? `/contexts/${encodeURIComponent(String(contextId))}` : "/contexts"
+    if (
+      typeof window !== "undefined" &&
+      activeView === "contexts" &&
+      window.location.pathname === targetPath &&
+      String(openContextId || "") === String(contextId || "")
+    ) return
+    const sourceView = activeView === "contexts" ? contextsSourceView || "channel" : activeView === "dm" ? "dm" : "channel"
+    setDedicatedPageReturn({
+      view: activeView,
+      channelTab: activeChannelTab,
+      homeSection,
+      openContextId,
+      contextsSourceView,
+    })
+    setContextsSourceView(sourceView)
+    setActiveChannelTab("messages")
+    setOpenContextId(contextId)
+    setActiveView("contexts")
+    pushAppRoute(targetPath)
+  }, [activeChannelTab, activeView, contextsSourceView, homeSection, openContextId])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return undefined
+
+    const applyRoute = () => {
+      const pathname = window.location.pathname.replace(/\/+$/, "") || "/"
+
+      if (pathname === "/tasks") {
+        setOpenContextId(null)
+        setActiveView("tasks")
+        return
+      }
+
+      if (pathname === "/contexts" || pathname.startsWith("/contexts/")) {
+        const contextId = pathname.startsWith("/contexts/") ? decodeURIComponent(pathname.slice("/contexts/".length)) : null
+        setContextsSourceView(prev => prev || (activeDMUser ? "dm" : activeChannel ? "channel" : prev))
+        setActiveChannelTab("messages")
+        setOpenContextId(contextId || null)
+        setActiveView("contexts")
+        return
+      }
+
+      if (activeView === "tasks" || activeView === "contexts") {
+        restoreFromDedicatedPage({ allowDedicated: false })
+      }
+    }
+
+    if (!initialRouteAppliedRef.current) {
+      initialRouteAppliedRef.current = true
+      applyRoute()
+    }
+    window.addEventListener("popstate", applyRoute)
+    return () => window.removeEventListener("popstate", applyRoute)
+  }, [activeChannel, activeDMUser, activeView, restoreFromDedicatedPage])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return
+
+    const targetPath =
+      activeView === "tasks"
+        ? "/tasks"
+        : activeView === "contexts"
+          ? openContextId
+            ? `/contexts/${encodeURIComponent(String(openContextId))}`
+            : "/contexts"
+          : "/"
+
+    if (window.location.pathname !== targetPath) {
+      try {
+        window.history.replaceState({}, "", targetPath)
+      } catch (error) {
+        console.warn("Route replace fallback", error)
+      }
+    }
+  }, [activeView, openContextId])
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
@@ -569,6 +699,9 @@ export default function CollaborationApp() {
   const userSocketRef = useRef(null)
   const callTimerRef = useRef(null)
   const callerCountdownRef = useRef(null)
+  const currentUserRef = useRef(currentUser)
+  const orgInfoRef = useRef(orgInfo)
+  const orgFormRef = useRef(orgForm)
 
   // Google Integration State
   const [showGoogleAppsMenu, setShowGoogleAppsMenu] = useState(false)
@@ -608,11 +741,24 @@ export default function CollaborationApp() {
   const restoreMessageScrollRef = useRef(false)
   const contextSaveTimeoutRef = useRef(null)
   const activeContextStateRef = useRef({ chatId: null, loaded: false })
+  const initialRouteAppliedRef = useRef(false)
   const collapsedSpaceMenuRef = useRef(null)
   const protectedFileUrlCacheRef = useRef(new Map())
   const protectedFileInflightRef = useRef(new Map())
   const messageActionButtonRefs = useRef({})
   const composerAttachButtonRef = useRef(null)
+
+  useEffect(() => {
+    currentUserRef.current = currentUser
+  }, [currentUser])
+
+  useEffect(() => {
+    orgInfoRef.current = orgInfo
+  }, [orgInfo])
+
+  useEffect(() => {
+    orgFormRef.current = orgForm
+  }, [orgForm])
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
 
@@ -1367,6 +1513,9 @@ export default function CollaborationApp() {
       import("./services/ws")
         .then(({ connectUserSocket }) => {
           userSocket = connectUserSocket(async data => {
+              const latestUser = currentUserRef.current
+              const latestOrgInfo = orgInfoRef.current
+              const latestOrgForm = orgFormRef.current
               if (!data || !data.type) return
 
               console.log('User socket received message:', data.type, data)
@@ -1378,7 +1527,7 @@ export default function CollaborationApp() {
                   if (!domain) return
 
                   // refresh org info
-                  let oj = orgInfo
+                  let oj = latestOrgInfo
                   try {
                     const resOrg = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(domain)}`)
                     if (resOrg.ok) { oj = await resOrg.json(); setOrgInfo(oj) }
@@ -1392,21 +1541,21 @@ export default function CollaborationApp() {
                       const usersList = Array.isArray(uj) ? uj : []
                       setAdminUsers(usersList)
 
-                      const adminEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+                      const adminEmail = (latestOrgForm && latestOrgForm.adminEmail) || (oj && oj.adminEmail) || ''
                       let adminUser = null
                       if (adminEmail) adminUser = usersList.find(u => String(u.email).toLowerCase() === String(adminEmail).toLowerCase())
                       if (!adminUser) adminUser = usersList.find(u => u.role === 'org_admin' || u.role === 'admin')
                       if (!adminUser && usersList.length > 0) adminUser = usersList[0]
 
-                      const promptEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+                      const promptEmail = (latestOrgForm && latestOrgForm.adminEmail) || (oj && oj.adminEmail) || ''
                       if (promptEmail) {
                         try { setSetPasswordEmail(promptEmail) } catch (e) {}
                         try { if (adminUser) setPendingAdminUserId(adminUser.id) } catch (e) {}
                         // Only show the Set Password modal to the registering admin (when they're the unauthenticated
                         // user who submitted the org form) or to a connected user whose email matches the org admin email.
                         try {
-                          const loggedEmail = (currentUser && currentUser.email) ? String(currentUser.email).toLowerCase() : ''
-                          const registeringEmail = (orgForm && orgForm.adminEmail) ? String(orgForm.adminEmail).toLowerCase() : ''
+                          const loggedEmail = (latestUser && latestUser.email) ? String(latestUser.email).toLowerCase() : ''
+                          const registeringEmail = (latestOrgForm && latestOrgForm.adminEmail) ? String(latestOrgForm.adminEmail).toLowerCase() : ''
                           const orgRecordEmail = (oj && oj.adminEmail) ? String(oj.adminEmail).toLowerCase() : ''
                           const targetEmail = String(promptEmail).toLowerCase()
                           const isRegisteringUser = registeringEmail && registeringEmail === targetEmail && !loggedEmail
@@ -1471,7 +1620,7 @@ export default function CollaborationApp() {
               
               if (data.type === 'webrtc-call-request') {
                 // Incoming call - check if this message is for current user
-                if (String(data.targetUserId) === String(currentUser?.id)) {
+                if (String(data.targetUserId) === String(latestUser?.id)) {
                   console.log('Incoming WebRTC call from:', data.fromUserName)
                   // Clear any existing timeouts and countdown
                   if (incomingTimeoutRef.current) {
@@ -1562,7 +1711,7 @@ export default function CollaborationApp() {
             }
 
             if (data.type === "friends_updated") {
-              refreshRelationshipState(currentUser?.id).catch(e => {
+              refreshRelationshipState(latestUser?.id).catch(e => {
                 console.error("Failed to refresh friend state", e)
               })
               return
@@ -1586,8 +1735,8 @@ export default function CollaborationApp() {
                   try {
                     const allUsers = await Storage.getUsers({ forceRefresh: true })
                     if (Array.isArray(allUsers)) setUsers(allUsers)
-                    if (currentUser?.friends?.length > 0) {
-                      const friendsList = await Storage.getFriends(currentUser.friends, { forceRefresh: true })
+                    if (latestUser?.friends?.length > 0) {
+                      const friendsList = await Storage.getFriends(latestUser.friends, { forceRefresh: true })
                       if (Array.isArray(friendsList)) setFriends(friendsList)
                     }
                   } catch (e) {
@@ -1628,7 +1777,7 @@ export default function CollaborationApp() {
                 return
               }
 
-              if (isNotificationDismissed(currentUser?.id, incoming.id)) return
+              if (isNotificationDismissed(latestUser?.id, incoming.id)) return
 
               setCurrentUser(prev => {
                 if (!prev) return prev
@@ -1638,7 +1787,7 @@ export default function CollaborationApp() {
               })
 
               if (incoming.id?.startsWith("fr-accept-") || incoming.type === "friend_request") {
-                refreshRelationshipState(currentUser?.id).catch(e => {
+                refreshRelationshipState(latestUser?.id).catch(e => {
                   console.error('Failed to refresh users after incoming friend notification', e)
                 })
               } else {
@@ -1667,13 +1816,16 @@ export default function CollaborationApp() {
 
     return () => {
       try {
-        if (userSocket) userSocket.close()
+        if (userSocket) {
+          userSocket.close()
+          if (userSocketRef.current === userSocket) userSocketRef.current = null
+        }
       } catch (e) {}
       try {
         if (refreshTimeout) clearTimeout(refreshTimeout)
       } catch (e) {}
     }
-  }, [isAuthenticated, currentUser?.spaces, currentUser?.friends, currentUser?.id])
+  }, [isAuthenticated, currentUser?.id])
 
   useEffect(() => {
     if (activeView === "meeting" && videoRef.current) {
@@ -2737,8 +2889,8 @@ export default function CollaborationApp() {
   }
 
   const openTaskDetailView = task => {
-    setActiveView("tasks")
     setActiveSpace(null)
+    openTasksPage()
   }
 
   // Connect Google Calendar
@@ -4062,8 +4214,9 @@ export default function CollaborationApp() {
   }
 
   const getActiveChatId = () => {
-    if (activeView === "channel") return Number(activeChannel)
-    if (activeView === "dm" && activeDMUser && currentUser) {
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    if (resolvedView === "channel") return Number(activeChannel)
+    if (resolvedView === "dm" && activeDMUser && currentUser) {
       const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
       return `dm_${ids[0]}_${ids[1]}`
     }
@@ -4071,13 +4224,14 @@ export default function CollaborationApp() {
   }
 
   const activeChatId = useMemo(() => {
-    if (activeView === "channel") return Number(activeChannel)
-    if (activeView === "dm" && activeDMUser && currentUser) {
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    if (resolvedView === "channel") return Number(activeChannel)
+    if (resolvedView === "dm" && activeDMUser && currentUser) {
       const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
       return `dm_${ids[0]}_${ids[1]}`
     }
     return null
-  }, [activeView, activeChannel, activeDMUser, currentUser])
+  }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser])
 
   const currentMessages = useMemo(
     () => (activeChatId ? messages[activeChatId] || [] : []),
@@ -4491,7 +4645,7 @@ export default function CollaborationApp() {
 
   const currentChannelContexts = useMemo(() => {
     const chatId = getActiveChatId()
-    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return []
+    if (!chatId || !["channel", "dm", "contexts"].includes(activeView)) return []
     return contextItems.filter(context => String(context.channelId) === String(chatId))
   }, [activeView, activeChannel, activeDMUser, currentUser, contextItems])
 
@@ -4529,7 +4683,8 @@ export default function CollaborationApp() {
 
   const isContextManager = context => {
     if (!context || !currentUser) return false
-    if (activeView === "dm") {
+    const managerView = activeView === "contexts" ? contextsSourceView : activeView
+    if (managerView === "dm") {
       return String(context.ownerId) === String(currentUser.id)
     }
     const role = getChannelRole(currentUser.id)
@@ -4722,8 +4877,8 @@ export default function CollaborationApp() {
     setContextItems(prev => [...prev, nextContext])
     setContextDraft(null)
     setSelectedMessageIds([])
-    setOpenContextId(created.id)
     setActiveChannelTab("messages")
+    openContextsPage(created.id)
   }
 
   const addMessageToContext = async (contextId, messageId) => {
@@ -4966,7 +5121,7 @@ export default function CollaborationApp() {
   )
 
   const openContext = contextId => {
-    setOpenContextId(contextId)
+    openContextsPage(contextId)
     setMessageActionMenu(null)
     setMessageContextPicker(null)
   }
@@ -5054,6 +5209,11 @@ export default function CollaborationApp() {
   }
 
   const handleChannelTabChange = nextTab => {
+    if (nextTab === "contexts") {
+      openContextsPage(null)
+      return
+    }
+
     const activeChatId = getActiveChatId()
     if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
@@ -8245,6 +8405,86 @@ export default function CollaborationApp() {
           resolveProtectedFileUrl={fetchProtectedUrlAndCreateObjectURL}
           onThemeChange={setIsDarkMode}
         />
+      ) : activeView === "contexts" ? (
+        currentContext ? (
+          <LivingContextPanel
+            isDarkMode={isDarkMode}
+            context={currentContext}
+            ownerName={getContextOwnerName(currentContext.ownerId)}
+            contributorNames={(currentContext.contributorIds || []).map(getContextOwnerName)}
+            linkedMessages={currentContextMessages}
+            files={currentContextFiles}
+            decisions={currentContextDecisions}
+            tasks={currentContextTasks.map(task => ({
+              ...task,
+              assigneeLabel: (task.assigneeIds || []).map(getContextOwnerName).join(", ") || "Unassigned",
+            }))}
+            activity={currentContextActivity}
+            canEdit={isContextManager(currentContext)}
+            canAddSelectedMessage={selectedMessageIds.length > 0}
+            onAddSelectedMessage={async () => {
+              for (const messageId of selectedMessageIds) {
+                await addMessageToContext(currentContext.id, messageId)
+              }
+            }}
+            onMarkDecision={contextsSourceView === "channel" ? (() => {
+              const selected = getMessageById(selectedMessageIds[0])
+              if (selected) markMessageDecision(selected)
+            }) : undefined}
+            onCreateTask={() => {
+              const selected = getMessageById(selectedMessageIds[0])
+              if (selected) openTaskFromMessage(selected)
+            }}
+            onEdit={() => {
+              setEditingContextId(currentContext.id)
+              setContextDraft({
+                title: currentContext.title,
+                summary: currentContext.summary,
+                status: currentContext.status,
+                ownerId: String(currentContext.ownerId),
+                messageIds: currentContext.linkedMessageIds || [],
+              })
+            }}
+            onClose={() => {
+              setOpenContextId(null)
+              pushAppRoute("/contexts")
+            }}
+            formatTime={formatContextTime}
+          />
+        ) : (
+          <ContextsHub
+            isDarkMode={isDarkMode}
+            contexts={currentChannelContexts}
+            renderOwner={getContextOwnerName}
+            formatUpdatedTime={formatContextTime}
+            onBack={() => {
+              pushAppRoute(restoreFromDedicatedPage())
+            }}
+            onOpenContext={openContext}
+            sourceLabel={
+              contextsSourceView === "dm"
+                ? `Direct message with ${getUser(activeDMUser)?.name || "contact"}`
+                : currentSpace?.name && activeChannelData?.name
+                  ? `${currentSpace.name} / #${activeChannelData.name}`
+                  : activeChannelData?.name
+                    ? `#${activeChannelData.name}`
+                    : ""
+            }
+          />
+        )
+      ) : activeView === "tasks" ? (
+        <TasksHub
+          isDarkMode={isDarkMode}
+          tasks={tasksList}
+          messages={messages}
+          currentUser={currentUser}
+          channels={allWorkspaceChannels}
+          completingTaskId={completingTaskId}
+          onBackHome={() => {
+            pushAppRoute(restoreFromDedicatedPage())
+          }}
+          onMarkTaskComplete={handleMarkTaskComplete}
+        />
       ) : (
         <>
       {/* Mobile Sidebar Overlay */}
@@ -8258,7 +8498,7 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          sidebarCollapsed ? "w-20" : "w-80"
+          sidebarCollapsed ? "w-[92px]" : "w-[272px]"
         } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left z-[70]" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
@@ -8300,7 +8540,7 @@ export default function CollaborationApp() {
             )}
             {isMobile && (
               <button
-                onClick={() => { setActiveView('tasks'); setActiveSpace(null); setMobileView('chat') }}
+                onClick={() => { setActiveSpace(null); openTasksPage(); setMobileView('chat') }}
                 className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Tasks"
               >
@@ -8343,7 +8583,7 @@ export default function CollaborationApp() {
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
-                onClick={() => { setActiveView('tasks'); setActiveSpace(null) }}
+                onClick={() => { setActiveSpace(null); openTasksPage() }}
                 className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Tasks"
               >
@@ -9029,6 +9269,73 @@ export default function CollaborationApp() {
               </div>
             </div>
           </div>
+        ) : activeView === "contexts" ? (
+          currentContext ? (
+            <LivingContextPanel
+              isDarkMode={isDarkMode}
+              context={currentContext}
+              ownerName={getContextOwnerName(currentContext.ownerId)}
+              contributorNames={(currentContext.contributorIds || []).map(getContextOwnerName)}
+              linkedMessages={currentContextMessages}
+              files={currentContextFiles}
+              decisions={currentContextDecisions}
+              tasks={currentContextTasks.map(task => ({
+                ...task,
+                assigneeLabel: (task.assigneeIds || []).map(getContextOwnerName).join(", ") || "Unassigned",
+              }))}
+              activity={currentContextActivity}
+              canEdit={isContextManager(currentContext)}
+              canAddSelectedMessage={selectedMessageIds.length > 0}
+              onAddSelectedMessage={async () => {
+                for (const messageId of selectedMessageIds) {
+                  await addMessageToContext(currentContext.id, messageId)
+                }
+              }}
+              onMarkDecision={contextsSourceView === "channel" ? (() => {
+                const selected = getMessageById(selectedMessageIds[0])
+                if (selected) markMessageDecision(selected)
+              }) : undefined}
+              onCreateTask={() => {
+                const selected = getMessageById(selectedMessageIds[0])
+                if (selected) openTaskFromMessage(selected)
+              }}
+              onEdit={() => {
+                setEditingContextId(currentContext.id)
+                setContextDraft({
+                  title: currentContext.title,
+                  summary: currentContext.summary,
+                  status: currentContext.status,
+                  ownerId: String(currentContext.ownerId),
+                  messageIds: currentContext.linkedMessageIds || [],
+                })
+              }}
+              onClose={() => {
+                setOpenContextId(null)
+                pushAppRoute("/contexts")
+              }}
+              formatTime={formatContextTime}
+            />
+          ) : (
+            <ContextsHub
+              isDarkMode={isDarkMode}
+              contexts={currentChannelContexts}
+              renderOwner={getContextOwnerName}
+              formatUpdatedTime={formatContextTime}
+              onBack={() => {
+                pushAppRoute(restoreFromDedicatedPage())
+              }}
+              onOpenContext={openContext}
+              sourceLabel={
+                contextsSourceView === "dm"
+                  ? `Direct message with ${getUser(activeDMUser)?.name || "contact"}`
+                  : currentSpace?.name && activeChannelData?.name
+                    ? `${currentSpace.name} / #${activeChannelData.name}`
+                    : activeChannelData?.name
+                      ? `#${activeChannelData.name}`
+                      : ""
+              }
+            />
+          )
         ) : activeView === "tasks" ? (
           <TasksHub
             isDarkMode={isDarkMode}
@@ -9038,8 +9345,7 @@ export default function CollaborationApp() {
             channels={allWorkspaceChannels}
             completingTaskId={completingTaskId}
             onBackHome={() => {
-              setActiveView("home")
-              setHomeSection("overview")
+              pushAppRoute(restoreFromDedicatedPage())
             }}
             onMarkTaskComplete={handleMarkTaskComplete}
           />
@@ -10580,58 +10886,6 @@ export default function CollaborationApp() {
                 </div>
                 </div>
               </div>
-
-              {(activeView === "channel" || activeView === "dm") && currentContext && (
-                <LivingContextPanel
-                  isDarkMode={isDarkMode}
-                  context={currentContext}
-                  ownerName={getContextOwnerName(currentContext.ownerId)}
-                  contributorNames={(currentContext.contributorIds || []).map(getContextOwnerName)}
-                  linkedMessages={currentContextMessages}
-                  files={currentContextFiles}
-                  decisions={currentContextDecisions}
-                  tasks={currentContextTasks.map(task => ({
-                    ...task,
-                    assigneeLabel: (task.assigneeIds || []).map(getContextOwnerName).join(", ") || "Unassigned",
-                  }))}
-                  activity={currentContextActivity}
-                  canEdit={isContextManager(currentContext)}
-                  canAddSelectedMessage={selectedMessageIds.length > 0}
-                  onAddSelectedMessage={async () => {
-                    for (const messageId of selectedMessageIds) {
-                      await addMessageToContext(currentContext.id, messageId)
-                    }
-                  }}
-                  onMarkDecision={activeView === "channel" ? (() => {
-                    const selected = getMessageById(selectedMessageIds[0])
-                    if (selected) markMessageDecision(selected)
-                  }) : undefined}
-                  onCreateTask={() => {
-                    const selected = getMessageById(selectedMessageIds[0])
-                    if (selected) openTaskFromMessage(selected)
-                  }}
-                  onEdit={() => {
-                    setEditingContextId(currentContext.id)
-                    setContextDraft({
-                      title: currentContext.title,
-                      summary: currentContext.summary,
-                      status: currentContext.status,
-                      ownerId: String(currentContext.ownerId),
-                      messageIds: currentContext.linkedMessageIds || [],
-                    })
-                  }}
-                  onClose={() => setOpenContextId(null)}
-                  formatTime={formatContextTime}
-                  panelStyle={{
-                    top: activeView === "channel" || activeView === "dm" ? 72 : 16,
-                    right: 16,
-                    bottom: activeChannelTab === "messages"
-                      ? (messageInputRef.current?.offsetHeight || 120) + 16
-                      : 16,
-                  }}
-                />
-              )}
-
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
                 className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-cyan-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
@@ -10862,7 +11116,7 @@ export default function CollaborationApp() {
         )}
 
       {/* Right Sidebar - FRIENDS & DMs */}
-      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right z-[70]" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-20" : "w-80"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
+      <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right z-[70]" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-[92px]" : "w-[272px]"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
         {isMobile && mobileView === "friends" && (
           <div className="swipe-indicator mt-2" />
