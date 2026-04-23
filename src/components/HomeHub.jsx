@@ -108,10 +108,16 @@ const isImageFile = file => {
 
 const getFilePreviewSrc = file => {
   if (!file) return ""
+  const backendFileUrl =
+    file?.source === "gmail"
+      ? ""
+      : file.fileId || file.id
+        ? `/upload/file/${file.fileId || file.id}/download`
+        : ""
   if (isImageFile(file)) {
-    return file.thumbnailLink || file.previewUrl || file.url || file.public_url || (file.fileId || file.id ? `/upload/file/${file.fileId || file.id}/download` : "")
+    return file.thumbnailLink || file.previewUrl || file.url || file.public_url || backendFileUrl
   }
-  return file.thumbnailLink || file.iconLink || file.previewUrl || file.url || file.public_url || (file.fileId || file.id ? `/upload/file/${file.fileId || file.id}/download` : "")
+  return file.thumbnailLink || file.iconLink || file.previewUrl || file.url || file.public_url || backendFileUrl
 }
 
 const getFileMetaLabel = file => {

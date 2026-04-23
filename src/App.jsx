@@ -62,6 +62,8 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
+import TasksHub from "./components/TasksHub"
+import DocumentsHub from "./components/DocumentsHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -274,6 +276,7 @@ export default function CollaborationApp() {
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
   const [tasksList, setTasksList] = useState([])
+  const [completingTaskId, setCompletingTaskId] = useState(null)
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -1309,7 +1312,7 @@ export default function CollaborationApp() {
         Storage.getEvents()
           .then(evts => setEvents(evts || []))
           .catch(() => {})
-        TasksService.getTasksForUser(currentUser.id)
+        TasksService.getTasksForUser(getUserIdValue(currentUser))
           .then(t => setTasksList(Array.isArray(t) ? t : []))
           .catch(e => console.warn('Failed to load tasks', e))
 
@@ -2512,6 +2515,179 @@ export default function CollaborationApp() {
     }
   }, [googleDocs, gmailAttachments, sharedChatDocs])
 
+  const formatDocsDate = value => {
+    if (!value) return "No recent activity"
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return String(value)
+
+    return parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: parsed.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+    })
+  }
+
+  const formatDocsSize = value => {
+    const size = Number(value)
+    if (!Number.isFinite(size) || size <= 0) return "Unknown size"
+    if (size >= 1024 * 1024 * 1024) return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+    if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+    if (size >= 1024) return `${Math.round(size / 1024)} KB`
+    return `${size} B`
+  }
+
+  const docsCollectionSummary = useMemo(() => {
+    const summaryMap = {
+      all: {
+        label: "Workspace library",
+        detail: "A clean browser for Drive files, shared chat docs, and Gmail attachments in one place.",
+        count: docsOverview.total,
+      },
+      drive: {
+        label: "Drive files",
+        detail: "Browse the latest synced documents from Google Drive and the wider workspace stack.",
+        count: docsOverview.drive,
+      },
+      docs: {
+        label: "Google Docs",
+        detail: "Writing surfaces, specs, and long-form documents from your connected Google account.",
+        count: docsOverview.docs,
+      },
+      sheets: {
+        label: "Google Sheets",
+        detail: "Trackers, tables, and structured files ready to reuse in conversations.",
+        count: docsOverview.sheets,
+      },
+      slides: {
+        label: "Google Slides",
+        detail: "Presentation decks and review material connected to the workspace.",
+        count: docsOverview.slides,
+      },
+      shared: {
+        label: "Shared in chats",
+        detail: "Files already circulating through channels and direct messages.",
+        count: docsOverview.shared,
+      },
+      gmail: {
+        label: "Gmail attachments",
+        detail: "Recent email files that can move straight into your workspace threads.",
+        count: docsOverview.gmail,
+      },
+    }
+
+    return summaryMap[selectedAppFilter] || summaryMap.all
+  }, [docsOverview, selectedAppFilter])
+
+  const handleDocumentsReconnect = () => {
+    setGoogleAccessToken(null)
+    GoogleService.removeGoogleAccessToken()
+    setDocsError(null)
+    handleConnectGoogleDocs()
+  }
+
+  const handleDocumentsRefresh = () => {
+    if (!googleAccessToken) return
+    if (selectedAppFilter === "shared") {
+      setSharedChatDocs(extractSharedChatDocs(messages))
+      return
+    }
+    loadGoogleDocs(googleAccessToken, selectedAppFilter === "all" ? null : selectedAppFilter)
+  }
+
+  const handleDocumentsFilterSelect = filter => {
+    setSelectedAppFilter(filter)
+    if (!googleAccessToken || filter === "shared") return
+    loadGoogleDocs(googleAccessToken, filter === "all" ? null : filter)
+  }
+
+  const handleHubAddDocument = async doc => {
+    if (!doc) return
+
+    const fileName = doc.name || doc.filename || "Attachment"
+    const gmailMessageId = doc.gmailMessageId || doc.messageId || null
+    const gmailAttachmentId = doc.gmailAttachmentId || doc.id || null
+
+    if (doc.source === "gmail" && googleAccessToken && gmailMessageId && gmailAttachmentId) {
+      try {
+        const bytes = await GoogleService.downloadGmailAttachmentWithFallback(
+          googleAccessToken,
+          gmailMessageId,
+          gmailAttachmentId,
+          fileName
+        )
+
+        if (bytes) {
+          const blob = new Blob([bytes], { type: doc.mimeType })
+          const formData = new FormData()
+          formData.append("file", blob, fileName)
+
+          const response = await fetch(`${API_BASE}/upload/file`, {
+            method: "POST",
+            body: formData,
+          })
+
+          if (response.ok) {
+            const payload = await response.json()
+            addDocumentAsAttachment({
+              id: payload.file_id || `${Date.now()}`,
+              name: fileName,
+              mimeType: doc.mimeType,
+              size: doc.size,
+              source: "upload",
+              fileId: payload.file_id,
+              url: payload.file_id ? `${API_BASE}/upload/file/${payload.file_id}/download` : null,
+              public_url: payload.file_id ? `${API_BASE}/upload/file/${payload.file_id}/download` : null,
+            })
+            return
+          }
+        }
+      } catch (error) {
+        console.error("Failed to upload Gmail attachment to server:", error)
+      }
+    }
+
+    addDocumentAsAttachment({
+      ...doc,
+      name: fileName,
+      gmailMessageId,
+      gmailAttachmentId,
+    })
+  }
+
+  const handleMarkTaskComplete = async task => {
+    if (!task) return
+
+    const taskId = String(task.id || task.timestamp || "")
+    if (!taskId || task.status === "completed" || completingTaskId === taskId) return
+
+    let didUpdateLocalTask = false
+    setCompletingTaskId(taskId)
+    setTasksList(prev =>
+      (prev || []).map(item => {
+        const itemId = String(item?.id || item?.timestamp || "")
+        if (itemId !== taskId) return item
+        didUpdateLocalTask = true
+        return { ...item, status: "completed" }
+      })
+    )
+
+    try {
+      await TasksService.updateTask(task.id || task.timestamp, { status: "completed" })
+    } catch (error) {
+      console.warn("task update failed", error)
+      if (didUpdateLocalTask) {
+        setTasksList(prev =>
+          (prev || []).map(item => {
+            const itemId = String(item?.id || item?.timestamp || "")
+            return itemId === taskId ? { ...item, status: task.status || "pending" } : item
+          })
+        )
+      }
+    } finally {
+      setCompletingTaskId(null)
+    }
+  }
+
   const homeFiles = useMemo(() => {
     const sharedFiles = extractSharedChatDocs(messages).map(file => ({
       ...file,
@@ -3484,6 +3660,19 @@ export default function CollaborationApp() {
     [currentSpace]
   )
 
+  const allWorkspaceChannels = useMemo(() => {
+    const channelMap = new Map()
+
+    ;(spaces || []).forEach(space => {
+      ;(space?.channels || []).forEach(channel => {
+        if (!channel?.id) return
+        channelMap.set(String(channel.id), channel)
+      })
+    })
+
+    return Array.from(channelMap.values())
+  }, [spaces])
+
   const getCurrentSpace = () => currentSpace
   const getCurrentChannels = () => currentChannels
 
@@ -3990,7 +4179,9 @@ export default function CollaborationApp() {
       rest.attachments = rest.attachments.map(att => {
         const { previewUrl: attPreview, data: attData, source: attSource, ...cleanAtt } = att
         // Ensure we have a proper server URL for the attachment (absolute URL with API_BASE)
-        if (cleanAtt.fileId && !cleanAtt.url) {
+        if ((attSource === 'gmail' || cleanAtt.source === 'gmail') && !cleanAtt.url) {
+          cleanAtt.webViewLink = cleanAtt.webViewLink || (cleanAtt.gmailMessageId ? `https://mail.google.com/mail/u/0/#inbox/${cleanAtt.gmailMessageId}` : null)
+        } else if (cleanAtt.fileId && !cleanAtt.url) {
           cleanAtt.url = `${API_BASE}/upload/file/${cleanAtt.fileId}/download`
         } else if (cleanAtt.id && !cleanAtt.url && !String(cleanAtt.id).startsWith('tmp-')) {
           cleanAtt.url = `${API_BASE}/upload/file/${cleanAtt.id}/download`
@@ -8839,197 +9030,19 @@ export default function CollaborationApp() {
             </div>
           </div>
         ) : activeView === "tasks" ? (
-          <div className={`flex-1 flex flex-col overflow-auto ${isDarkMode ? 'bg-[#191b1f]' : 'bg-gradient-to-br from-slate-50 via-white to-sky-50/30'}`}>
-            {/* Tasks Header */}
-            <div className={`sticky top-0 z-10 px-6 py-5 border-b backdrop-blur-xl ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200/60'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${isDarkMode ? 'bg-gradient-to-br from-sky-600 to-cyan-700' : 'bg-gradient-to-br from-sky-500 to-cyan-600'}`}>
-                    <ClipboardList className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>My Tasks</h2>
-                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id)).length} total tasks
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    {(tasksList || []).filter(t => t.status === 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} completed
-                  </div>
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isDarkMode ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    {(tasksList || []).filter(t => t.status !== 'completed' && ((t.assigned_to || []).map(String).includes(String(currentUser?.id)) || String(t.created_by) === String(currentUser?.id))).length} pending
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Tasks Content */}
-            <div className="flex-1 p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
-                {/* Assigned to me */}
-                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
-                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-sky-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-sky-50/50 to-transparent'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-sky-900/50 text-sky-400' : 'bg-sky-100 text-sky-600'}`}>
-                      <UserPlus className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Assigned to me</h3>
-                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length} tasks
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
-                    {(tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).length === 0 ? (
-                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
-                          <CheckCircle className="w-8 h-8" />
-                        </div>
-                        <p className="font-medium">No tasks assigned</p>
-                        <p className="text-xs mt-1">You're all caught up!</p>
-                      </div>
-                    ) : (
-                      (tasksList || []).filter(t => (t.assigned_to || []).map(String).includes(String(currentUser?.id))).map(t => (
-                        <div 
-                          key={t.id || t.timestamp} 
-                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
-                            t.status === 'completed' 
-                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
-                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-sky-500/30' : 'bg-white border-slate-200 hover:border-sky-200'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <button 
-                              onClick={async () => {
-                                if (t.status === 'completed') return
-                                const id = t.id || t.timestamp
-                                setTasksList(prev => prev.map(p => (p === t ? {...p, status: 'completed'} : p)))
-                                try {
-                                  await TasksService.updateTask(id, { status: 'completed' })
-                                } catch (e) {
-                                  console.warn('task update failed', e)
-                                }
-                              }}
-                              className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                                t.status === 'completed'
-                                  ? 'bg-emerald-500 border-emerald-500 text-white'
-                                  : isDarkMode ? 'border-slate-500 hover:border-sky-500 hover:bg-sky-500/20' : 'border-slate-300 hover:border-sky-500 hover:bg-sky-50'
-                              }`}
-                            >
-                              {t.status === 'completed' && <Check className="w-4 h-4" />}
-                            </button>
-                            <div className="flex-1 min-w-0">
-                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                                {t.message}
-                              </div>
-                              <div className="flex items-center gap-3 mt-2">
-                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                  <Clock className="w-3 h-3" />
-                                  {t.timestamp}
-                                </span>
-                                {t.channel_id && (
-                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              t.status === 'completed' 
-                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
-                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {t.status === 'completed' ? 'Done' : 'Pending'}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Created by me */}
-                <div className={`rounded-3xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200/60 shadow-sm'}`}>
-                  <div className={`px-5 py-4 border-b flex items-center gap-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-cyan-900/30 to-transparent' : 'border-slate-100 bg-gradient-to-r from-cyan-50/50 to-transparent'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-cyan-900/50 text-cyan-400' : 'bg-cyan-100 text-cyan-600'}`}>
-                      <PenTool className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Created by me</h3>
-                      <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length} tasks
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto">
-                    {(tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).length === 0 ? (
-                      <div className={`text-center py-12 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
-                          <Plus className="w-8 h-8" />
-                        </div>
-                        <p className="font-medium">No tasks created</p>
-                        <p className="text-xs mt-1">Create tasks by typing /task in chat</p>
-                      </div>
-                    ) : (
-                      (tasksList || []).filter(t => String(t.created_by) === String(currentUser?.id)).map(t => (
-                        <div 
-                          key={t.id || t.timestamp} 
-                          className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
-                            t.status === 'completed' 
-                              ? isDarkMode ? 'bg-emerald-900/20 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-100' 
-                              : isDarkMode ? 'bg-slate-700/30 border-slate-600/30 hover:border-cyan-500/30' : 'bg-white border-slate-200 hover:border-cyan-200'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              t.status === 'completed'
-                                ? 'bg-emerald-500 text-white'
-                                : isDarkMode ? 'bg-slate-600 text-slate-400' : 'bg-slate-200 text-slate-500'
-                            }`}>
-                              {t.status === 'completed' ? <Check className="w-4 h-4" /> : <Clock className="w-3 h-3" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className={`font-semibold ${t.status === 'completed' ? 'line-through opacity-60' : ''} ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                                {t.message}
-                              </div>
-                              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                  <Clock className="w-3 h-3" />
-                                  {t.timestamp}
-                                </span>
-                                {t.channel_id && (
-                                  <span className={`text-xs px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                                    #{channels.find(c => c.id === t.channel_id)?.name || 'channel'}
-                                  </span>
-                                )}
-                                {(t.assigned_to || []).length > 0 && (
-                                  <span className={`text-xs flex items-center gap-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    <Users className="w-3 h-3" />
-                                    {(t.assigned_to || []).length} assignee{(t.assigned_to || []).length > 1 ? 's' : ''}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              t.status === 'completed' 
-                                ? isDarkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700' 
-                                : isDarkMode ? 'bg-amber-900/50 text-amber-400' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {t.status === 'completed' ? 'Done' : 'Pending'}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <TasksHub
+            isDarkMode={isDarkMode}
+            tasks={tasksList}
+            messages={messages}
+            currentUser={currentUser}
+            channels={allWorkspaceChannels}
+            completingTaskId={completingTaskId}
+            onBackHome={() => {
+              setActiveView("home")
+              setHomeSection("overview")
+            }}
+            onMarkTaskComplete={handleMarkTaskComplete}
+          />
         ) : (
           /* VIEW: CHANNEL / DM */
           <>
@@ -12287,671 +12300,30 @@ export default function CollaborationApp() {
         <div className={`fixed inset-0 z-50 animate-fade-in ${
           isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/50'
         }`}>
-          <div className={`h-full w-full p-4 sm:p-6 md:p-8 flex flex-col ${
-            isDarkMode 
-              ? 'bg-slate-900/95' 
-              : 'bg-slate-50/95'
-          }`}>
-            <div className={`mb-4 sm:mb-6 border-b pb-4 sm:pb-6 ${
-              isDarkMode
-                ? 'border-slate-800'
-                : 'border-slate-200'
-            }`}>
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-gradient-to-r from-cyan-500 to-sky-600 shadow-cyan-500/20' 
-                        : 'bg-gradient-to-r from-sky-500 to-sky-600 shadow-sky-300/40'
-                    }`}>
-                      <FileText className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className={`text-xl sm:text-3xl font-bold bg-clip-text text-transparent ${
-                        isDarkMode 
-                          ? 'bg-gradient-to-r from-white to-sky-400' 
-                          : 'bg-gradient-to-r from-slate-800 to-sky-700'
-                      }`}>
-                        Documents Hub
-                      </h3>
-                      <p className={`text-xs sm:text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Browse Drive files, shared workspace docs, and Gmail attachments in one place.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 sm:gap-3">
-                  {googleAccessToken && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('drive')
-                          loadGoogleDocs(googleAccessToken, 'drive')
-                        }}
-                        className={`px-3 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 border shadow-sm ${isDarkMode ? 'bg-slate-700/50 text-slate-200 border-slate-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
-                        title="Show Drive Files"
-                      >
-                        <SmartImage src="/google-drive.png" alt="Drive" className="w-5 h-5" />
-                        <span className="hidden sm:inline">Open Drive</span>
-                      </button>
-                      <button
-                        onClick={() => setShowConnectAppsModal(true)}
-                        className={`px-3 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all duration-300 flex items-center gap-1.5 sm:gap-2 border shadow-sm ${
-                          isDarkMode 
-                            ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border-sky-500/30 hover:shadow-lg hover:shadow-sky-500/20' 
-                            : 'bg-gradient-to-r from-sky-50 to-cyan-50 text-sky-600 hover:from-sky-100 hover:to-cyan-100 border-sky-100 hover:shadow-lg hover:shadow-sky-100/50'
-                        }`}
-                      >
-                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        <span className="hidden sm:inline">Connect More Apps</span>
-                        <span className="sm:hidden">Connect</span>
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => setShowDocsModal(false)}
-                    className={`p-2 sm:p-2.5 rounded-xl transition-all duration-300 hover:rotate-90 hover:shadow-md flex-shrink-0 ${
-                      isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
-                    }`}
-                  >
-                    <X className="w-5 h-5 sm:w-6 sm:h-6" />
-                  </button>
-                </div>
-              </div>
-
-              {googleAccessToken && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-                  {[
-                    { label: 'Total assets', value: docsOverview.total, tone: isDarkMode ? 'bg-slate-900/70 border-slate-700 text-white' : 'bg-white/80 border-slate-200 text-slate-900' },
-                    { label: 'Drive files', value: docsOverview.drive, tone: isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : 'bg-blue-50 border-blue-100 text-blue-700' },
-                    { label: 'Shared docs', value: docsOverview.shared, tone: isDarkMode ? 'bg-sky-500/10 border-sky-500/20 text-sky-200' : 'bg-sky-50 border-sky-100 text-sky-700' },
-                    { label: 'Gmail files', value: docsOverview.gmail, tone: isDarkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 'bg-rose-50 border-rose-100 text-rose-700' },
-                  ].map(stat => (
-                    <div key={stat.label} className={`rounded-2xl border px-4 py-3 ${stat.tone}`}>
-                      <p className="text-[11px] uppercase tracking-[0.2em] opacity-70">{stat.label}</p>
-                      <p className="mt-2 text-2xl font-bold">{stat.value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {!googleAccessToken ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-16">
-                <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border-2 ${
-                  isDarkMode 
-                    ? 'bg-gradient-to-br from-sky-500/20 to-cyan-500/20 border-sky-500/30' 
-                    : 'bg-gradient-to-br from-sky-50 to-cyan-50 border-sky-100'
-                }`}>
-                  <FileText className={`w-12 h-12 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
-                </div>
-                <h4 className={`text-2xl font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Connect Your Google Account</h4>
-                <p className={`mb-6 text-center max-w-md ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Connect your Google account to access <strong>Gmail attachments</strong> and <strong>Google Drive files</strong> in one unified view.
-                </p>
-                <p className={`text-xs mb-4 text-center ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                  You'll be asked to grant permissions for Gmail and Drive access.
-                </p>
-                <button
-                  onClick={handleConnectGoogleDocs}
-                  className={`px-8 py-4 font-bold rounded-2xl transition-all flex items-center gap-3 text-white shadow-lg ${
-                    isDarkMode 
-                      ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-500/20' 
-                      : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'
-                  }`}
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Connect Google Account
-                </button>
-              </div>
-            ) : (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {loadingDocs ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className={`animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4 ${
-                        isDarkMode ? 'border-sky-500' : 'border-sky-600'
-                      }`}></div>
-                      <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading documents...</p>
-                    </div>
-                  </div>
-                ) : docsError ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center px-4">
-                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                        isDarkMode ? 'bg-red-500/20' : 'bg-red-50'
-                      }`}>
-                        <XCircle className={`w-7 h-7 sm:w-8 sm:h-8 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
-                      </div>
-                      <p className={`font-medium mb-4 text-sm sm:text-base ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>{docsError}</p>
-                      <button
-                        onClick={() => {
-                          // If token expired, re-authenticate
-                          if (docsError.includes('expired') || docsError.includes('Invalid')) {
-                            setGoogleAccessToken(null)
-                            GoogleService.removeGoogleAccessToken()
-                            setDocsError(null)
-                            handleConnectGoogleDocs()
-                          } else {
-                            loadGoogleDocs(googleAccessToken)
-                          }
-                        }}
-                        className={`px-6 py-3 font-bold rounded-xl text-white ${
-                          isDarkMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-sky-600 hover:bg-sky-700'
-                        }`}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className={`mb-4 rounded-2xl border p-3 sm:p-4 ${
-                      isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'
-                    }`}>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                        <div>
-                          <p className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Collections</p>
-                          <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Switch between connected sources without leaving the workspace.
-                          </p>
-                        </div>
-                        <div className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          {docsOverview.total} items available
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('all')
-                          loadGoogleDocs(googleAccessToken)
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all ${
-                          selectedAppFilter === 'all'
-                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        All
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('drive')
-                          loadGoogleDocs(googleAccessToken, 'drive')
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                          selectedAppFilter === 'drive'
-                            ? isDarkMode ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        <SmartImage src="/google-drive.png" alt="Drive" className="w-4 h-4" /> Drive
-                      </button>
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('docs')
-                            loadGoogleDocs(googleAccessToken, 'docs')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'docs'
-                              ? 'bg-blue-600 text-white'
-                              : isDarkMode ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                          }`}
-                        >
-                          <SmartImage src="/google-docs.png" alt="Docs" className="w-4 h-4" /> Docs
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setSelectedAppFilter('shared')
-                        }}
-                        className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                          selectedAppFilter === 'shared'
-                            ? isDarkMode ? 'bg-sky-600 text-white' : 'bg-sky-600 text-white'
-                            : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                        >
-                        <SmartImage src="/shared.png.png" alt="Shared" className="w-4 h-4" /> Shared
-                      </button>
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('sheets')
-                            loadGoogleDocs(googleAccessToken, 'sheets')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'sheets'
-                              ? 'bg-green-600 text-white'
-                              : isDarkMode ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-green-50 text-green-600 hover:bg-green-100'
-                          }`}
-                        >
-                          <SmartImage src="/google-sheets.png" alt="Sheets" className="w-4 h-4" /> Sheets
-                        </button>
-                      )}
-                      {googleDocs.some(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides') && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('slides')
-                            loadGoogleDocs(googleAccessToken, 'slides')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'slides'
-                              ? 'bg-yellow-600 text-white'
-                              : isDarkMode ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
-                          }`}
-                          >
-                          <SmartImage src="/slides.png" alt="Slides" className="w-4 h-4" /> Slides
-                        </button>
-                      )}
-                      {gmailAttachments.length > 0 && (
-                        <button
-                          onClick={() => {
-                            setSelectedAppFilter('gmail')
-                            loadGoogleDocs(googleAccessToken, 'gmail')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all flex items-center gap-1.5 ${
-                            selectedAppFilter === 'gmail'
-                              ? 'bg-red-600 text-white'
-                              : isDarkMode ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
-                          }`}
-                        >
-                          <SmartImage src="/gmail.png" alt="Gmail" className="w-4 h-4" /> Gmail
-                        </button>
-                      )}
-                      </div>
-                    </div>
-
-                    {/* Documents Grid */}
-                    <div className="flex-1 overflow-y-auto pr-2">
-                      {/* Shared Files View */}
-                      {selectedAppFilter === 'shared' && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
-                        }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared Files
-                            </h4>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                              {sharedChatDocs.length} items
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {sharedChatDocs.map((attachment, idx) => {
-                                    const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
-                                    const attAppIcon = GoogleService.getAppIcon(attAppType)
-                                    return (
-                                      <div 
-                                        key={attachment.id || `${attachment.name}-${idx}`} 
-                                        className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-cyan-600/40 hover:shadow-md hover:shadow-cyan-500/10' : 'border-slate-200/60 bg-white/80 hover:border-sky-300 hover:shadow-md hover:shadow-sky-100/30'}`}
-                                        onClick={() => openAttachment(attachment)}
-                                      >
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
-                                          <SmartImage src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{attAppIcon.emoji}</span>} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-cyan-300' : 'text-slate-800 group-hover:text-sky-600'}`}>
-                                            {attachment.name || 'Attachment'}
-                                          </h5>
-                                          <p className={`text-[10px] truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                            {attachment.source === 'drive' ? 'Drive' : attachment.source === 'gmail' ? 'Gmail' : 'Chat'}
-                                            {attachment.timestamp && ` • ${new Date(attachment.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
-                                          </p>
-                                        </div>
-                                        <button
-                                          onClick={async (e) => {
-                                            e.preventDefault()
-                                            e.stopPropagation()
-                                            // If this is a Gmail attachment, always upload to backend first
-                                            if (attachment.source === 'gmail' && googleAccessToken) {
-                                              try {
-                                                const bytes = await GoogleService.downloadGmailAttachmentWithFallback(googleAccessToken, attachment.gmailMessageId || attachment.messageId, attachment.gmailAttachmentId || attachment.id, attachment.name)
-                                                if (bytes) {
-                                                  const blob = new Blob([bytes], { type: attachment.mimeType })
-                                                  const fd = new FormData()
-                                                  fd.append('file', blob, attachment.name)
-                                                  const resp = await fetch(`${API_BASE}/upload/file`, {
-                                                    method: 'POST',
-                                                    body: fd
-                                                  })
-                                                  if (resp.ok) {
-                                                    const j = await resp.json()
-                                                    addDocumentAsAttachment({
-                                                      id: j.file_id || `${Date.now()}`,
-                                                      name: attachment.name,
-                                                      mimeType: attachment.mimeType,
-                                                      size: attachment.size,
-                                                      source: 'upload',
-                                                      fileId: j.file_id,
-                                                      url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
-                                                      public_url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
-                                                    })
-                                                    return
-                                                  }
-                                                }
-                                              } catch (err) {
-                                                console.error('Failed to upload gmail attachment to server:', err)
-                                                // fallthrough to add as gmail-only attachment
-                                              }
-                                            }
-                                            // For all other cases, or if upload fails, attach as normal
-                                            addDocumentAsAttachment({
-                                              id: attachment.id,
-                                              name: attachment.name,
-                                              mimeType: attachment.mimeType,
-                                              url: attachment.url || attachment.webViewLink,
-                                              source: attachment.source || 'chat',
-                                              gmailMessageId: attachment.gmailMessageId,
-                                              gmailAttachmentId: attachment.gmailAttachmentId
-                                            })
-                                          }}
-                                          className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-cyan-900/50 text-cyan-400 hover:bg-cyan-800' : 'bg-sky-100 text-sky-600 hover:bg-sky-200'}`}
-                                          title="Add to message"
-                                        >
-                                          <Plus className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                    )
-                                  })}
-                          </div>
-                        </div>
-                      )}
-
-                      {(selectedAppFilter === 'all' || selectedAppFilter === 'drive' || selectedAppFilter === 'docs' || selectedAppFilter === 'sheets' || selectedAppFilter === 'slides') && googleDocs.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
-                        }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <h4 className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Google Workspace Files</h4>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                                Recently updated files from Drive, Docs, Sheets, and Slides.
-                              </p>
-                            </div>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                              {googleDocs.length} items
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                          {sortedGoogleDocs.map((doc) => {
-                            const appType = GoogleService.getAppTypeFromMime(doc.mimeType)
-                            const appIcon = GoogleService.getAppIcon(appType)
-                            
-                            return (
-                              <div
-                                key={doc.id}
-                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-cyan-600/40 hover:shadow-md hover:shadow-cyan-500/10' : 'border-slate-200/60 bg-white/80 hover:border-sky-300 hover:shadow-md hover:shadow-sky-100/30'}`}
-                                onClick={() => window.open(doc.webViewLink, '_blank')}
-                              >
-                                {/* Icon */}
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${appIcon.color}`}>
-                                  <SmartImage src={doc.iconLink || appIcon.iconUrl} alt={appType} className="w-6 h-6" fallback={<span className="text-xl">{appIcon.emoji}</span>} />
-                                </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-cyan-300' : 'text-slate-800 group-hover:text-sky-600'}`}>
-                                    {doc.name}
-                                  </h5>
-                                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    {new Date(doc.modifiedTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </p>
-                                </div>
-                                
-                                {/* Add Button */}
-                                <button
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    addDocumentAsAttachment(doc)
-                                  }}
-                                  className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-cyan-900/50 text-cyan-400 hover:bg-cyan-800' : 'bg-sky-100 text-sky-600 hover:bg-sky-200'}`}
-                                  title="Add to message"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )
-                          })}
-                          </div>
-                        </div>
-                      )}
-
-
-
-                      {/* Shared Chat Documents */}
-                      {selectedAppFilter === 'all' && sharedChatDocs.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
-                        }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                              <FileText className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`} /> Shared in Chats
-                            </h4>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                              {sharedChatDocs.length} items
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {sharedChatDocs.map((attachment, idx) => {
-                              const attAppType = GoogleService.getAppTypeFromMime(attachment.mimeType || attachment.type)
-                              const attAppIcon = GoogleService.getAppIcon(attAppType)
-                              return (
-                              <div 
-                                key={attachment.id || `${attachment.name}-${idx}`} 
-                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${isDarkMode ? 'border-slate-700 bg-slate-800/50 hover:border-cyan-600/40 hover:shadow-md hover:shadow-cyan-500/10' : 'border-slate-200/60 bg-white/80 hover:border-sky-300 hover:shadow-md hover:shadow-sky-100/30'}`}
-                                onClick={() => openAttachment(attachment)}
-                              >
-                                {/* Icon */}
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${attAppIcon.color}`}>
-                                  <SmartImage src={attachment.iconLink || attAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{attAppIcon.emoji}</span>} />
-                                </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-cyan-300' : 'text-slate-800 group-hover:text-sky-600'}`}>
-                                    {attachment.name || 'Attachment'}
-                                  </h5>
-                                  <p className={`text-[10px] truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    {attachment.source === 'drive' ? 'Drive' : attachment.source === 'gmail' ? 'Gmail' : 'Chat'}
-                                    {attachment.timestamp && ` • ${new Date(attachment.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
-                                  </p>
-                                </div>
-                                
-                                {/* Add Button */}
-                                <button
-                                  onClick={(e) => { 
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    addDocumentAsAttachment({ 
-                                      id: attachment.id, 
-                                      name: attachment.name, 
-                                      mimeType: attachment.mimeType, 
-                                      url: attachment.url || attachment.webViewLink, 
-                                      source: attachment.source || 'chat',
-                                      gmailMessageId: attachment.gmailMessageId,
-                                      gmailAttachmentId: attachment.gmailAttachmentId
-                                    }) 
-                                  }}
-                                  className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${isDarkMode ? 'bg-cyan-900/50 text-cyan-400 hover:bg-cyan-800' : 'bg-sky-100 text-sky-600 hover:bg-sky-200'}`}
-                                  title="Add to message"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                </button>
-                              </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Gmail Attachments Grid */}
-                      {(selectedAppFilter === 'all' || selectedAppFilter === 'gmail') && gmailAttachments.length > 0 && (
-                        <div className={`mb-6 rounded-2xl border p-4 ${
-                          isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
-                        }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <h4 className={`text-sm font-bold flex items-center gap-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                                <Mail className="w-4 h-4 text-red-500" /> Gmail Attachments
-                              </h4>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                                Recent email files ready to add into chats and channels.
-                              </p>
-                            </div>
-                            <span className={`text-xs px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                              {gmailAttachments.length} items
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                            {gmailAttachments.map((attachment, idx) => {
-                              const gmailAppType = GoogleService.getAppTypeFromMime(attachment.mimeType)
-                              const gmailAppIcon = GoogleService.getAppIcon(gmailAppType)
-                              return (
-                              <div
-                                key={`gmail-${attachment.messageId}-${attachment.id}-${idx}`}
-                                className={`group flex items-center gap-3 p-3 rounded-xl border transition-all ${
-                                  isDarkMode
-                                    ? 'border-rose-500/20 bg-slate-800/60 hover:border-rose-400/40 hover:shadow-md hover:shadow-rose-500/10'
-                                    : 'border-red-100 bg-white hover:border-red-300 hover:shadow-md'
-                                }`}
-                              >
-                                {/* File Icon */}
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${gmailAppIcon.color}`}>
-                                  <SmartImage src={gmailAppIcon.iconUrl} alt="file" className="w-6 h-6" fallback={<span className="text-xl">{gmailAppIcon.emoji}</span>} />
-                                </div>
-                                
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                  <h5 className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-200 group-hover:text-rose-300' : 'text-slate-800 group-hover:text-red-600'}`}>
-                                    {attachment.filename}
-                                  </h5>
-                                  <div className={`flex items-center gap-2 text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    <span className="truncate max-w-[100px]">{attachment.senderName || 'Unknown'}</span>
-                                    <span>•</span>
-                                    <span>{attachment.size > 1048576 ? `${(attachment.size / 1048576).toFixed(1)}MB` : `${(attachment.size / 1024).toFixed(0)}KB`}</span>
-                                  </div>
-                                </div>
-                                
-                                {/* Action Buttons */}
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={async (e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      // Try to download the attachment using the user's Google token and upload to backend
-                                          if (googleAccessToken) {
-                                        try {
-                                          const bytes = await GoogleService.downloadGmailAttachmentWithFallback(googleAccessToken, attachment.messageId, attachment.id, attachment.filename)
-                                          if (bytes) {
-                                            const blob = new Blob([bytes], { type: attachment.mimeType })
-                                            const fd = new FormData()
-                                            fd.append('file', blob, attachment.filename)
-
-                                            const resp = await fetch(`${API_BASE}/upload/file`, {
-                                              method: 'POST',
-                                              body: fd
-                                            })
-                                            if (resp.ok) {
-                                              const j = await resp.json()
-                                              // Attach uploaded file metadata so other users can access via backend
-                                              addDocumentAsAttachment({
-                                                id: j.file_id || `${Date.now()}`,
-                                                name: attachment.filename,
-                                                mimeType: attachment.mimeType,
-                                                size: attachment.size,
-                                                source: 'upload',
-                                                fileId: j.file_id,
-                                                url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
-                                                public_url: j.file_id ? `${API_BASE}/upload/file/${j.file_id}/download` : null,
-                                              })
-                                              return
-                                            }
-                                          }
-                                        } catch (err) {
-                                          console.error('Failed to upload gmail attachment to server:', err)
-                                          // fallthrough to add as gmail-only attachment
-                                        }
-                                      }
-
-                                      // Fallback: attach as gmail source (viewer may not be able to download)
-                                      addDocumentAsAttachment({
-                                        id: attachment.id,
-                                        name: attachment.filename,
-                                        mimeType: attachment.mimeType,
-                                        size: attachment.size,
-                                        source: 'gmail',
-                                        gmailMessageId: attachment.messageId,
-                                        gmailAttachmentId: attachment.id,
-                                        webViewLink: `https://mail.google.com/mail/u/0/#inbox/${attachment.messageId}`
-                                      })
-                                    }}
-                                    className="p-1.5 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
-                                    title="Add to chat"
-                                  >
-                                    <Plus className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={async (e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      try {
-                                        const blobUrl = await GoogleService.getGmailAttachmentPreviewUrl(
-                                          googleAccessToken,
-                                          attachment.messageId,
-                                          attachment.id,
-                                          attachment.mimeType,
-                                          attachment.filename
-                                        )
-                                        if (blobUrl) {
-                                          const a = document.createElement('a')
-                                          a.href = blobUrl
-                                          a.download = attachment.filename
-                                          document.body.appendChild(a)
-                                          a.click()
-                                          document.body.removeChild(a)
-                                          URL.revokeObjectURL(blobUrl)
-                                        }
-                                      } catch (err) {
-                                        console.error('Download failed:', err)
-                                      }
-                                    }}
-                                    className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
-                                    title="Download"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {docsOverview.total === 0 && (
-                        <div className="flex-1 flex items-center justify-center py-16">
-                          <div className="text-center">
-                            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                              <FileText className={`w-8 h-8 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
-                            </div>
-                            <p className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>No documents found</p>
-                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Try connecting more apps or changing filters</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+          <div className={`h-full w-full overflow-y-auto ${isDarkMode ? 'bg-slate-950/90' : 'bg-slate-100/95'}`}>
+            <DocumentsHub
+              isDarkMode={isDarkMode}
+              googleAccessToken={googleAccessToken}
+              loadingDocs={loadingDocs}
+              docsError={docsError}
+              selectedAppFilter={selectedAppFilter}
+              docsOverview={docsOverview}
+              docsCollectionSummary={docsCollectionSummary}
+              googleDocs={googleDocs}
+              sortedGoogleDocs={sortedGoogleDocs}
+              sharedChatDocs={sharedChatDocs}
+              gmailAttachments={gmailAttachments}
+              formatDocsDate={formatDocsDate}
+              formatDocsSize={formatDocsSize}
+              onBackHome={() => setShowDocsModal(false)}
+              onConnectGoogle={handleConnectGoogleDocs}
+              onReconnectGoogle={handleDocumentsReconnect}
+              onRefresh={handleDocumentsRefresh}
+              onOpenConnections={() => setShowConnectAppsModal(true)}
+              onSelectFilter={handleDocumentsFilterSelect}
+              onOpenAttachment={openAttachment}
+              onAddDocument={handleHubAddDocument}
+            />
           </div>
         </div>
       )}

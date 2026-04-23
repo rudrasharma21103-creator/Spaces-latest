@@ -1,23 +1,26 @@
 from fastapi import APIRouter, HTTPException
 from app.ws_manager import manager
 from app.database import organizations_collection
+import asyncio
 import dns.resolver
+import json
 import os
 import re
+import urllib.parse
+import urllib.request
 import uuid
 import time
-import resend
-
+try:
+    import resend
+except Exception:
+    resend = None
 # =========================
 # Resend configuration
 # =========================
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-
-if not RESEND_API_KEY:
-    raise RuntimeError("RESEND_API_KEY not set")
-
-resend.api_key = RESEND_API_KEY
+if RESEND_API_KEY and resend is not None:
+    resend.api_key = RESEND_API_KEY
 
 # Resend sandbox sender (DEV MODE)
 FROM_EMAIL = "Spaces <rudra@spacess.in>"
@@ -70,6 +73,8 @@ def build_email_html(otp: str, logo_url: str | None):
 
 def send_email(to_email: str, subject: str, html: str):
     text = re.sub(r"<[^>]+>", "", html)
+    if not RESEND_API_KEY or resend is None:
+        raise HTTPException(status_code=503, detail="Organization email is not configured. Set RESEND_API_KEY.")
     try:
         return resend.Emails.send({
             "from": FROM_EMAIL,
@@ -213,15 +218,14 @@ async def check_dns(domain: str):
     print("Expected token:", expected_token)
 
     try:
-        # 🔸 Use Cloudflare DNS to avoid stale cache
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://cloudflare-dns.com/dns-query",
-                params={"name": domain, "type": "TXT", "_": str(int(time.time()))},
-                headers={"accept": "application/dns-json"}
-            )
-            data = resp.json()
-
+        # Use Cloudflare DNS to avoid stale cache
+        query = urllib.parse.urlencode({"name": domain, "type": "TXT", "_": str(int(time.time()))})
+        request = urllib.request.Request(
+            f"https://cloudflare-dns.com/dns-query?{query}",
+            headers={"accept": "application/dns-json"},
+        )
+        resp = await asyncio.to_thread(urllib.request.urlopen, request, timeout=10)
+        data = json.loads(resp.read().decode("utf-8"))
         # Extract all TXT records
         txt_records = [a.get("data", "").strip('"') for a in data.get("Answer", []) if "data" in a]
         for record in txt_records:

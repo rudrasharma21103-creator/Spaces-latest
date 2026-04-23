@@ -560,157 +560,170 @@ export default function TasksHub({
   ]
 
   return (
-    <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#111315] text-slate-100" : "bg-slate-50 text-slate-900")}>
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1520px] flex-col px-4 py-5 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
-        <div className="flex flex-col gap-6">
-          {typeof onBackHome === "function" && (
-            <div className="flex items-center">
-              <button
-                onClick={onBackHome}
-                className={cx(
-                  "inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium",
-                  isDarkMode ? "border-[#2d323a] bg-[#171b21] text-slate-200 hover:bg-[#1b2026]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-                  fastTransition
-                )}
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </button>
-            </div>
+    <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#0b0f14] text-slate-100" : "bg-[#edf3f8] text-slate-900")}>
+      <div className="flex min-h-[100dvh] w-full flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
+        {typeof onBackHome === "function" && (
+          <div className="flex items-center">
+            <button
+              onClick={onBackHome}
+              className={cx(
+                "inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium",
+                isDarkMode ? "border-[#2d323a] bg-[#121821] text-slate-200 hover:bg-[#17202a]" : "border-slate-200 bg-white/90 text-slate-700 hover:bg-white",
+                fastTransition
+              )}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </button>
+          </div>
+        )}
+
+        <section
+          className={cx(
+            "overflow-hidden rounded-[30px] border",
+            isDarkMode ? "border-white/10 bg-[#101720]" : "border-white/70 bg-white/85 shadow-[0_28px_80px_rgba(15,23,42,0.08)]"
           )}
-
-          <SurfaceCard isDarkMode={isDarkMode}>
-            <div className="px-5 py-5 sm:px-6 lg:px-8">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0">
-                  <div className="flex items-start gap-4">
-                    <div className={cx("flex h-12 w-12 shrink-0 items-center justify-center rounded-xl", isDarkMode ? "bg-[#20252c] text-slate-100" : "bg-slate-100 text-slate-700")}>
-                      <ClipboardList className="h-6 w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h1 className={cx("text-[1.75rem] font-semibold tracking-[-0.02em]", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                        Tasks
-                      </h1>
-                      <p className={cx("mt-1 max-w-3xl text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                        One unified task list with filters for ownership, status, and date so people can focus without jumping between sections.
-                      </p>
-                      {workspaceFallback && (
-                        <div className={cx("mt-3 inline-flex rounded-md px-3 py-1.5 text-xs font-medium", isDarkMode ? "bg-[#20252c] text-slate-300" : "bg-slate-100 text-slate-600")}>
-                          Showing visible workspace tasks because none are mapped directly to your profile yet.
-                        </div>
-                      )}
-                    </div>
+        >
+          <div className={cx("border-b px-5 py-5 sm:px-7 sm:py-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
+            <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-end 2xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-start gap-4">
+                  <div className={cx("flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.35rem]", isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700")}>
+                    <ClipboardList className="h-7 w-7" />
                   </div>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[360px]">
-                  <SummaryMetric label="Total" value={totalCount} isDarkMode={isDarkMode} />
-                  <SummaryMetric label="Completed" value={completedCount} tone="success" isDarkMode={isDarkMode} />
-                  <SummaryMetric label="Pending" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
+                  <div className="min-w-0">
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.24em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                      Workspace Tasks
+                    </div>
+                    <h1 className={cx("mt-2 text-[2rem] font-semibold tracking-[-0.05em] sm:text-[2.4rem]", isDarkMode ? "text-white" : "text-slate-950")}>
+                      Task command center
+                    </h1>
+                    <p className={cx("mt-3 max-w-4xl text-sm leading-7", isDarkMode ? "text-slate-400" : "text-slate-600")}>
+                      A full-page view for assignments, delegated work, and follow-ups across the workspace.
+                    </p>
+                    {workspaceFallback && (
+                      <div className={cx("mt-4 inline-flex rounded-full px-3 py-1.5 text-xs font-medium", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600")}>
+                        Showing visible workspace tasks because none are mapped directly to your profile yet.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:min-w-[760px]">
+                <SummaryMetric label="Total" value={totalCount} isDarkMode={isDarkMode} />
+                <SummaryMetric label="Completed" value={completedCount} tone="success" isDarkMode={isDarkMode} />
+                <SummaryMetric label="Pending" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
+                <SummaryMetric label="Completion" value={`${completionRate}%`} isDarkMode={isDarkMode} />
+              </div>
             </div>
-          </SurfaceCard>
+          </div>
+        </section>
 
-          <div className="grid gap-6 xl:grid-cols-[290px_minmax(0,1fr)]">
-            <aside className="space-y-4">
-              <SurfaceCard isDarkMode={isDarkMode}>
-                <div className="px-5 py-5">
-                  <h2 className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                    Overview
-                  </h2>
-                  <div className="mt-4 space-y-4">
-                    <InsightRow label="Assigned to me" value={assignedTasks.length} note="Tasks where you are an assignee." isDarkMode={isDarkMode} />
-                    <InsightRow label="Created by me" value={createdTasks.length} note="Items you opened or delegated." isDarkMode={isDarkMode} />
-                    <InsightRow label="Filtered results" value={filteredTasks.length} note="Tasks matching the current filter set." isDarkMode={isDarkMode} />
-                  </div>
+        <div className="grid flex-1 min-h-0 gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
+              <div className="px-5 py-5">
+                <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                  Filters
                 </div>
-              </SurfaceCard>
+                <h2 className={cx("mt-2 text-[1.35rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                  Refine the queue
+                </h2>
+                <div className="mt-5 space-y-4">
+                  <FilterField icon={<ListFilter className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
+                  <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
+                  <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
+                </div>
+              </div>
+            </SurfaceCard>
 
-              <SurfaceCard isDarkMode={isDarkMode}>
-                <div className="px-5 py-5">
+            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
+              <div className="px-5 py-5">
+                <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                  Overview
+                </div>
+                <div className="mt-4 space-y-4">
+                  <InsightRow label="Assigned to me" value={assignedTasks.length} note="Tasks where you are an assignee." isDarkMode={isDarkMode} />
+                  <InsightRow label="Created by me" value={createdTasks.length} note="Items you opened or delegated." isDarkMode={isDarkMode} />
+                  <InsightRow label="Filtered results" value={filteredTasks.length} note="Tasks matching the current filter set." isDarkMode={isDarkMode} />
+                </div>
+
+                <div className="mt-6">
                   <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <h2 className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                        Progress
-                      </h2>
-                      <p className={cx("mt-1 text-sm", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                        Completion across the currently visible task source.
-                      </p>
+                    <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
+                      Progress
                     </div>
                     <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
                       {completionRate}%
                     </div>
                   </div>
-
-                  <div className={cx("mt-4 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
+                  <div className={cx("mt-3 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
                     <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900", fastTransition)} style={{ width: `${completionRate}%` }} />
                   </div>
-
-                  <div className="mt-4 space-y-4">
-                    <InsightRow label="Completed" value={completedCount} note="Closed and no longer active." isDarkMode={isDarkMode} />
-                    <InsightRow label="Pending" value={pendingCount} note="Still requires attention." isDarkMode={isDarkMode} />
-                  </div>
                 </div>
-              </SurfaceCard>
-            </aside>
+              </div>
+            </SurfaceCard>
+          </aside>
 
-            <main className="space-y-6">
-              <SurfaceCard isDarkMode={isDarkMode}>
-                <div className={cx("border-b px-5 py-4 sm:px-6", isDarkMode ? "border-[#2a313a]" : "border-slate-200")}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                    <div>
-                      <h2 className={cx("text-lg font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-                        All tasks
-                      </h2>
-                      <p className={cx("mt-1 text-sm", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                        Filter the full list by who owns the task, current status, or date window.
-                      </p>
+          <main className="min-h-0">
+            <SurfaceCard isDarkMode={isDarkMode} className={cx("flex min-h-full flex-col", isDarkMode ? "bg-[#101720]" : "bg-white/88")}>
+              <div className={cx("border-b px-5 py-5 sm:px-6", isDarkMode ? "border-[#2a313a]" : "border-slate-200/80")}>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="min-w-0">
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                      Task Feed
                     </div>
-                    <div className={cx("inline-flex w-fit rounded-md px-2.5 py-1 text-xs font-semibold", isDarkMode ? "bg-[#20252c] text-slate-200" : "bg-slate-100 text-slate-700")}>
-                      {filteredTasks.length} results
+                    <h2 className={cx("mt-2 text-[1.45rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                      Full workspace list
+                    </h2>
+                    <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                      Search, filter, and clear work without jumping between channels.
+                    </p>
+                  </div>
+                  <div className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.05] text-slate-200" : "bg-slate-100 text-slate-700")}>
+                    {filteredTasks.length} visible
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col px-5 py-5 sm:px-6">
+                <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.45fr)_repeat(3,minmax(180px,1fr))]">
+                  <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
+                  <FilterField icon={<UserPlus className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
+                  <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
+                  <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
+                </div>
+
+                <div className="mt-5 min-h-0 flex-1">
+                  {filteredTasks.length === 0 ? (
+                    <EmptyState
+                      title="No tasks match these filters"
+                      description="Try clearing one of the filters or widen the date range to surface more tasks."
+                      isDarkMode={isDarkMode}
+                    />
+                  ) : (
+                    <div className="space-y-3 xl:max-h-[calc(100dvh-18.5rem)] xl:overflow-y-auto xl:pr-1">
+                      {filteredTasks.map(task => {
+                        const taskId = String(task.id || task.timestamp || "")
+                        return (
+                          <TaskItem
+                            key={taskId || `${task.message}-${task.timestamp}`}
+                            task={task}
+                            channelName={channelNames.get(String(task.channel_id))}
+                            currentUserId={currentUserId}
+                            isDarkMode={isDarkMode}
+                            isWorking={completingTaskId === taskId}
+                            onComplete={onMarkTaskComplete}
+                          />
+                        )
+                      })}
                     </div>
-                  </div>
+                  )}
                 </div>
-
-                <div className="px-5 py-5 sm:px-6">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(180px,1fr))]">
-                    <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
-                    <FilterField icon={<ListFilter className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                  </div>
-
-                  <div className="mt-6">
-                    {filteredTasks.length === 0 ? (
-                      <EmptyState
-                        title="No tasks match these filters"
-                        description="Try clearing one of the filters or widen the date range to surface more tasks."
-                        isDarkMode={isDarkMode}
-                      />
-                    ) : (
-                      <div className="space-y-3 xl:max-h-[calc(100dvh-19rem)] xl:overflow-y-auto xl:pr-1">
-                        {filteredTasks.map(task => {
-                          const taskId = String(task.id || task.timestamp || "")
-                          return (
-                            <TaskItem
-                              key={taskId || `${task.message}-${task.timestamp}`}
-                              task={task}
-                              channelName={channelNames.get(String(task.channel_id))}
-                              currentUserId={currentUserId}
-                              isDarkMode={isDarkMode}
-                              isWorking={completingTaskId === taskId}
-                              onComplete={onMarkTaskComplete}
-                            />
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </SurfaceCard>
-            </main>
-          </div>
+              </div>
+            </SurfaceCard>
+          </main>
         </div>
       </div>
     </div>

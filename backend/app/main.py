@@ -1,6 +1,12 @@
 import logging
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,13 +29,6 @@ from app.routes.contexts import router as contexts_router
 from app.routes.drafts import router as drafts_router
 from app.core import drive as drive_core
 from googleapiclient.errors import HttpError
-# Load environment variables from backend/.env if present
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    # dotenv optional; if not installed or .env missing, continue
-    pass
 
 app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)

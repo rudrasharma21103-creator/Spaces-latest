@@ -144,6 +144,7 @@ export default function DocumentsHub(props) {
     onConnectGoogle,
     onReconnectGoogle,
     onRefresh,
+    onOpenConnections,
     onSelectFilter,
     onOpenAttachment,
     onAddDocument,
@@ -316,12 +317,12 @@ export default function DocumentsHub(props) {
   }, [selectedAppFilter, isDarkMode, sharedChatDocs, googleDocs.length, sortedGoogleDocs, gmailAttachments, formatDocsDate, formatDocsSize, onOpenAttachment, onAddDocument])
 
   return (
-    <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#0f1115] text-slate-100" : "bg-[#f4f6fa] text-slate-900")}>
-      <div className="relative isolate min-h-[100dvh]">
+    <div className={cx("h-full min-h-0 w-full overflow-y-auto", isDarkMode ? "bg-[#0f1115] text-slate-100" : "bg-[#f4f6fa] text-slate-900")}>
+      <div className="relative isolate min-h-full">
         <div className="relative px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
           <div className="flex flex-col gap-6">
-            {typeof onBackHome === "function" && (
-              <div className="flex items-center">
+            <div className="flex flex-wrap items-center gap-3">
+              {typeof onBackHome === "function" && (
                 <button
                   onClick={onBackHome}
                   className={cx(
@@ -334,8 +335,38 @@ export default function DocumentsHub(props) {
                   <ArrowLeft className="h-4 w-4" />
                   Back
                 </button>
-              </div>
-            )}
+              )}
+
+              {googleAccessToken && typeof onRefresh === "function" && (
+                <button
+                  onClick={onRefresh}
+                  className={cx(
+                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition",
+                    isDarkMode
+                      ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      : "border-slate-200/80 bg-white/90 text-slate-700 hover:border-slate-300 hover:bg-white"
+                  )}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh
+                </button>
+              )}
+
+              {googleAccessToken && typeof onOpenConnections === "function" && (
+                <button
+                  onClick={onOpenConnections}
+                  className={cx(
+                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition",
+                    isDarkMode
+                      ? "border-sky-400/20 bg-sky-400/10 text-sky-200 hover:bg-sky-400/15"
+                      : "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100"
+                  )}
+                >
+                  <Plus className="h-4 w-4" />
+                  Connect Apps
+                </button>
+              )}
+            </div>
             {!googleAccessToken ? (
               <SurfaceCard isDarkMode={isDarkMode}>
                 <div className="px-6 py-12 text-center sm:px-8">
