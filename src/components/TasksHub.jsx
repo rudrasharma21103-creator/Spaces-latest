@@ -190,6 +190,37 @@ function SummaryMetric({ label, value, tone = "neutral", isDarkMode = false }) {
   )
 }
 
+function MobileMetricCard({ label, value, tone = "neutral", isDarkMode = false }) {
+  const toneClass =
+    tone === "success"
+      ? isDarkMode
+        ? "text-emerald-300"
+        : "text-emerald-700"
+      : tone === "warning"
+        ? isDarkMode
+          ? "text-amber-300"
+          : "text-amber-700"
+        : isDarkMode
+          ? "text-white"
+          : "text-slate-950"
+
+  return (
+    <div
+      className={cx(
+        "min-w-[120px] rounded-[22px] border px-4 py-3.5",
+        isDarkMode
+          ? "border-white/10 bg-white/[0.05] backdrop-blur"
+          : "border-white/80 bg-white/90 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+      )}
+    >
+      <div className={cx("text-[10px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+        {label}
+      </div>
+      <div className={cx("mt-2 text-[1.4rem] font-semibold tracking-[-0.04em]", toneClass)}>{value}</div>
+    </div>
+  )
+}
+
 function InsightRow({ label, value, note, isDarkMode = false }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -203,6 +234,41 @@ function InsightRow({ label, value, note, isDarkMode = false }) {
       </div>
       <div className={cx("shrink-0 text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
         {value}
+      </div>
+    </div>
+  )
+}
+
+function FilterChipGroup({ label, value, onChange, options, isDarkMode = false }) {
+  return (
+    <div>
+      <div className={cx("mb-2 text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+        {label}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {options.map(option => {
+          const isSelected = value === option.value
+
+          return (
+            <button
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              className={cx(
+                "shrink-0 rounded-full border px-3.5 py-2 text-xs font-semibold",
+                isSelected
+                  ? isDarkMode
+                    ? "border-sky-400/40 bg-sky-400/15 text-sky-100"
+                    : "border-sky-200 bg-sky-600 text-white"
+                  : isDarkMode
+                    ? "border-white/10 bg-white/[0.05] text-slate-300"
+                    : "border-slate-200 bg-white text-slate-600",
+                colorTransition
+              )}
+            >
+              {option.label}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -310,6 +376,7 @@ function TaskItem({
   currentUserId,
   isDarkMode = false,
   isWorking = false,
+  isCompact = false,
   onComplete,
 }) {
   const isCompleted = task.status === "completed"
@@ -319,7 +386,7 @@ function TaskItem({
   return (
     <article
       className={cx(
-        "rounded-xl border px-4 py-4",
+        isCompact ? "rounded-[24px] border px-4 py-4" : "rounded-xl border px-4 py-4",
         isCompleted
           ? isDarkMode
             ? "border-emerald-900/40 bg-emerald-950/20"
@@ -330,12 +397,12 @@ function TaskItem({
         fastTransition
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className={cx("flex items-start gap-3", isCompact ? "gap-3.5" : "gap-3")}>
         <button
           onClick={() => onComplete?.(task)}
           disabled={isCompleted || isWorking}
           className={cx(
-            "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
+            isCompact ? "mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border" : "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
             isCompleted
               ? "border-emerald-500 bg-emerald-500 text-white"
               : isDarkMode
@@ -350,11 +417,11 @@ function TaskItem({
         </button>
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className={cx("flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between", isCompact ? "gap-2.5" : "gap-3")}>
             <div className="min-w-0">
               <h3
                 className={cx(
-                  "text-[15px] font-semibold leading-6",
+                  isCompact ? "text-[15px] font-semibold leading-6" : "text-[15px] font-semibold leading-6",
                   isCompleted ? "line-through opacity-70" : "",
                   isDarkMode ? "text-slate-100" : "text-slate-900"
                 )}
@@ -362,7 +429,7 @@ function TaskItem({
                 {task.message}
               </h3>
 
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className={cx("mt-2 flex flex-wrap items-center gap-2", isCompact ? "mt-2.5" : "mt-2")}>
                 {isAssignedToCurrentUser && (
                   <span
                     className={cx(
@@ -562,9 +629,157 @@ export default function TasksHub({
   return (
     <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#0b0f14] text-slate-100" : "bg-[#edf3f8] text-slate-900")}>
       <div className="flex min-h-[100dvh] w-full flex-col px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
+        <section className="md:hidden">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+            <div
+              className={cx(
+                "overflow-hidden rounded-[30px] border px-4 py-4",
+                isDarkMode
+                  ? "border-white/10 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),_transparent_52%),linear-gradient(180deg,#101720_0%,#0d131a_100%)]"
+                  : "border-white/80 bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.14),_transparent_52%),linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] shadow-[0_24px_60px_rgba(15,23,42,0.08)]"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  {typeof onBackHome === "function" && (
+                    <button
+                      onClick={onBackHome}
+                      className={cx(
+                        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border backdrop-blur",
+                        isDarkMode ? "border-white/10 bg-white/[0.06] text-slate-100" : "border-white/90 bg-white/90 text-slate-700"
+                      )}
+                      title="Back"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                  )}
+
+                  <div className="min-w-0">
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.24em]", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                      Mobile Queue
+                    </div>
+                    <h1 className={cx("mt-2 text-[1.7rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-950")}>
+                      Tasks
+                    </h1>
+                    <p className={cx("mt-2 max-w-md text-sm leading-6", isDarkMode ? "text-slate-300" : "text-slate-600")}>
+                      See what needs attention, filter fast, and close work from one thumb-friendly view.
+                    </p>
+                  </div>
+                </div>
+
+                <div className={cx("shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.08] text-slate-100" : "bg-slate-900 text-white")}>
+                  {filteredTasks.length} live
+                </div>
+              </div>
+
+              {workspaceFallback && (
+                <div className={cx("mt-4 rounded-[20px] px-3.5 py-3 text-xs leading-5", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100/90 text-slate-600")}>
+                  Showing all visible workspace tasks until profile-linked ownership is available.
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <MobileMetricCard label="Total" value={totalCount} isDarkMode={isDarkMode} />
+              <MobileMetricCard label="Done" value={completedCount} tone="success" isDarkMode={isDarkMode} />
+              <MobileMetricCard label="Open" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
+              <MobileMetricCard label="Rate" value={`${completionRate}%`} isDarkMode={isDarkMode} />
+            </div>
+
+            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]/95" : "bg-white/95")}>
+              <div className="px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                      Refine
+                    </div>
+                    <h2 className={cx("mt-2 text-lg font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                      Focus your queue
+                    </h2>
+                  </div>
+                  <div className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>
+                    {assignedTasks.length} assigned
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <FilterChipGroup label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
+                  <FilterChipGroup label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
+                  <FilterChipGroup label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
+                </div>
+
+                <div className="mt-5 grid grid-cols-3 gap-2.5">
+                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
+                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Assigned</div>
+                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{assignedTasks.length}</div>
+                  </div>
+                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
+                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Created</div>
+                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{createdTasks.length}</div>
+                  </div>
+                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
+                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Visible</div>
+                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{filteredTasks.length}</div>
+                  </div>
+                </div>
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard isDarkMode={isDarkMode} className={cx("overflow-visible", isDarkMode ? "bg-[#101720]/95" : "bg-white/95")}>
+              <div className={cx("border-b px-4 py-4", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                      Task Feed
+                    </div>
+                    <h2 className={cx("mt-1.5 text-[1.15rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                      Swipe-friendly list
+                    </h2>
+                  </div>
+                  <div className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>
+                    {filteredTasks.length} visible
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-4 py-4">
+                {filteredTasks.length === 0 ? (
+                  <EmptyState
+                    title="No tasks match these filters"
+                    description="Try broadening the ownership or date filters to bring more work back into view."
+                    isDarkMode={isDarkMode}
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {filteredTasks.map(task => {
+                      const taskId = String(task.id || task.timestamp || "")
+                      return (
+                        <TaskItem
+                          key={taskId || `${task.message}-${task.timestamp}`}
+                          task={task}
+                          channelName={channelNames.get(String(task.channel_id))}
+                          currentUserId={currentUserId}
+                          isDarkMode={isDarkMode}
+                          isWorking={completingTaskId === taskId}
+                          isCompact
+                          onComplete={onMarkTaskComplete}
+                        />
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </SurfaceCard>
+          </div>
+        </section>
+
         <section
           className={cx(
-            "flex min-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[28px] border",
+            "hidden min-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[28px] border md:flex",
             isDarkMode ? "border-white/10 bg-[#101720]" : "border-white/70 bg-white/88 shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
           )}
         >

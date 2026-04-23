@@ -51,6 +51,25 @@ function MetricCard({ label, value, note, icon, isDarkMode = false }) {
   )
 }
 
+function MobileMetricCard({ label, value, icon, isDarkMode = false }) {
+  return (
+    <div
+      className={cx(
+        "min-w-[140px] rounded-[22px] border px-4 py-3.5",
+        isDarkMode
+          ? "border-white/10 bg-white/[0.05] backdrop-blur"
+          : "border-white/80 bg-white/90 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className={cx("text-[10px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>{label}</div>
+        <div className={cx("flex h-9 w-9 items-center justify-center rounded-2xl", isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700")}>{icon}</div>
+      </div>
+      <div className={cx("mt-3 text-[1.45rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-950")}>{value}</div>
+    </div>
+  )
+}
+
 function FilterButton({ filter, isSelected, isDarkMode = false, onClick }) {
   return (
     <button
@@ -76,25 +95,51 @@ function FilterButton({ filter, isSelected, isDarkMode = false, onClick }) {
   )
 }
 
-function DocumentCard({ title, meta, sourceLabel, icon, emoji, onOpen, onAdd, extraAction, badgeClass, isDarkMode = false }) {
+function MobileFilterPill({ filter, isSelected, isDarkMode = false, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cx(
+        "shrink-0 rounded-full border px-3.5 py-2 text-sm font-semibold",
+        isSelected
+          ? (sourceStyles[filter.key] || sourceStyles.all).active
+          : isDarkMode
+            ? "border-white/10 bg-white/[0.05] text-slate-200"
+            : "border-slate-200 bg-white text-slate-700"
+      )}
+    >
+      <span className="flex items-center gap-2">
+        <span className={cx("flex h-6 w-6 items-center justify-center rounded-full", isSelected ? "bg-white/15 text-white" : isDarkMode ? "bg-white/[0.06]" : "bg-slate-100")}>
+          {filter.icon}
+        </span>
+        {filter.label}
+        <span className={cx("rounded-full px-2 py-0.5 text-[11px] font-semibold", isSelected ? "bg-white/15 text-white" : isDarkMode ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600")}>
+          {filter.count}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function DocumentCard({ title, meta, sourceLabel, icon, emoji, onOpen, onAdd, extraAction, badgeClass, isDarkMode = false, isCompact = false }) {
   const safeMeta = typeof meta === "string" ? meta.replaceAll("Â·", "|").replaceAll("·", "|") : meta
 
   return (
-    <article className={cx("group flex h-full flex-col rounded-[26px] border p-4 transition", isDarkMode ? "border-white/10 bg-white/[0.04] hover:border-sky-400/20 hover:bg-white/[0.05]" : "border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-[0_20px_40px_rgba(15,23,42,0.08)]")}>
+    <article className={cx("group flex h-full flex-col border p-4 transition", isCompact ? "rounded-[24px]" : "rounded-[26px]", isDarkMode ? "border-white/10 bg-white/[0.04] hover:border-sky-400/20 hover:bg-white/[0.05]" : "border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-[0_20px_40px_rgba(15,23,42,0.08)]")}>
       <div className="flex items-start justify-between gap-3">
         <button onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-          <div className={cx("flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border", isDarkMode ? "border-white/10 bg-white/[0.06]" : "border-slate-200 bg-slate-50")}>
-            {icon ? <SmartImage src={icon} alt="" className="h-8 w-8 object-contain" fallback={<span className="text-2xl">{emoji}</span>} /> : <span className="text-2xl">{emoji}</span>}
+          <div className={cx("flex shrink-0 items-center justify-center border", isCompact ? "h-12 w-12 rounded-[18px]" : "h-14 w-14 rounded-[20px]", isDarkMode ? "border-white/10 bg-white/[0.06]" : "border-slate-200 bg-slate-50")}>
+            {icon ? <SmartImage src={icon} alt="" className={cx("object-contain", isCompact ? "h-7 w-7" : "h-8 w-8")} fallback={<span className={isCompact ? "text-xl" : "text-2xl"}>{emoji}</span>} /> : <span className={isCompact ? "text-xl" : "text-2xl"}>{emoji}</span>}
           </div>
           <div className="min-w-0 flex-1">
-            <div className={cx("line-clamp-2 text-[1rem] font-semibold leading-6", isDarkMode ? "text-slate-100" : "text-slate-900")}>{title}</div>
-            <div className={cx("mt-2 line-clamp-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>{safeMeta}</div>
+            <div className={cx(isCompact ? "line-clamp-2 text-[0.98rem] font-semibold leading-6" : "line-clamp-2 text-[1rem] font-semibold leading-6", isDarkMode ? "text-slate-100" : "text-slate-900")}>{title}</div>
+            <div className={cx(isCompact ? "mt-1.5 line-clamp-2 text-[13px] leading-5" : "mt-2 line-clamp-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>{safeMeta}</div>
           </div>
         </button>
         <span className={cx("shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold", badgeClass)}>{sourceLabel}</span>
       </div>
 
-      <div className="mt-5 flex items-center justify-between gap-3">
+      <div className={cx("flex items-center justify-between gap-3", isCompact ? "mt-4" : "mt-5")}>
         <button onClick={onOpen} className={cx("inline-flex items-center gap-2 rounded-full text-sm font-semibold transition", isDarkMode ? "text-slate-200 hover:text-white" : "text-slate-700 hover:text-slate-900")}>
           Open file
           <ArrowUpRight className="h-4 w-4" />
@@ -321,7 +366,7 @@ export default function DocumentsHub(props) {
       <div className="relative isolate min-h-full">
         <div className="relative px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
           <div className="flex flex-col gap-6">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="hidden flex-wrap items-center gap-3 md:flex">
               {typeof onBackHome === "function" && (
                 <button
                   onClick={onBackHome}
@@ -410,73 +455,242 @@ export default function DocumentsHub(props) {
                 </div>
               </SurfaceCard>
             ) : (
-              <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="space-y-5 xl:sticky xl:top-6 xl:h-fit">
-                  <SurfaceCard isDarkMode={isDarkMode}>
-                    <div className="px-5 py-5">
-                      <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Collections</div>
-                      <h2 className={cx("mt-2 text-[1.45rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>Browse by source</h2>
-                      <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>Switch between document sources without losing the larger workspace context.</p>
-                      <div className="mt-5 space-y-3">
-                        {filters.map(filter => (
-                          <FilterButton key={filter.key} filter={filter} isSelected={selectedAppFilter === filter.key} isDarkMode={isDarkMode} onClick={() => onSelectFilter(filter.key)} />
-                        ))}
-                      </div>
-                    </div>
-                  </SurfaceCard>
-
-                  <SurfaceCard isDarkMode={isDarkMode}>
-                    <div className="px-5 py-5">
-                      <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Library pulse</div>
-                      <h3 className={cx("mt-2 text-[1.35rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>Quick totals</h3>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                        {overviewCards.map(card => <MetricCard key={card.label} label={card.label} value={card.value} note={card.note} icon={card.icon} isDarkMode={isDarkMode} />)}
-                      </div>
-                    </div>
-                  </SurfaceCard>
-                </aside>
-
-                <main className="min-w-0 space-y-5">
-                  <SurfaceCard isDarkMode={isDarkMode}>
-                    <div className={cx("border-b px-5 py-5 sm:px-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="min-w-0">
-                          <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Active collection</div>
-                          <h2 className={cx("mt-2 text-[1.9rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-900")}>{collectionSummary.label}</h2>
-                          <p className={cx("mt-2 max-w-3xl text-sm leading-7", isDarkMode ? "text-slate-400" : "text-slate-500")}>{collectionSummary.detail}</p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={cx("inline-flex rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>{collectionSummary.count} visible</span>
-                          <span className={cx("inline-flex rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-cyan-400/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>Full-page browser</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="px-5 py-5 sm:px-6">
-                      {sections.length === 0 ? (
-                        <EmptyState title="No documents in this collection" description="Try a different source, reconnect Google, or wait for files to sync into the library." isDarkMode={isDarkMode} />
-                      ) : (
-                        <div className="space-y-6">
-                          {sections.map(section => (
-                            <div key={section.key}>
-                              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                                <div>
-                                  <h3 className={cx("text-[1.25rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>{section.title}</h3>
-                                  <p className={cx("mt-1 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>{section.description}</p>
-                                </div>
-                                <span className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", section.badgeClass)}>{section.items.length} items</span>
-                              </div>
-                              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                                {section.items.map(item => <DocumentCard key={item.id} title={item.title} meta={item.meta} sourceLabel={item.sourceLabel} icon={item.icon} emoji={item.emoji} onOpen={item.onOpen} onAdd={item.onAdd} extraAction={item.extraAction} badgeClass={item.badgeClass || section.badgeClass} isDarkMode={isDarkMode} />)}
-                              </div>
+              <>
+                <section className="md:hidden">
+                  <div className="flex flex-col gap-4">
+                    <div
+                      className={cx(
+                        "overflow-hidden rounded-[30px] border px-4 py-4",
+                        isDarkMode
+                          ? "border-white/10 bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.2),_transparent_52%),linear-gradient(180deg,#121821_0%,#0d131a_100%)]"
+                          : "border-white/80 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.14),_transparent_52%),linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] shadow-[0_24px_60px_rgba(15,23,42,0.08)]"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          {typeof onBackHome === "function" && (
+                            <button
+                              onClick={onBackHome}
+                              className={cx(
+                                "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border backdrop-blur",
+                                isDarkMode ? "border-white/10 bg-white/[0.06] text-slate-100" : "border-white/90 bg-white/90 text-slate-700"
+                              )}
+                            >
+                              <ArrowLeft className="h-4 w-4" />
+                            </button>
+                          )}
+                          <div className="min-w-0">
+                            <div className={cx("text-[11px] font-semibold uppercase tracking-[0.24em]", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                              Mobile Library
                             </div>
+                            <h1 className={cx("mt-2 text-[1.7rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-950")}>
+                              Docs
+                            </h1>
+                            <p className={cx("mt-2 max-w-md text-sm leading-6", isDarkMode ? "text-slate-300" : "text-slate-600")}>
+                              Browse workspace files, jump sources quickly, and attach documents without leaving the phone flow.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className={cx("shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.08] text-slate-100" : "bg-slate-900 text-white")}>
+                          {collectionSummary.count} files
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {googleAccessToken && typeof onRefresh === "function" && (
+                          <button
+                            onClick={onRefresh}
+                            className={cx(
+                              "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold",
+                              isDarkMode ? "border-white/10 bg-white/[0.06] text-slate-200" : "border-white/90 bg-white/90 text-slate-700"
+                            )}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                            Refresh
+                          </button>
+                        )}
+                        {googleAccessToken && typeof onOpenConnections === "function" && (
+                          <button
+                            onClick={onOpenConnections}
+                            className={cx(
+                              "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold",
+                              isDarkMode ? "border-sky-400/20 bg-sky-400/12 text-sky-200" : "border-sky-200 bg-sky-50 text-sky-700"
+                            )}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Connect Apps
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      <MobileMetricCard label="All files" value={overview.total} icon={<Sparkles className="h-4 w-4" />} isDarkMode={isDarkMode} />
+                      <MobileMetricCard label="Workspace" value={overview.drive} icon={<FileText className="h-4 w-4" />} isDarkMode={isDarkMode} />
+                      <MobileMetricCard label="Shared" value={overview.shared} icon={<FolderOpen className="h-4 w-4" />} isDarkMode={isDarkMode} />
+                      <MobileMetricCard label="Gmail" value={overview.gmail} icon={<Mail className="h-4 w-4" />} isDarkMode={isDarkMode} />
+                    </div>
+
+                    <SurfaceCard isDarkMode={isDarkMode}>
+                      <div className="px-4 py-4">
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                              Sources
+                            </div>
+                            <h2 className={cx("mt-2 text-lg font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                              Jump between collections
+                            </h2>
+                          </div>
+                          <span className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>
+                            {selectedAppFilter}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                          {filters.map(filter => (
+                            <MobileFilterPill
+                              key={filter.key}
+                              filter={filter}
+                              isSelected={selectedAppFilter === filter.key}
+                              isDarkMode={isDarkMode}
+                              onClick={() => onSelectFilter(filter.key)}
+                            />
                           ))}
                         </div>
-                      )}
-                    </div>
-                  </SurfaceCard>
-                </main>
-              </div>
+                      </div>
+                    </SurfaceCard>
+
+                    <SurfaceCard isDarkMode={isDarkMode}>
+                      <div className={cx("border-b px-4 py-4", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
+                              Active Collection
+                            </div>
+                            <h2 className={cx("mt-2 text-[1.2rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>
+                              {collectionSummary.label}
+                            </h2>
+                            <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
+                              {collectionSummary.detail}
+                            </p>
+                          </div>
+                          <span className={cx("shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-cyan-400/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>
+                            {collectionSummary.count} visible
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-4">
+                        {sections.length === 0 ? (
+                          <EmptyState title="No documents in this collection" description="Try a different source or reconnect Google to surface files here." isDarkMode={isDarkMode} />
+                        ) : (
+                          <div className="space-y-5">
+                            {sections.map(section => (
+                              <div key={section.key}>
+                                <div className="mb-3 flex items-end justify-between gap-3">
+                                  <div>
+                                    <h3 className={cx("text-[1.05rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>{section.title}</h3>
+                                    <p className={cx("mt-1 text-[13px] leading-5", isDarkMode ? "text-slate-400" : "text-slate-500")}>{section.description}</p>
+                                  </div>
+                                  <span className={cx("shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold", section.badgeClass)}>{section.items.length}</span>
+                                </div>
+                                <div className="space-y-3">
+                                  {section.items.map(item => (
+                                    <DocumentCard
+                                      key={item.id}
+                                      title={item.title}
+                                      meta={item.meta}
+                                      sourceLabel={item.sourceLabel}
+                                      icon={item.icon}
+                                      emoji={item.emoji}
+                                      onOpen={item.onOpen}
+                                      onAdd={item.onAdd}
+                                      extraAction={item.extraAction}
+                                      badgeClass={item.badgeClass || section.badgeClass}
+                                      isDarkMode={isDarkMode}
+                                      isCompact
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </SurfaceCard>
+                  </div>
+                </section>
+
+                <div className="hidden gap-6 md:grid xl:grid-cols-[320px_minmax(0,1fr)]">
+                  <aside className="space-y-5 xl:sticky xl:top-6 xl:h-fit">
+                    <SurfaceCard isDarkMode={isDarkMode}>
+                      <div className="px-5 py-5">
+                        <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Collections</div>
+                        <h2 className={cx("mt-2 text-[1.45rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>Browse by source</h2>
+                        <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>Switch between document sources without losing the larger workspace context.</p>
+                        <div className="mt-5 space-y-3">
+                          {filters.map(filter => (
+                            <FilterButton key={filter.key} filter={filter} isSelected={selectedAppFilter === filter.key} isDarkMode={isDarkMode} onClick={() => onSelectFilter(filter.key)} />
+                          ))}
+                        </div>
+                      </div>
+                    </SurfaceCard>
+
+                    <SurfaceCard isDarkMode={isDarkMode}>
+                      <div className="px-5 py-5">
+                        <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Library pulse</div>
+                        <h3 className={cx("mt-2 text-[1.35rem] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>Quick totals</h3>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                          {overviewCards.map(card => <MetricCard key={card.label} label={card.label} value={card.value} note={card.note} icon={card.icon} isDarkMode={isDarkMode} />)}
+                        </div>
+                      </div>
+                    </SurfaceCard>
+                  </aside>
+
+                  <main className="min-w-0 space-y-5">
+                    <SurfaceCard isDarkMode={isDarkMode}>
+                      <div className={cx("border-b px-5 py-5 sm:px-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                          <div className="min-w-0">
+                            <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Active collection</div>
+                            <h2 className={cx("mt-2 text-[1.9rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-900")}>{collectionSummary.label}</h2>
+                            <p className={cx("mt-2 max-w-3xl text-sm leading-7", isDarkMode ? "text-slate-400" : "text-slate-500")}>{collectionSummary.detail}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={cx("inline-flex rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>{collectionSummary.count} visible</span>
+                            <span className={cx("inline-flex rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-cyan-400/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>Full-page browser</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="px-5 py-5 sm:px-6">
+                        {sections.length === 0 ? (
+                          <EmptyState title="No documents in this collection" description="Try a different source, reconnect Google, or wait for files to sync into the library." isDarkMode={isDarkMode} />
+                        ) : (
+                          <div className="space-y-6">
+                            {sections.map(section => (
+                              <div key={section.key}>
+                                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                                  <div>
+                                    <h3 className={cx("text-[1.25rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>{section.title}</h3>
+                                    <p className={cx("mt-1 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>{section.description}</p>
+                                  </div>
+                                  <span className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", section.badgeClass)}>{section.items.length} items</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                                  {section.items.map(item => <DocumentCard key={item.id} title={item.title} meta={item.meta} sourceLabel={item.sourceLabel} icon={item.icon} emoji={item.emoji} onOpen={item.onOpen} onAdd={item.onAdd} extraAction={item.extraAction} badgeClass={item.badgeClass || section.badgeClass} isDarkMode={isDarkMode} />)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </SurfaceCard>
+                  </main>
+                </div>
+              </>
             )}
           </div>
         </div>
