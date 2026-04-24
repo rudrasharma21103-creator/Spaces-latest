@@ -52,6 +52,8 @@ const getGreeting = name => {
   return `${label}${name ? `, ${name}` : ""}`
 }
 
+const getShortConnectionName = name => (name || "").trim().slice(0, 5)
+
 const formatWhen = value => {
   if (!value) return "Just now"
   const date = new Date(value)
@@ -213,6 +215,9 @@ export default function HomeHub({
   const [savingProfile, setSavingProfile] = useState(false)
   const dmMessagesContainerRef = useRef(null)
   const connectionsScrollerRef = useRef(null)
+  const connectionsScrollTargetRef = useRef(0)
+  const connectionsAutoScrollingRef = useRef(false)
+  const connectionsScrollSettleTimerRef = useRef(0)
   const settingsMenuRef = useRef(null)
   const previousDMUserRef = useRef(null)
   const justSwitchedDMRef = useRef(false)
@@ -224,6 +229,9 @@ export default function HomeHub({
   )
   const profileStrength = [currentProfile.companyName, currentProfile.position, currentProfile.linkedInUrl].filter(Boolean).length
   const profileStrengthLabel = profileStrength === 3 ? "Complete" : profileStrength === 2 ? "Strong" : profileStrength === 1 ? "Started" : "Needs details"
+  const desktopConnectionsVisibleCount = homeSidebarCollapsed ? 10 : 8
+  const desktopConnectionItemBasis = `clamp(72px, calc((100% - ${(desktopConnectionsVisibleCount - 1) * 12}px) / ${desktopConnectionsVisibleCount}), 90px)`
+  const connectionsCardWidthClass = homeSidebarCollapsed ? "max-w-[1140px] xl:max-w-[1220px]" : "max-w-[980px] xl:max-w-[1040px]"
 
   const syncConnectionsScrollState = targetScrollLeft => {
     const container = connectionsScrollerRef.current
@@ -298,17 +306,7 @@ export default function HomeHub({
     let settleTimeout = 0
 
     const updateScrollState = () => {
-      const maxScrollLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
-      const nextScrollLeft = Math.min(Math.max(container.scrollLeft, 0), maxScrollLeft)
-
-      setConnectionsScrollState(prev => {
-        const next = {
-          left: nextScrollLeft > 8,
-          right: nextScrollLeft < maxScrollLeft - 8,
-        }
-
-        return prev.left === next.left && prev.right === next.right ? prev : next
-      })
+      syncConnectionsScrollState()
     }
 
     updateScrollState()
@@ -326,11 +324,12 @@ export default function HomeHub({
     return () => {
       if (frameId) window.cancelAnimationFrame(frameId)
       if (settleTimeout) window.clearTimeout(settleTimeout)
+      if (connectionsScrollSettleTimerRef.current) window.clearTimeout(connectionsScrollSettleTimerRef.current)
       resizeObserver?.disconnect()
       container.removeEventListener("scroll", updateScrollState)
       window.removeEventListener("resize", updateScrollState)
     }
-  }, [friends, isMobile, searchQuery])
+  }, [friends, homeSidebarCollapsed, isMobile, searchQuery])
 
   useEffect(() => {
     if (!showSettingsMenu) return
@@ -636,29 +635,68 @@ export default function HomeHub({
     </div>
   )
 
-  const scrollConnections = direction => {
+  const getConnectionsScrollMetrics = () => {
     const container = connectionsScrollerRef.current
-    if (!container) return
+    if (!container) return null
 
-    const offset = Math.max(container.clientWidth * 0.72, 220)
     const maxScrollLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
-    const startScrollLeft = Math.min(Math.max(container.scrollLeft, 0), maxScrollLeft)
-    const targetScrollLeft = Math.min(Math.max(startScrollLeft + direction * offset, 0), maxScrollLeft)
+    const currentScrollLeft = Math.min(Math.max(container.scrollLeft, 0), maxScrollLeft)
+    const computedStyles = window.getComputedStyle(container)
+    const scrollPaddingLeft =
+      Number.parseFloat(computedStyles.scrollPaddingLeft || computedStyles.scrollPaddingInlineStart || "0") || 0
+    const snapPoints = Array.from(container.children)
+      .map(child => Math.min(Math.max(child.offsetLeft - scrollPaddingLeft, 0), maxScrollLeft))
+      .concat(0, maxScrollLeft)
+      .filter((point, index, points) => points.indexOf(point) === index)
+      .sort((a, b) => a - b)
 
-    if (Math.abs(targetScrollLeft - startScrollLeft) < 1) return
+    return { container, maxScrollLeft, currentScrollLeft, snapPoints }
+  }
+
+  const scrollConnections = direction => {
+    const metrics = getConnectionsScrollMetrics()
+    if (!metrics) return
+
+    const { container, currentScrollLeft, maxScrollLeft, snapPoints } = metrics
+    if (maxScrollLeft <= 1) {
+      syncConnectionsScrollState(0)
+      return
+    }
+
+    const baseScrollLeft = connectionsAutoScrollingRef.current
+      ? connectionsScrollTargetRef.current
+      : currentScrollLeft
+    const pageDistance = Math.max(container.clientWidth * 0.82, 120)
+    const proposedScrollLeft = Math.min(Math.max(baseScrollLeft + direction * pageDistance, 0), maxScrollLeft)
+    const nearestSnapPoint = snapPoints.reduce((closest, point) => {
+      return Math.abs(point - proposedScrollLeft) < Math.abs(closest - proposedScrollLeft) ? point : closest
+    }, snapPoints[0] ?? proposedScrollLeft)
+    const fallbackSnapPoint =
+      direction > 0
+        ? snapPoints.find(point => point > currentScrollLeft + 2) ?? maxScrollLeft
+        : [...snapPoints].reverse().find(point => point < currentScrollLeft - 2) ?? 0
+    const targetScrollLeft =
+      direction > 0
+        ? Math.max(nearestSnapPoint, fallbackSnapPoint)
+        : Math.min(nearestSnapPoint, fallbackSnapPoint)
+
+    if (Math.abs(targetScrollLeft - currentScrollLeft) < 1) return
+
+    connectionsAutoScrollingRef.current = true
+    connectionsScrollTargetRef.current = targetScrollLeft
+    if (connectionsScrollSettleTimerRef.current) window.clearTimeout(connectionsScrollSettleTimerRef.current)
 
     container.scrollTo({ left: targetScrollLeft, behavior: "smooth" })
     syncConnectionsScrollState(targetScrollLeft)
+
+    connectionsScrollSettleTimerRef.current = window.setTimeout(() => {
+      connectionsAutoScrollingRef.current = false
+      connectionsScrollTargetRef.current = container.scrollLeft
+      syncConnectionsScrollState()
+    }, 420)
   }
 
   const handleConnectionsButtonClick = (event, direction) => {
-    event.preventDefault()
-    event.stopPropagation()
-    scrollConnections(direction)
-  }
-
-  const handleConnectionsButtonKeyDown = (event, direction) => {
-    if (event.key !== "Enter" && event.key !== " ") return
     event.preventDefault()
     event.stopPropagation()
     scrollConnections(direction)
@@ -813,7 +851,7 @@ export default function HomeHub({
   }
 
   const renderOverview = () => (
-    <div className={cx("space-y-4", isMobile && "flex min-h-full flex-col")}>
+    <div className={cx("w-full min-w-0 max-w-full space-y-4 overflow-x-hidden", isMobile && "flex min-h-full flex-col")}>
       {isMobile ? (
         <>
           {renderMobileOverviewHero()}
@@ -822,61 +860,72 @@ export default function HomeHub({
         </>
       ) : (
         <>
-      <div className="relative w-full lg:px-5">
-        <button
-          type="button"
-          onClick={event => handleConnectionsButtonClick(event, -1)}
-          onKeyDown={event => handleConnectionsButtonKeyDown(event, -1)}
-          className={cx(
-            "pointer-events-auto absolute left-5 top-1/2 z-10 hidden h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-            ui.iconButton,
-            !connectionsScrollState.left && "opacity-40"
-          )}
-          title="Scroll left"
-        >
-          <ChevronLeft className="h-4.5 w-4.5" />
-        </button>
-
-        <ShellCard className={cx("p-4", overviewWidgetClass)}>
-          <div
-            ref={connectionsScrollerRef}
-            className="flex items-center gap-3 overflow-x-auto pb-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-            style={{ scrollBehavior: "auto" }}
+      <div className="w-full min-w-0 max-w-full overflow-hidden lg:px-5">
+        <div className={cx("relative mx-auto w-full min-w-0", connectionsCardWidthClass)}>
+          <button
+            type="button"
+            onClick={event => handleConnectionsButtonClick(event, -1)}
+            aria-disabled={!connectionsScrollState.left}
+            className={cx(
+              "pointer-events-auto absolute left-3 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+              ui.iconButton,
+              !connectionsScrollState.left && "opacity-40"
+            )}
+            title="Scroll left"
           >
-            <button onClick={onOpenAddConnection} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
-                <Plus className="h-5 w-5" />
-              </span>
-              <span className={cx("text-sm font-medium", ui.textPrimary)}>Add yours</span>
-            </button>
-            {filteredFriends.map(friend => (
-              <button key={friend.id} onClick={() => onOpenDM(friend.id)} className="flex min-w-[78px] shrink-0 flex-col items-center gap-2 rounded-[20px] px-1 py-1.5">
-                <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
-                  {renderAvatar(friend, 48)}
-                </span>
-                <span className={cx("max-w-[78px] truncate text-sm font-medium", ui.textPrimary)}>{friend.name}</span>
-              </button>
-            ))}
-          </div>
-        </ShellCard>
+            <ChevronLeft className="h-4.5 w-4.5" />
+          </button>
 
-        <button
-          type="button"
-          onClick={event => handleConnectionsButtonClick(event, 1)}
-          onKeyDown={event => handleConnectionsButtonKeyDown(event, 1)}
-          className={cx(
-            "pointer-events-auto absolute right-5 top-1/2 z-10 hidden h-10 w-10 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-            ui.iconButton,
-            !connectionsScrollState.right && "opacity-40"
-          )}
-          title="Scroll right"
-        >
-          <ChevronRight className="h-4.5 w-4.5" />
-        </button>
+          <ShellCard className={cx("w-full max-w-full overflow-hidden p-4", overviewWidgetClass)}>
+            <div
+              ref={connectionsScrollerRef}
+              className="flex w-full min-w-0 max-w-full snap-x snap-mandatory items-center gap-3 overflow-x-auto overflow-y-hidden px-10 pb-1.5 scroll-px-10 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              style={{ scrollBehavior: "auto" }}
+            >
+              <button
+                onClick={onOpenAddConnection}
+                className="flex shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
+                style={{ flexBasis: desktopConnectionItemBasis }}
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
+                  <Plus className="h-5 w-5" />
+                </span>
+                <span className={cx("w-full truncate text-center text-sm font-medium", ui.textPrimary)}>Add yours</span>
+              </button>
+              {filteredFriends.map(friend => (
+                <button
+                  key={friend.id}
+                  onClick={() => onOpenDM(friend.id)}
+                  className="flex shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
+                  style={{ flexBasis: desktopConnectionItemBasis }}
+                >
+                  <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
+                    {renderAvatar(friend, 48)}
+                  </span>
+                  <span className={cx("w-full truncate text-center text-sm font-medium", ui.textPrimary)}>{getShortConnectionName(friend.name)}</span>
+                </button>
+              ))}
+            </div>
+          </ShellCard>
+
+          <button
+            type="button"
+            onClick={event => handleConnectionsButtonClick(event, 1)}
+            aria-disabled={!connectionsScrollState.right}
+            className={cx(
+              "pointer-events-auto absolute right-3 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
+              ui.iconButton,
+              !connectionsScrollState.right && "opacity-40"
+            )}
+            title="Scroll right"
+          >
+            <ChevronRight className="h-4.5 w-4.5" />
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-12">
-        <div className="space-y-4 xl:col-span-5">
+        <div className="min-w-0 space-y-4 xl:col-span-5">
           <ShellCard className={overviewWidgetClass}>
             <div className="mb-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -933,7 +982,7 @@ export default function HomeHub({
           </ShellCard>
         </div>
 
-        <div className="space-y-4 xl:col-span-7">
+        <div className="min-w-0 space-y-4 xl:col-span-7">
           {renderThoughtsCard()}
 
           <ShellCard className={overviewWidgetClass}>
@@ -1396,8 +1445,8 @@ export default function HomeHub({
         </div>
         )}
 
-        <main className={cx("flex min-w-0 flex-1 flex-col", isDarkMode ? "bg-[#111111]" : "bg-[#f6f8fc]", showSidebar && "lg:pl-16")}>
-          <div className="flex min-h-0 flex-1 flex-col">
+        <main className={cx("flex min-w-0 max-w-full flex-1 flex-col overflow-x-hidden", isDarkMode ? "bg-[#111111]" : "bg-[#f6f8fc]", showSidebar && "lg:px-10 xl:px-12")}>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
             {isMobile && section !== "overview" && section !== "dm" && renderMobileSectionNav()}
             {isMobile && section === "dm" && (
               <div className={cx("border-b px-4 py-2.5 sm:px-5", ui.border)}>
@@ -1430,9 +1479,9 @@ export default function HomeHub({
               <div className={cx("border-b px-4 py-3.5 sm:px-5 lg:px-6 lg:py-4", ui.border)}>
                 <div
                   className={cx(
-                    "flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between",
-                    section === "overview" && "mx-auto w-full max-w-[1460px]",
-                    section === "dm" && "mx-auto w-full max-w-[1400px]"
+                    "flex min-w-0 max-w-full flex-col gap-3 xl:flex-row xl:items-center xl:justify-between",
+                    section === "overview" && "mx-auto w-full min-w-0 max-w-[1460px]",
+                    section === "dm" && "mx-auto w-full min-w-0 max-w-[1400px]"
                   )}
                 >
                   <div className="min-w-0">
@@ -1530,12 +1579,12 @@ export default function HomeHub({
               className={cx(
                 "flex-1 min-w-0 px-4 py-3.5 sm:px-5 lg:px-6",
                 isMobile ? "pb-24" : "",
-                section === "overview" && "mx-auto w-full max-w-[1460px]",
+                section === "overview" && "mx-auto w-full min-w-0 max-w-[1460px] overflow-x-hidden",
                 section === "dm"
                   ? "flex min-h-0 lg:overflow-hidden"
                   : section === "overview"
-                    ? "flex pt-4 lg:py-5 lg:overflow-y-auto"
-                  : "pb-6 lg:py-5 lg:overflow-y-auto"
+                    ? "flex max-w-full pt-4 lg:overflow-x-hidden lg:py-5 lg:overflow-y-auto"
+                    : "pb-6 lg:py-5 lg:overflow-y-auto"
               )}
             >
               {renderBody()}
