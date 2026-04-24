@@ -2,6 +2,29 @@ import axios from 'axios'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY
+let googleScriptLoadPromise = null
+
+const ensureGooglePreconnect = () => {
+  if (typeof document === 'undefined') return
+
+  const targets = [
+    ['preconnect', 'https://accounts.google.com'],
+    ['preconnect', 'https://www.googleapis.com'],
+    ['dns-prefetch', '//accounts.google.com'],
+    ['dns-prefetch', '//www.googleapis.com']
+  ]
+
+  for (const [rel, href] of targets) {
+    const selector = `link[rel="${rel}"][href="${href}"]`
+    if (document.head.querySelector(selector)) continue
+
+    const link = document.createElement('link')
+    link.rel = rel
+    link.href = href
+    if (rel === 'preconnect') link.crossOrigin = 'anonymous'
+    document.head.appendChild(link)
+  }
+}
 
 // Google Apps for the Grid Icon
 export const GOOGLE_APPS = [
@@ -64,17 +87,48 @@ export const GOOGLE_APPS = [
 ]
 
 // Initialize Google API for OAuth
-export const initGoogleAuth = (callback) => {
-  if (typeof window === 'undefined') return
+const ensureGoogleAuthScript = () => {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if (window.google?.accounts?.oauth2) return Promise.resolve()
+  if (googleScriptLoadPromise) return googleScriptLoadPromise
+  ensureGooglePreconnect()
 
-  // Load Google Identity Services script
-  if (!window.google) {
+  googleScriptLoadPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]')
+    if (existingScript) {
+      if (existingScript.dataset.loaded === 'true' || window.google?.accounts?.oauth2) {
+        resolve()
+        return
+      }
+      existingScript.addEventListener('load', () => resolve(), { once: true })
+      existingScript.addEventListener('error', () => reject(new Error('Failed to load Google API')), { once: true })
+      return
+    }
+
     const script = document.createElement('script')
     script.src = 'https://accounts.google.com/gsi/client'
     script.async = true
     script.defer = true
     script.onload = () => {
-      // Disable automatic One Tap to prevent CORS errors on unconfigured domains
+      script.dataset.loaded = 'true'
+      resolve()
+    }
+    script.onerror = () => reject(new Error('Failed to load Google API'))
+    ;(document.body || document.head).appendChild(script)
+  }).catch(error => {
+    googleScriptLoadPromise = null
+    throw error
+  })
+
+  return googleScriptLoadPromise
+}
+
+export const initGoogleAuth = (callback) => {
+  if (typeof window === 'undefined') return
+
+  ensureGoogleAuthScript()
+    .then(() => {
+      // Cancel any automatic prompts
       try {
         if (window.google?.accounts?.id) {
           window.google.accounts.id.cancel()
@@ -83,10 +137,27 @@ export const initGoogleAuth = (callback) => {
         // Silently ignore
       }
       if (callback) callback()
-    }
-    document.body.appendChild(script)
-  } else {
-    // Cancel any automatic prompts
+    })
+    .catch(() => {
+      if (callback) callback()
+    })
+}
+
+// Google Sign-In Handler (using OAuth2 popup for explicit button clicks)
+export const handleGoogleSignIn = async (onSuccess, onError) => {
+  try {
+    await ensureGoogleAuthScript()
+  } catch (error) {
+    onError?.('Google API not loaded')
+    return
+  }
+
+  if (!window.google) {
+    onError?.('Google API not loaded')
+    return
+  }
+
+  try {
     try {
       if (window.google?.accounts?.id) {
         window.google.accounts.id.cancel()
@@ -94,18 +165,6 @@ export const initGoogleAuth = (callback) => {
     } catch (e) {
       // Silently ignore
     }
-    if (callback) callback()
-  }
-}
-
-// Google Sign-In Handler (using OAuth2 popup for explicit button clicks)
-export const handleGoogleSignIn = (onSuccess, onError) => {
-  if (!window.google) {
-    onError?.('Google API not loaded')
-    return
-  }
-
-  try {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: 'openid email profile',

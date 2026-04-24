@@ -170,26 +170,22 @@ function FilePreview({ file, isDarkMode }) {
 
 export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
   return (
-    <div
-      className={`mx-4 sm:mx-6 mb-2.5 rounded-xl border px-2.5 py-1.5 flex items-center justify-between gap-2 ${
-        isDarkMode ? "border-slate-800 bg-[#16181c]" : "border-white/70 bg-white/70 shadow-sm"
-      }`}
-    >
-      <div className="flex items-center gap-1">
+    <div className="mx-4 mb-0.5 px-0 sm:mx-6">
+      <div className={`flex items-center gap-0.5 overflow-x-auto border-b pb-1.5 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/90"}`}>
         {tabs.map(tab => {
           const active = activeTab === tab
           return (
             <button
               key={tab}
               onClick={() => onChange(tab)}
-              className={`px-2.5 py-1.5 rounded-lg text-[13px] font-semibold capitalize transition-colors ${
+              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold capitalize transition-colors sm:text-[13px] ${
                 active
                   ? isDarkMode
                     ? "bg-slate-800 text-white"
                     : "bg-slate-900 text-white"
                   : isDarkMode
-                    ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800/80"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                    ? "text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
               }`}
             >
               {tab}
@@ -486,8 +482,8 @@ export function ContextsTabView({
 }) {
   if (!contexts.length) {
     return (
-      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
-        <div className={`mx-auto mb-4 w-14 h-14 rounded-3xl flex items-center justify-center ${isDarkMode ? "bg-slate-800 text-sky-300" : "bg-sky-50 text-sky-600"}`}>
+      <div className={`mx-4 rounded-[1.75rem] border p-8 text-center sm:mx-6 ${isDarkMode ? "border-slate-800 bg-[#16181c] text-slate-400" : "border-slate-200/80 bg-white text-slate-500 shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
+        <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-3xl ${isDarkMode ? "bg-slate-800 text-sky-300" : "bg-slate-100 text-slate-600"}`}>
           <FolderOpen className="w-8 h-8" />
         </div>
         <div className={`text-lg font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>No living context yet</div>
@@ -497,68 +493,76 @@ export function ContextsTabView({
   }
 
   return (
-    <div className="mx-4 sm:mx-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {contexts.map(context => {
-        const statusMeta = CONTEXT_STATUS_META[context.status] || CONTEXT_STATUS_META.active
-        const showDelete = typeof canDelete === "function" ? canDelete(context) : false
-        return (
-          <article
-            key={context.id}
-            onClick={() => onOpen(context.id)}
-            onKeyDown={event => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                onOpen(context.id)
-              }
-            }}
-            role="button"
-            tabIndex={0}
-            className={`text-left rounded-[1.5rem] border p-4 transition-all hover:-translate-y-0.5 ${
-              isDarkMode ? "bg-[#16181c] border-slate-800 hover:border-slate-700" : "bg-white/80 border-white hover:shadow-lg"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <div className={`text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
-                <div className={`text-sm mt-1 line-clamp-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{context.summary}</div>
+    <div className="mx-4 sm:mx-6">
+      <div className="max-w-[440px] space-y-4">
+        {contexts.map(context => {
+          const statusMeta = CONTEXT_STATUS_META[context.status] || CONTEXT_STATUS_META.active
+          const showDelete = typeof canDelete === "function" ? canDelete(context) : false
+          return (
+            <article
+              key={context.id}
+              onClick={() => onOpen(context.id)}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault()
+                  onOpen(context.id)
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              className={`text-left transition-all hover:-translate-y-0.5 ${
+                isDarkMode
+                  ? "rounded-[1.5rem] border border-slate-800 bg-[#16181c] p-4 hover:border-slate-700"
+                  : "rounded-[1.7rem] border border-slate-200/90 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.04)] hover:border-slate-300/90"
+              }`}
+            >
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className={`truncate text-[1.05rem] font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
+                  {!isDarkMode && context.summary ? (
+                    <div className="mt-1 line-clamp-1 text-sm text-slate-400">{context.summary}</div>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full border px-3 py-1 text-xs ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>
+                    {statusMeta.label}
+                  </span>
+                  {showDelete && (
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation()
+                        onDelete?.(context.id)
+                      }}
+                      className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                        isDarkMode
+                          ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
+                          : "text-rose-500 hover:bg-rose-50 hover:text-rose-600"
+                      }`}
+                      aria-label={`Delete ${context.title}`}
+                      title="Delete context permanently"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex items-start gap-2">
-                <span className={`px-2.5 py-1 rounded-full text-xs border ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>{statusMeta.label}</span>
-                {showDelete && (
-                  <button
-                    type="button"
-                    onClick={event => {
-                      event.stopPropagation()
-                      onDelete?.(context.id)
-                    }}
-                    className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
-                      isDarkMode
-                        ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
-                        : "text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                    }`}
-                    aria-label={`Delete ${context.title}`}
-                    title="Delete context permanently"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
+
+              <div className={`mb-5 grid grid-cols-2 gap-2 text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Messages {context.linkedMessageIds.length}</div>
+                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Files {context.linkedFileIds.length}</div>
+                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Contributors {context.contributorIds.length}</div>
+                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Tasks {context.taskIds.length}</div>
               </div>
-            </div>
 
-            <div className={`grid grid-cols-2 gap-1.5 text-xs mb-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Messages {context.linkedMessageIds.length}</div>
-              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Files {context.linkedFileIds.length}</div>
-              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Contributors {context.contributorIds.length}</div>
-              <div className="rounded-lg px-2.5 py-1.5 border border-transparent bg-black/5">Tasks {context.taskIds.length}</div>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>Owner {renderOwner(context.ownerId)}</span>
-              <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>{formatUpdatedTime(context.updatedAt)}</span>
-            </div>
-          </article>
-        )
-      })}
+              <div className="flex items-center justify-between text-xs">
+                <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>Owner {renderOwner(context.ownerId)}</span>
+                <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>{formatUpdatedTime(context.updatedAt)}</span>
+              </div>
+            </article>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -878,9 +882,9 @@ function MessageFocusedContextPanel({
   const artifactCount = visibleFiles.length + visibleDecisions.length + visibleTasks.length
 
   return (
-    <div className={`flex h-full min-h-0 w-full flex-col overflow-hidden animate-fade-in ${isDarkMode ? "bg-[#08111a]" : "bg-[#eff4f8]"}`} style={panelStyle}>
+    <div className={`flex h-full min-h-0 w-full flex-col overflow-hidden animate-fade-in ${isDarkMode ? "bg-[#08111a]" : "bg-[#f6f8fb]"}`} style={panelStyle}>
       <section className="mx-auto flex min-h-0 h-full w-full max-w-[1540px] flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-        <header className={cx("shrink-0 border-b pb-5", isDarkMode ? "border-slate-800/90" : "border-slate-200/80")}>
+        <header className={cx("shrink-0 rounded-[1.9rem] border px-5 py-5 sm:px-6", isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_22px_55px_rgba(15,23,42,0.04)]")}>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -891,7 +895,7 @@ function MessageFocusedContextPanel({
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back
                 </button>
-                <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600 shadow-sm"}`}>
+                <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-[#f2f4f7] text-slate-600"}`}>
                   Context
                 </span>
                 <span className={`rounded-full border px-2.5 py-1 text-xs ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>
@@ -911,7 +915,7 @@ function MessageFocusedContextPanel({
 
                 <div className="flex flex-wrap gap-2.5">
                   {metrics.slice(0, 3).map(metric => (
-                    <div key={metric.label} className={`rounded-[18px] border px-3.5 py-3 ${isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200/80 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.05)]"}`}>
+                    <div key={metric.label} className={`rounded-[18px] border px-3.5 py-3 ${isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200/80 bg-[#f8fafc]"}`}>
                       <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
                         {metric.label}
                       </div>
@@ -965,7 +969,7 @@ function MessageFocusedContextPanel({
 
             <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
               {linkedMessages.length === 0 ? (
-                <div className={`flex min-h-[300px] items-center justify-center rounded-[24px] border border-dashed px-6 text-center ${isDarkMode ? "border-slate-700/70 bg-[#0d151d] text-slate-500" : "border-slate-200 bg-white/80 text-slate-500"}`}>
+                <div className={`flex min-h-[300px] items-center justify-center rounded-[24px] border border-dashed px-6 text-center ${isDarkMode ? "border-slate-700/70 bg-[#0d151d] text-slate-500" : "border-slate-200 bg-white text-slate-500"}`}>
                   No linked messages yet.
                 </div>
               ) : (
@@ -977,10 +981,10 @@ function MessageFocusedContextPanel({
                       ) : null}
                       <span className={cx("absolute left-0 top-8 h-[10px] w-[10px] rounded-full", isDarkMode ? "bg-sky-400" : "bg-sky-500")} />
 
-                      <article className={`overflow-hidden rounded-[22px] border ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_14px_34px_rgba(15,23,42,0.05)]"}`}>
+                      <article className={`overflow-hidden rounded-[22px] border ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
                         <div className={`flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
                           <div className="flex min-w-0 items-center gap-3">
-                            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] text-sm font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
+                            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] text-sm font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-[#f3f5f7] text-slate-700"}`}>
                               {getNameInitials(message.author)}
                             </div>
                             <div className="min-w-0">
@@ -994,7 +998,7 @@ function MessageFocusedContextPanel({
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <div className={`rounded-full px-3 py-1 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                            <div className={`rounded-full px-3 py-1 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-[#f3f5f7] text-slate-600"}`}>
                               {formatTime(message.timestamp)}
                             </div>
                           </div>
@@ -1016,7 +1020,7 @@ function MessageFocusedContextPanel({
           <aside className="min-h-0">
             <div className="h-full overflow-y-auto">
               <div className="space-y-4">
-                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
                   <div className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
                     Snapshot
                   </div>
@@ -1024,7 +1028,7 @@ function MessageFocusedContextPanel({
                     {metrics.map(metric => {
                       const MetricIcon = metric.icon
                       return (
-                        <div key={metric.label} className={`flex items-center justify-between rounded-[16px] border px-3 py-2.5 ${isDarkMode ? "border-white/8 bg-white/[0.04]" : "border-slate-200 bg-slate-50/80"}`}>
+                        <div key={metric.label} className={`flex items-center justify-between rounded-[16px] border px-3 py-2.5 ${isDarkMode ? "border-white/8 bg-white/[0.04]" : "border-slate-200/80 bg-[#f7f9fc]"}`}>
                           <div>
                             <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
                               {metric.label}
@@ -1042,10 +1046,10 @@ function MessageFocusedContextPanel({
                   </div>
                 </section>
 
-                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>Supporting context</div>
-                    <div className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+                    <div className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-[#f3f5f7] text-slate-600"}`}>
                       {artifactCount}
                     </div>
                   </div>
@@ -1054,7 +1058,7 @@ function MessageFocusedContextPanel({
                     <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Files</div>
                     <div className="mt-2 space-y-2">
                       {visibleFiles.length > 0 ? visibleFiles.map(file => (
-                        <div key={file.id || file.fileId || file.name} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                        <div key={file.id || file.fileId || file.name} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-[#f7f9fc] text-slate-700"}`}>
                           <div className="truncate text-sm font-medium">{file.name || "Untitled file"}</div>
                           <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{file.sourceLabel || "Linked file"}</div>
                         </div>
@@ -1068,7 +1072,7 @@ function MessageFocusedContextPanel({
                     <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Decisions</div>
                     <div className="mt-2 space-y-2">
                       {visibleDecisions.length > 0 ? visibleDecisions.map(decision => (
-                        <div key={decision.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                        <div key={decision.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-[#f7f9fc] text-slate-700"}`}>
                           <div className="line-clamp-2 text-sm font-medium">{decision.text || "Decision captured"}</div>
                           <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{decision.author || "Unknown"}</div>
                         </div>
@@ -1082,7 +1086,7 @@ function MessageFocusedContextPanel({
                     <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Tasks</div>
                     <div className="mt-2 space-y-2">
                       {visibleTasks.length > 0 ? visibleTasks.map(task => (
-                        <div key={task.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
+                        <div key={task.id} className={`rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-[#f7f9fc] text-slate-700"}`}>
                           <div className="flex items-start justify-between gap-2">
                             <div className="line-clamp-2 text-sm font-medium">{task.text || task.message || "Untitled task"}</div>
                             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${String(task.status) === "completed" ? (isDarkMode ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-100 text-emerald-700") : (isDarkMode ? "bg-amber-500/10 text-amber-300" : "bg-amber-100 text-amber-700")}`}>
@@ -1098,7 +1102,7 @@ function MessageFocusedContextPanel({
                   </div>
                 </section>
 
-                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+                <section className={`rounded-[22px] border p-4 ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
                   <div className={`text-sm font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>People and activity</div>
                   <div className={`mt-3 text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
                     {latestActivity?.label || "No activity has been recorded for this context yet."}
@@ -1108,8 +1112,8 @@ function MessageFocusedContextPanel({
                     <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Contributors</div>
                     <div className="mt-2 space-y-2">
                       {visibleContributors.length > 0 ? visibleContributors.map(name => (
-                        <div key={name} className={`flex items-center gap-3 rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-slate-50 text-slate-700"}`}>
-                          <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-white text-slate-600"}`}>
+                        <div key={name} className={`flex items-center gap-3 rounded-[16px] px-3 py-2.5 ${isDarkMode ? "bg-white/[0.04] text-slate-300" : "bg-[#f7f9fc] text-slate-700"}`}>
+                          <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-white text-slate-600 shadow-sm"}`}>
                             {getNameInitials(name)}
                           </span>
                           <span className="min-w-0 truncate text-sm font-medium">{name}</span>
@@ -1125,8 +1129,8 @@ function MessageFocusedContextPanel({
           </aside>
         </div>
 
-        <div className={`mt-6 shrink-0 border-t pt-4 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/80"}`}>
-          <div className={`flex flex-col gap-3 rounded-[22px] border px-4 py-4 lg:flex-row lg:items-center lg:justify-between ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/80 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]"}`}>
+        <div className={`mt-6 shrink-0 pt-1`}>
+          <div className={`flex flex-col gap-3 rounded-[22px] border px-4 py-4 lg:flex-row lg:items-center lg:justify-between ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={onAddSelectedMessage}

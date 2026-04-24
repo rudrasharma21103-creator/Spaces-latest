@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from "react"
+import React, { startTransition, useState, useEffect, useRef, useMemo, useLayoutEffect } from "react"
 import {
   Send,
   Hash,
@@ -52,7 +52,8 @@ import {
   Smile,
   LogOut,
   Zap,
-  Home as HomeIcon
+  Home as HomeIcon,
+  Loader2
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
@@ -202,6 +203,8 @@ export default function CollaborationApp() {
   })
   const [authError, setAuthError] = useState("")
   const [authSuccess, setAuthSuccess] = useState("")
+  const [authPending, setAuthPending] = useState(false)
+  const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
   // Main Data State
   const [spaces, setSpaces] = useState([])
@@ -223,6 +226,9 @@ export default function CollaborationApp() {
   const [homeDMSending, setHomeDMSending] = useState(false)
   const [drafts, setDrafts] = useState([])
   const [activeDraftId, setActiveDraftId] = useState(null)
+  const authResolvedAtRef = useRef(0)
+  const authLookupCacheRef = useRef(new Map())
+  const googleAuthInFlightRef = useRef(false)
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
@@ -1202,8 +1208,9 @@ export default function CollaborationApp() {
     const pollData = async () => {
       try {
         const isPageHidden = typeof document !== "undefined" && document.hidden
+        const justAuthenticated = authResolvedAtRef.current && Date.now() - authResolvedAtRef.current < 12000
         const [bootstrap, storedEvents] = await Promise.all([
-          Storage.getBootstrap({ forceRefresh: true }).catch(() => null),
+          Storage.getBootstrap({ forceRefresh: !justAuthenticated, cacheTtl: justAuthenticated ? 15000 : 5000 }).catch(() => null),
           isPageHidden ? Promise.resolve(events) : Storage.getEvents()
         ])
         let availableSpaces = Array.isArray(bootstrap?.spaces) ? bootstrap.spaces : []
@@ -2186,53 +2193,120 @@ export default function CollaborationApp() {
     friends
   ])
 
+  const getSpaceIconElement = React.useCallback(iconType => {
+    if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
+    if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
+    return <UserIcon className="w-5 h-5" />
+  }, [])
+
+  const enrichSpacesForUi = React.useCallback(
+    list =>
+      (Array.isArray(list) ? list : []).map(space => ({
+        ...space,
+        icon: getSpaceIconElement(space.iconType),
+      })),
+    [getSpaceIconElement]
+  )
+
+  const buildDefaultSpace = React.useCallback(userId => ({
+    id: userId + 1,
+    name: "Space 1",
+    iconType: "briefcase",
+    members: [userId],
+    inviteCode: `SPACE1-${Math.floor(1000 + Math.random() * 9000)}`,
+    channels: [
+      {
+        id: userId + 2,
+        name: "general",
+        type: "public",
+        members: [userId],
+      },
+      {
+        id: userId + 3,
+        name: "random",
+        type: "public",
+        members: [userId],
+      },
+    ],
+    expanded: true,
+    ownerId: userId,
+  }), [])
+
+  const lookupUserByEmailCached = React.useCallback(async email => {
+    const normalizedEmail = String(email || "").trim().toLowerCase()
+    if (!normalizedEmail) return null
+
+    if (authLookupCacheRef.current.has(normalizedEmail)) {
+      return await authLookupCacheRef.current.get(normalizedEmail)
+    }
+
+    const request = Storage.findUserByEmail(normalizedEmail).catch(() => null)
+    authLookupCacheRef.current.set(normalizedEmail, request)
+    const result = await request
+    authLookupCacheRef.current.set(normalizedEmail, result)
+    return result
+  }, [])
+
+  const applyAuthenticatedSession = React.useCallback((user, token, options = {}) => {
+    if (!user || !token) return
+
+    const safeUser = filterDismissedUser(user)
+    const seededSpaces = options.seedSpaces ? enrichSpacesForUi(options.seedSpaces) : null
+
+    authResolvedAtRef.current = Date.now()
+    saveAuth(safeUser, token)
+
+    startTransition(() => {
+      setCurrentUser(safeUser)
+      setIsAuthenticated(true)
+      setActiveView("home")
+      setHomeSection("overview")
+      if (seededSpaces) setSpaces(seededSpaces)
+      if (options.activeSpaceId !== undefined) setActiveSpace(options.activeSpaceId)
+      if (options.activeChannelId !== undefined) setActiveChannel(options.activeChannelId)
+      setAuthSuccess(options.successMessage || "")
+    })
+
+    setUsers(prev => {
+      const next = new Map((Array.isArray(prev) ? prev : []).map(item => [String(item.id), item]))
+      next.set(String(safeUser.id), { ...(next.get(String(safeUser.id)) || {}), ...safeUser })
+      return Array.from(next.values())
+    })
+
+    if (options.cacheLookupEmail) {
+      authLookupCacheRef.current.set(String(options.cacheLookupEmail).trim().toLowerCase(), safeUser)
+    }
+  }, [enrichSpacesForUi])
+
   // --- Auth & Logout ---
   const handleAuthSubmit = async e => {
     e.preventDefault()
+    if (authPending) return
     setAuthError("")
     setAuthSuccess("")
+    setAuthPending(true)
 
-    if (authMode === "signup") {
+    try {
+      if (authMode === "signup") {
       if (!authData.name || !authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
+        setAuthPending(false)
         return
       }
       if (authData.password !== authData.confirmPassword) {
         setAuthError("Passwords do not match")
+        setAuthPending(false)
         return
       }
-      const existingUser = await Storage.findUserByEmail(authData.email)
+      const existingUser = await lookupUserByEmailCached(authData.email)
       if (existingUser) {
         setAuthError("Email already registered")
+        setAuthPending(false)
         return
       }
 
       const newUserId = Date.now()
-
-      // 1. Create Default Space 1
-      const defaultSpace = {
-        id: newUserId + 1, // Simple ID gen
-        name: "Space 1",
-        iconType: "briefcase",
-        members: [newUserId],
-        inviteCode: `SPACE1-${Math.floor(1000 + Math.random() * 9000)}`,
-        channels: [
-          {
-            id: newUserId + 2,
-            name: "general",
-            type: "public",
-            members: [newUserId]
-          },
-          {
-            id: newUserId + 3,
-            name: "random",
-            type: "public",
-            members: [newUserId]
-          }
-        ],
-        expanded: true,
-        ownerId: newUserId
-      }
+      const defaultSpace = buildDefaultSpace(newUserId)
       await Storage.saveSpace(defaultSpace)
 
       // 2. Create User with Space 1
@@ -2249,32 +2323,31 @@ export default function CollaborationApp() {
         notifications: [],
         integrations: {}
       }
-      await Storage.saveUser(newUser)
+      const signupData = await Storage.saveUser(newUser)
+      const savedUser = signupData?.user || newUser
+      const savedToken = signupData?.token || getToken() || `token_${newUserId}_${Date.now()}`
 
-      // Generate a simple token for the new user
-      const token = `token_${newUserId}_${Date.now()}`
-      saveAuth(newUser, token)
-      
-      setCurrentUser(newUser)
-      setIsAuthenticated(true)
-      setActiveView("home")
-      setHomeSection("overview")
-      setActiveSpace(defaultSpace.id)
-      setActiveChannel(defaultSpace.channels[0].id)
-      setAuthSuccess("Account created successfully!")
+      applyAuthenticatedSession(savedUser, savedToken, {
+        activeSpaceId: defaultSpace.id,
+        activeChannelId: defaultSpace.channels[0]?.id || null,
+        seedSpaces: [defaultSpace],
+        successMessage: "Account created successfully!",
+        cacheLookupEmail: authData.email,
+      })
+      setAuthPending(false)
     } else {
       if (!authData.email || !authData.password) {
         setAuthError("Please fill in all fields")
+        setAuthPending(false)
         return
       }
       try {
         const data = await Storage.login({ email: authData.email, password: authData.password })
         if (data?.user && data?.token) {
-          setCurrentUser(data.user)
-          setIsAuthenticated(true)
-          setActiveView("home")
-          setHomeSection("overview")
-          setAuthSuccess("Logged in successfully!")
+          applyAuthenticatedSession(data.user, data.token, {
+            successMessage: "Logged in successfully!",
+            cacheLookupEmail: authData.email,
+          })
         } else {
           setAuthError(data?.error || "Invalid credentials")
         }
@@ -2282,6 +2355,12 @@ export default function CollaborationApp() {
         console.error("Login failed", e)
         setAuthError("Invalid credentials")
       }
+      setAuthPending(false)
+    }
+    } catch (e) {
+      console.error("Authentication failed", e)
+      setAuthError(authMode === "login" ? "Invalid credentials" : "Unable to complete signup right now.")
+      setAuthPending(false)
     }
   }
 
@@ -2304,6 +2383,8 @@ export default function CollaborationApp() {
     setAuthData({ email: "", password: "", confirmPassword: "", name: "" })
     setAuthError("")
     setAuthSuccess("")
+    setAuthPending(false)
+    setGoogleAuthPending(false)
     setDmSearchQuery("")
     setSearchQuery("")
     
@@ -2316,60 +2397,46 @@ export default function CollaborationApp() {
 
   // --- Google OAuth Handlers ---
   const handleGoogleLogin = () => {
+    if (googleAuthInFlightRef.current || authPending || googleAuthPending) return
+
+    googleAuthInFlightRef.current = true
+    setGoogleAuthPending(true)
+    setAuthPending(true)
+    setAuthError("")
+    setAuthSuccess("")
+
     // Ensure org modal is closed if present before starting Google flow
     try { setShowOrgModal(false); setOrgStage('form') } catch (e) {}
     GoogleService.handleGoogleSignIn(
       async (userInfo, credential) => {
-        setAuthError("")
-        
-        // Check if user exists
-        const existingUser = await Storage.findUserByEmail(userInfo.email)
-        
-        if (existingUser) {
-          // Login existing user
-          const token = `token_${existingUser.id}_${Date.now()}`
-          saveAuth(existingUser, token)
-          
-          setCurrentUser(existingUser)
-          setIsAuthenticated(true)
-          setActiveView("home")
-          setHomeSection("overview")
-          setAuthSuccess("Logged in with Google successfully!")
-        } else {
+        try {
+          const normalizedEmail = String(userInfo?.email || "").trim().toLowerCase()
+          if (!normalizedEmail) {
+            setAuthError("Google account did not return an email address.")
+            return
+          }
+
+          const existingUser = await lookupUserByEmailCached(normalizedEmail)
+
+          if (existingUser) {
+            const token = getToken() || `token_${existingUser.id}_${Date.now()}`
+            applyAuthenticatedSession(existingUser, token, {
+              successMessage: "Logged in with Google successfully!",
+              cacheLookupEmail: normalizedEmail,
+            })
+          } else {
           // Create new user from Google data
           const newUserId = Date.now()
           
           // Create default space
-          const defaultSpace = {
-            id: newUserId + 1,
-            name: "Space 1",
-            iconType: "briefcase",
-            members: [newUserId],
-            inviteCode: `SPACE1-${Math.floor(1000 + Math.random() * 9000)}`,
-            channels: [
-              {
-                id: newUserId + 2,
-                name: "general",
-                type: "public",
-                members: [newUserId]
-              },
-              {
-                id: newUserId + 3,
-                name: "random",
-                type: "public",
-                members: [newUserId]
-              }
-            ],
-            expanded: true,
-            ownerId: newUserId
-          }
+          const defaultSpace = buildDefaultSpace(newUserId)
           await Storage.saveSpace(defaultSpace)
           
           // Create new user
           const newUser = {
             id: newUserId,
-            name: userInfo.name || userInfo.email.split('@')[0],
-            email: userInfo.email,
+            name: userInfo.name || normalizedEmail.split('@')[0],
+            email: normalizedEmail,
             password: '', // No password for Google OAuth users
             avatar: userInfo.picture ? '🔵' : '👤',
             status: "online",
@@ -2380,25 +2447,36 @@ export default function CollaborationApp() {
             integrations: {
               google: {
                 connected: true,
-                email: userInfo.email
+                email: normalizedEmail
               }
             }
           }
-          await Storage.saveUser(newUser)
-          
-          // Generate a simple token for the new user
-          const token = `token_${newUserId}_${Date.now()}`
-          saveAuth(newUser, token)
-          
-          setCurrentUser(newUser)
-          setIsAuthenticated(true)
-          setActiveView("home")
-          setHomeSection("overview")
-          setActiveSpace(defaultSpace.id)
-          setActiveChannel(defaultSpace.channels[0].id)
-          setAuthSuccess("Account created with Google successfully!")
+          const signupData = await Storage.saveUser(newUser)
+          const savedUser = signupData?.user || newUser
+          const savedToken = signupData?.token || getToken() || `token_${newUserId}_${Date.now()}`
+
+          applyAuthenticatedSession(savedUser, savedToken, {
+            activeSpaceId: defaultSpace.id,
+            activeChannelId: defaultSpace.channels[0]?.id || null,
+            seedSpaces: [defaultSpace],
+            successMessage: "Account created with Google successfully!",
+            cacheLookupEmail: normalizedEmail,
+          })
+
+          if (credential) {
+            GoogleService.setGoogleAccessToken(credential)
+            setGoogleAccessToken(credential)
+          }
           // Make sure org modal remains closed after Google signup
           try { setShowOrgModal(false); setOrgStage('form') } catch (e) {}
+          }
+        } catch (error) {
+          console.error('Google Sign-In Error:', error)
+          setAuthError("Google sign-in temporarily unavailable. Please use email/password login.")
+        } finally {
+          googleAuthInFlightRef.current = false
+          setGoogleAuthPending(false)
+          setAuthPending(false)
         }
       },
       (error) => {
@@ -2410,6 +2488,9 @@ export default function CollaborationApp() {
         } else {
           setAuthError("Google sign-in temporarily unavailable. Please use email/password login.")
         }
+        googleAuthInFlightRef.current = false
+        setGoogleAuthPending(false)
+        setAuthPending(false)
       }
     )
   }
@@ -6714,25 +6795,27 @@ export default function CollaborationApp() {
               <div className={`flex p-1.5 rounded-[1.6rem] mb-2 ${isDarkMode ? 'bg-white/[0.04]' : 'bg-slate-100/80'}`}>
                 <button
                   onClick={() => setAuthMode("login")}
+                  disabled={authPending}
                   className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                     authMode === "login"
                       ? isDarkMode 
                         ? "bg-white/10 text-white shadow-lg shadow-slate-950/40" 
                         : "bg-white text-slate-900 shadow-lg shadow-slate-200/70"
                       : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
-                  }`}
+                  } ${authPending ? "cursor-not-allowed opacity-70" : ""}`}
                 >
                   Sign In
                 </button>
                 <button
                   onClick={() => setAuthMode("signup")}
+                  disabled={authPending}
                   className={`flex-1 py-3 px-6 text-center font-bold text-sm rounded-2xl transition-all duration-300 ${
                     authMode === "signup"
                       ? isDarkMode 
                         ? "bg-white/10 text-white shadow-lg shadow-slate-950/40" 
                         : "bg-white text-slate-900 shadow-lg shadow-slate-200/70"
                       : isDarkMode ? "text-slate-500 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
-                  }`}
+                  } ${authPending ? "cursor-not-allowed opacity-70" : ""}`}
                 >
                   Sign Up
                 </button>
@@ -6769,6 +6852,7 @@ export default function CollaborationApp() {
                     <input
                       type="text"
                       value={authData.name}
+                      disabled={authPending}
                       onChange={e =>
                         setAuthData({ ...authData, name: e.target.value })
                       }
@@ -6790,6 +6874,7 @@ export default function CollaborationApp() {
                   <input
                     type="email"
                     value={authData.email}
+                    disabled={authPending}
                     onChange={e =>
                       setAuthData({ ...authData, email: e.target.value })
                     }
@@ -6810,6 +6895,7 @@ export default function CollaborationApp() {
                   <input
                     type="password"
                     value={authData.password}
+                    disabled={authPending}
                     onChange={e =>
                       setAuthData({ ...authData, password: e.target.value })
                     }
@@ -6831,6 +6917,7 @@ export default function CollaborationApp() {
                     <input
                       type="password"
                       value={authData.confirmPassword}
+                      disabled={authPending}
                       onChange={e =>
                         setAuthData({
                           ...authData,
@@ -6848,13 +6935,19 @@ export default function CollaborationApp() {
                 )}
                 <button
                   type="submit"
+                  disabled={authPending}
                   className={`w-full py-4 font-bold rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4 text-white shadow-xl hover:scale-[1.02] ${
                     isDarkMode 
                       ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-sky-500 hover:from-cyan-400 hover:via-blue-400 hover:to-sky-400 shadow-blue-500/20 hover:shadow-blue-500/40' 
                       : 'bg-gradient-to-r from-cyan-500 via-blue-500 to-sky-500 hover:from-cyan-600 hover:via-blue-600 hover:to-sky-600 shadow-blue-300/40 hover:shadow-blue-400/50'
-                  }`}
+                  } ${authPending ? 'cursor-not-allowed opacity-80 hover:scale-100' : ''}`}
                 >
-                  {authMode === "login" ? (
+                  {authPending && !googleAuthPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      {authMode === "login" ? "Signing in..." : "Creating account..."}
+                    </>
+                  ) : authMode === "login" ? (
                     <>
                       <LogIn className="w-5 h-5" /> Enter Space
                     </>
@@ -6877,19 +6970,29 @@ export default function CollaborationApp() {
                 <button
                   type="button"
                   onClick={handleGoogleLogin}
+                  disabled={authPending}
                   className={`w-full py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-3 transform active:scale-[0.98] border-2 ${
                     isDarkMode 
                       ? 'bg-white/[0.03] border-white/10 text-slate-200 hover:bg-white/[0.06] hover:border-white/20 hover:shadow-md' 
                       : 'bg-white/90 border-slate-200/80 text-slate-700 hover:bg-white hover:border-slate-300 hover:shadow-md shadow-sm'
-                  }`}
+                  } ${authPending ? 'cursor-not-allowed opacity-80' : ''}`}
                 >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Sign in with Google
+                  {googleAuthPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Opening Google...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                      </svg>
+                      {authMode === "signup" ? "Continue with Google" : "Sign in with Google"}
+                    </>
+                  )}
                 </button>
                 {authMode === "signup" && (
                   <div className="mt-4">
@@ -9353,20 +9456,20 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header - Desktop with Liquid Glass */}
-            <div className={`liquid-glass-navbar h-[90px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-4 sm:px-6 md:px-8 lg:px-10 mx-0 w-full mt-3`}>
+            <div className={`liquid-glass-navbar h-[62px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 mx-0 w-full mt-1.5`}>
               {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className={`liquid-glass-header flex items-center gap-5 cursor-pointer group py-3 px-5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
+                className={`liquid-glass-header flex items-center gap-2.5 cursor-pointer group px-3.5 py-1.5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
-                  <div className="flex items-center gap-5 relative z-10">
+                  <div className="relative z-10 flex items-center gap-3">
                     <div className="relative">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
-                        {renderAvatar(getUser(activeDMUser), 48)}
+                      <div className={`w-10 h-10 rounded-[18px] flex items-center justify-center text-xl shadow-lg border-2 ${isDarkMode ? 'bg-gradient-to-br from-cyan-900/50 to-sky-900/50 border-cyan-700/50' : 'bg-gradient-to-br from-sky-100 to-cyan-100 border-white'} text-slate-700 overflow-hidden`}>
+                        {renderAvatar(getUser(activeDMUser), 40)}
                       </div>
                       <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] ${isDarkMode ? 'border-[var(--bg-secondary)]' : 'border-white'} shadow-md ${
+                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-[3px] ${isDarkMode ? 'border-[var(--bg-secondary)]' : 'border-white'} shadow-md ${
                           getUser(activeDMUser)?.status === "online"
                             ? "bg-emerald-500"
                             : "bg-slate-400"
@@ -9374,34 +9477,34 @@ export default function CollaborationApp() {
                       ></span>
                     </div>
                     <div>
-                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                      <h2 className={`font-bold text-[1.25rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                         {getActiveViewName()}
                       </h2>
-                      <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : isDarkMode ? 'text-slate-500' : "text-slate-400"}`}>
-                        <span className={`w-2 h-2 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300" : "bg-slate-400"}`}></span>{" "}
+                      <p className={`text-[10px] font-bold uppercase tracking-[0.15em] flex items-center gap-1.5 mt-0.5 ${getUser(activeDMUser)?.status === "online" ? "text-emerald-600" : isDarkMode ? 'text-slate-500' : "text-slate-400"}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${getUser(activeDMUser)?.status === "online" ? "bg-emerald-500 animate-pulse shadow-sm shadow-emerald-300" : "bg-slate-400"}`}></span>{" "}
                         {getUser(activeDMUser)?.status === "online" ? "Online" : "Offline"}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-5 relative z-10">
-                    <div className={`w-12 h-12 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
-                      <Hash className="w-6 h-6" />
+                  <div className="relative z-10 flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
+                      <Hash className="w-5 h-5" />
                     </div>
                     <div>
-                      <h2 className={`font-bold text-2xl leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-2.5`}>
+                      <h2 className={`font-bold text-[1.05rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
                         {/* Header Breadcrumb Context */}
                         <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
                           {currentSpace?.name}
                         </span>
-                        <ChevronRight className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                        <ChevronRight className={`w-3.5 h-3.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                         <span className="truncate max-w-[18vw] md:max-w-[24vw] lg:max-w-[28vw] xl:max-w-[32vw] 2xl:max-w-[36vw] block" title={getActiveViewName().replace('#','')}>
                           {getActiveViewName().replace("#", "")}
                         </span>
                       </h2>
-                      <div className={`flex items-center gap-3 text-xs font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        <span className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                          <Users className="w-3.5 h-3.5" /> {activeMembers.length}{" "}
+                      <div className={`flex items-center gap-2 text-[11px] font-medium mt-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <span className={`flex items-center gap-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <Users className="w-3 h-3" /> {activeMembers.length}{" "}
                           members
                         </span>
                         <span className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`}>
@@ -9414,17 +9517,17 @@ export default function CollaborationApp() {
               </div>
 
               {/* Action Buttons with Liquid Glass */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
                     onClick={handleDocsClick}
-                    className={`liquid-glass-nav-item p-3.5 transition-all relative group`}
+                    className={`liquid-glass-nav-item p-2 transition-all relative group`}
                     title="Documents"
                   >
-                    <FileText className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                    <FileText className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
                     {googleAccessToken && (
-                      <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
+                      <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
                     )}
                   </button>
                 </div>
@@ -9433,10 +9536,10 @@ export default function CollaborationApp() {
                 <div className="relative">
                   <button
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
-                    className={`liquid-glass-nav-item p-3.5 transition-all group`}
+                    className={`liquid-glass-nav-item p-2 transition-all group`}
                     title="Google Apps"
                   >
-                    <Grid3x3 className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                    <Grid3x3 className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                   </button>
 
                   {showGoogleAppsMenu && (
@@ -9499,10 +9602,10 @@ export default function CollaborationApp() {
                           setShowVideoModal(true)
                         }
                       }}
-                      className={`liquid-glass-nav-item p-3.5 transition-all group`}
+                      className={`liquid-glass-nav-item p-2 transition-all group`}
                       title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
-                      <Video className={`w-5 h-5 group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <Video className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                     </button>
                     {/* In Call Indicator */}
                     {showWebRTCCall && (
@@ -9525,32 +9628,32 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(true)
                       }}
                       disabled={!canInvite}
-                      className={`hidden md:flex liquid-glass-nav-item p-3.5 transition-all group ${
+                      className={`hidden md:flex liquid-glass-nav-item p-2.5 transition-all group ${
                         canInvite ? '' : 'opacity-60 cursor-not-allowed'
                       }`}
                     >
-                      <UserPlus className={`w-5 h-5 transition-transform ${
+                      <UserPlus className={`w-[18px] h-[18px] transition-transform ${
                         canInvite ? 'group-hover:scale-110' : ''
                       } ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
                     </button>
                   )
                 })()}
 
-                <div className={`h-10 w-px mx-2 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
+                <div className={`h-8 w-px mx-1.5 bg-gradient-to-b ${isDarkMode ? 'from-transparent via-slate-600 to-transparent' : 'from-transparent via-slate-200 to-transparent'}`}></div>
 
                 {/* Theme Toggle Button */}
                 <button
                   onClick={() => setIsDarkMode(!isDarkMode)}
-                  className={`liquid-glass-nav-item theme-toggle-nav-button p-3 transition-all group ${
+                  className={`liquid-glass-nav-item theme-toggle-nav-button p-2.5 transition-all group ${
                     isDarkMode ? 'text-yellow-400' : 'text-slate-600'
                   }`}
                   title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 >
                   <div className="transition-transform group-hover:scale-110">
                     {isDarkMode ? (
-                      <Sun className="w-5 h-5" />
+                      <Sun className="w-[18px] h-[18px]" />
                     ) : (
-                      <Moon className="w-5 h-5" />
+                      <Moon className="w-[18px] h-[18px]" />
                     )}
                   </div>
                 </button>
@@ -9560,12 +9663,12 @@ export default function CollaborationApp() {
                 <div className="relative z-50">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className={`liquid-glass-header flex items-center gap-4 pl-4 pr-3 py-2.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
+                    className={`liquid-glass-header flex items-center gap-3 pl-3 pr-2.5 py-1.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
                   >
                     {/* Only show name if at least one sidebar is collapsed */}
                     {!(sidebarCollapsed === false && friendsSidebarCollapsed === false) && (
                       <div className="text-right hidden sm:block relative z-10">
-                        <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                        <div className={`text-[13px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                           {currentUser?.name}
                         </div>
                         <div className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
@@ -9574,8 +9677,8 @@ export default function CollaborationApp() {
                       </div>
                     )}
                     <div className="relative z-10">
-                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
-                        {renderAvatar(currentUser, 44)}
+                      <div className={`w-10 h-10 rounded-[18px] flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
+                        {renderAvatar(currentUser, 40)}
                       </div>
                       {currentUser?.notifications?.length ? (
                         <span className="absolute -top-1 -right-1 flex h-4 w-4">
