@@ -251,7 +251,6 @@ export default function CollaborationApp() {
   const [highlightTerm, setHighlightTerm] = useState("")
   const [targetMessageId, setTargetMessageId] = useState(null)
   const [pinnedMessageId, setPinnedMessageId] = useState(null)
-  const [hoveredMessageId, setHoveredMessageId] = useState(null)
   const [showEmojiPickerFor, setShowEmojiPickerFor] = useState(null)
   const [activeChannelTab, setActiveChannelTab] = useState("messages")
   const [selectedMessageIds, setSelectedMessageIds] = useState([])
@@ -766,10 +765,21 @@ export default function CollaborationApp() {
     orgFormRef.current = orgForm
   }, [orgForm])
   const [isAtBottom, setIsAtBottom] = useState(true)
-  const [visibleDateLabel, setVisibleDateLabel] = useState("Today")
+  const isAtBottomRef = useRef(true)
+  const messageScrollRafRef = useRef(null)
+
+  const setIsAtBottomFast = value => {
+    const nextValue = Boolean(value)
+    isAtBottomRef.current = nextValue
+    setIsAtBottom(prev => (prev === nextValue ? prev : nextValue))
+  }
 
   useEffect(() => {
     return () => {
+      if (messageScrollRafRef.current) {
+        cancelAnimationFrame(messageScrollRafRef.current)
+        messageScrollRafRef.current = null
+      }
       for (const objectUrl of protectedFileUrlCacheRef.current.values()) {
         URL.revokeObjectURL(objectUrl)
       }
@@ -797,9 +807,18 @@ export default function CollaborationApp() {
   }, [])
 
   // Helper: render avatar for a user object
-  const renderAvatar = (user, size = 40) => {
+  const renderAvatar = (user, size = 40, options = {}) => {
     if (!user) return null
-    let url = user.avatar_url || user.avatarImage || user.avatar_image
+    let url =
+      user.avatar_url ||
+      user.avatarUrl ||
+      user.avatarImage ||
+      user.avatar_image ||
+      user.profileImage ||
+      user.profile_image ||
+      user.photoURL ||
+      user.photoUrl ||
+      user.picture
     const preset = user.avatar_preset
     const emojiAvatar =
       typeof user.avatar === "string" && user.avatar.trim().length > 0
@@ -809,6 +828,9 @@ export default function CollaborationApp() {
     const initial = (name && name[0]) ? name[0].toUpperCase() : "?"
 
     const sizeStyle = { width: size, height: size, lineHeight: `${size}px`, fontSize: Math.floor(size/2) }
+    const imageLoading = options.loading || (size <= 36 ? "lazy" : "eager")
+    const imageFetchPriority =
+      options.fetchPriority || (imageLoading === "eager" ? "high" : undefined)
     const avatarCacheKey =
       user.avatar_version ||
       user.avatarVersion ||
@@ -829,8 +851,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
-            loading="eager"
-            fetchPriority="high"
+            loading={imageLoading}
+            fetchPriority={imageFetchPriority}
           />
         )
       }
@@ -843,8 +865,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
-            loading="eager"
-            fetchPriority="high"
+            loading={imageLoading}
+            fetchPriority={imageFetchPriority}
           />
         )
       }
@@ -868,8 +890,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
-            loading="eager"
-            fetchPriority="high"
+            loading={imageLoading}
+            fetchPriority={imageFetchPriority}
           />
         )
       }
@@ -933,29 +955,45 @@ export default function CollaborationApp() {
     if (!updatedUser) return
     const updatedId = getUserIdValue(updatedUser)
     if (!updatedId) return
+    const normalizedUpdate = Object.fromEntries(
+      Object.entries(updatedUser).filter(([, value]) => value !== undefined)
+    )
+    try {
+      Storage.invalidateUsersCache?.()
+    } catch (e) {}
+
+    setCurrentUser(prev => {
+      if (!prev || getUserIdValue(prev) !== updatedId) return prev
+      const merged = { ...prev, ...normalizedUpdate }
+      try {
+        saveAuth(merged, getToken())
+      } catch (e) {}
+      return merged
+    })
+
     setUsers(prev => {
-      if (!Array.isArray(prev)) return [updatedUser]
+      if (!Array.isArray(prev)) return [normalizedUpdate]
       const exists = prev.some(u => getUserIdValue(u) === updatedId)
       if (exists) {
         return prev.map(user =>
-          getUserIdValue(user) === updatedId ? { ...user, ...updatedUser } : user
+          getUserIdValue(user) === updatedId ? { ...user, ...normalizedUpdate } : user
         )
       }
-      return [...prev, updatedUser]
+      return [...prev, normalizedUpdate]
     })
     setFriends(prev => {
       if (!Array.isArray(prev)) return prev
       const exists = prev.some(f => getUserIdValue(f) === updatedId)
       if (exists) {
         return prev.map(friend =>
-          getUserIdValue(friend) === updatedId ? { ...friend, ...updatedUser } : friend
+          getUserIdValue(friend) === updatedId ? { ...friend, ...normalizedUpdate } : friend
         )
       }
       // If this updated user is in the current user's friend list but missing from `friends` state, append it
       try {
         const myFriends = Array.isArray(currentUser?.friends) ? currentUser.friends.map(String) : []
         if (myFriends.includes(String(updatedId))) {
-          return [...prev, updatedUser]
+          return [...prev, normalizedUpdate]
         }
       } catch (e) {}
       return prev
@@ -971,7 +1009,7 @@ export default function CollaborationApp() {
         // Update space-level members if they are objects
         if (Array.isArray(s.members) && s.members.length > 0 && typeof s.members[0] === 'object') {
           const newMembers = s.members.map(m =>
-            getUserIdValue(m) === updatedId ? { ...m, ...updatedUser } : m
+            getUserIdValue(m) === updatedId ? { ...m, ...normalizedUpdate } : m
           )
           if (JSON.stringify(newMembers) !== JSON.stringify(s.members)) {
             s.members = newMembers
@@ -984,7 +1022,7 @@ export default function CollaborationApp() {
           const newChannels = s.channels.map(ch => {
             if (Array.isArray(ch.members) && ch.members.length > 0 && typeof ch.members[0] === 'object') {
               const newChMembers = ch.members.map(m =>
-                getUserIdValue(m) === updatedId ? { ...m, ...updatedUser } : m
+                getUserIdValue(m) === updatedId ? { ...m, ...normalizedUpdate } : m
               )
               if (JSON.stringify(newChMembers) !== JSON.stringify(ch.members)) {
                 spaceChanged = true
@@ -1009,7 +1047,7 @@ export default function CollaborationApp() {
         const mapped = prev.map(u => {
           if (getUserIdValue(u) === updatedId) {
             changed = true
-            return { ...u, ...updatedUser }
+            return { ...u, ...normalizedUpdate }
           }
           return u
         })
@@ -1702,7 +1740,9 @@ export default function CollaborationApp() {
               const updatedUser = {
                 id: data.userId,
                 avatar_url: data.avatar_url,
-                avatar_preset: data.avatar_preset
+                avatar_preset: data.avatar_preset,
+                avatar_version: data.avatar_version,
+                avatar_updated_at: data.avatar_updated_at
               }
               syncUserCollections(updatedUser)
               // Refresh authoritative users list to avoid stale cached data
@@ -1734,6 +1774,8 @@ export default function CollaborationApp() {
                   id: incoming.userId,
                   avatar_url: incoming.avatarData.avatar_url,
                   avatar_preset: incoming.avatarData.avatar_preset,
+                  avatar_version: incoming.avatarData.avatar_version,
+                  avatar_updated_at: incoming.avatarData.avatar_updated_at,
                   name: incoming.avatarData.name
                 }
                 syncUserCollections(updatedUser)
@@ -2081,7 +2123,7 @@ export default function CollaborationApp() {
       const timer = setTimeout(() => {
         const element = document.getElementById(`msg-${targetMessageId}`)
         if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "center" })
+          element.scrollIntoView({ behavior: "auto", block: "center" })
           setTargetMessageId(null)
         }
       }, 500)
@@ -2098,17 +2140,16 @@ export default function CollaborationApp() {
       return
     }
 
-    // 4) If user is at bottom, smooth-scroll to latest when messages change.
+    // 4) If user is at bottom, move to latest immediately when messages change.
     // If user is NOT at bottom, preserve their scroll position instead of forcing them to the latest message.
     const el = messagesContainerRef.current
     if (!el) return
 
     if (isAtBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      setIsAtBottom(true)
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+      setIsAtBottomFast(true)
       // record current height so future incoming messages can preserve scroll position
       try { prevScrollHeightRef.current = el.scrollHeight } catch (e) {}
-      try { setVisibleDateLabel(messageDateLabel || "Today") } catch (e) {}
     } else {
       // Preserve scroll position: adjust scrollTop by the increase in scrollHeight
       try {
@@ -4318,6 +4359,7 @@ export default function CollaborationApp() {
     () => (activeChatId ? messages[activeChatId] || [] : []),
     [messages, activeChatId]
   )
+  const isChannelFeed = activeView === "channel"
 
   useEffect(() => {
     const normalizedActiveChatId = activeChatId ? String(activeChatId) : null
@@ -4352,13 +4394,13 @@ export default function CollaborationApp() {
 
   const usersById = useMemo(() => {
     const lookup = {}
-    if (currentUser?.id !== undefined && currentUser?.id !== null) {
-      lookup[String(currentUser.id)] = currentUser
-    }
     ;[...users, ...friends].forEach(user => {
       if (!user?.id && user?.id !== 0) return
       lookup[String(user.id)] = user
     })
+    if (currentUser?.id !== undefined && currentUser?.id !== null) {
+      lookup[String(currentUser.id)] = currentUser
+    }
     return lookup
   }, [currentUser, users, friends])
 
@@ -4385,18 +4427,6 @@ export default function CollaborationApp() {
   }, [activeView, activeChannelData, activeDMUser, currentUser, usersById])
 
   const getActiveMembers = () => activeMembers
-
-  // Compute the current chat's date label (latest message) and update when relevant state changes
-  const messageDateLabel = useMemo(() => {
-    try {
-      const latest = currentMessages.length ? currentMessages[currentMessages.length - 1] : null
-      return formatDateLabel(latest?.timestamp, timeTicker)
-    } catch (e) {
-      return "Today"
-    }
-  }, [currentMessages, timeTicker])
-
-  // Visible date label (changes while scrolling to indicate the date of messages in view)
 
   const getChannelRole = (memberId) => {
     if (!activeChannelData) return 'member'
@@ -5289,6 +5319,39 @@ export default function CollaborationApp() {
     prevScrollHeightRef.current = container.scrollHeight
   }
 
+  const handleMessagesScroll = () => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const activeChat = getActiveChatId()
+    const scrollTop = container.scrollTop
+    const scrollHeight = container.scrollHeight
+
+    if (activeChat) {
+      const chatKey = String(activeChat)
+      messageScrollPositionsRef.current[chatKey] = scrollTop
+      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+      messageScrollStateRef.current[chatKey] = {
+        scrollTop,
+        atBottom: scrollHeight - scrollTop - container.clientHeight < threshold,
+      }
+    }
+    prevScrollHeightRef.current = scrollHeight
+
+    if (messageScrollRafRef.current) return
+    messageScrollRafRef.current = requestAnimationFrame(() => {
+      messageScrollRafRef.current = null
+      const latestContainer = messagesContainerRef.current
+      if (!latestContainer) return
+      const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
+      const atBottom =
+        latestContainer.scrollHeight - latestContainer.scrollTop - latestContainer.clientHeight < threshold
+      if (isAtBottomRef.current !== atBottom) {
+        setIsAtBottomFast(atBottom)
+      }
+    })
+  }
+
   const handleChannelTabChange = nextTab => {
     if (nextTab === "contexts") {
       openContextsPage(null)
@@ -5351,15 +5414,15 @@ export default function CollaborationApp() {
       if (container) {
         if (savedState?.atBottom) {
           container.scrollTop = container.scrollHeight
-          setIsAtBottom(true)
+          setIsAtBottomFast(true)
         } else if (typeof savedScrollTop === "number") {
           container.scrollTop = savedScrollTop
           const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
           const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
-          setIsAtBottom(atBottom)
+          setIsAtBottomFast(atBottom)
         } else {
           container.scrollTop = container.scrollHeight
-          setIsAtBottom(true)
+          setIsAtBottomFast(true)
         }
         prevScrollHeightRef.current = container.scrollHeight
       }
@@ -6343,7 +6406,7 @@ export default function CollaborationApp() {
             ].map(([label, id]) => (
               <button
                 key={id}
-                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'auto' })}
                 className={`text-sm font-semibold transition-colors ${
                   isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-950'
                 }`}
@@ -6415,7 +6478,7 @@ export default function CollaborationApp() {
                 Create your Space
               </button>
               <button
-                onClick={() => document.getElementById('showcase')?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => document.getElementById('showcase')?.scrollIntoView({ behavior: 'auto' })}
                 className={`rounded-full border px-7 py-4 text-sm font-bold transition-colors ${
                   isDarkMode
                     ? 'border-white/12 bg-white/5 text-white hover:bg-white/10'
@@ -8025,9 +8088,12 @@ export default function CollaborationApp() {
                         if (!uid) throw new Error("No user id")
 
                         // Only send avatar-related fields to avoid overwriting other data
+                        const avatarVersion = Date.now()
                         const updates = {
                           avatar_url: avatarPreview || null,
-                          avatar_preset: selectedPreset || null
+                          avatar_preset: selectedPreset || null,
+                          avatar_version: avatarVersion,
+                          avatar_updated_at: avatarVersion
                         }
 
                         // Optimistically update UI immediately for fast feedback
@@ -8054,6 +8120,8 @@ export default function CollaborationApp() {
                         Storage.broadcastAvatarUpdate(uid, {
                           avatar_url: updates.avatar_url,
                           avatar_preset: updates.avatar_preset,
+                          avatar_version: updates.avatar_version,
+                          avatar_updated_at: updates.avatar_updated_at,
                           name: optimisticMerged.name
                         }).catch(e => {
                           console.error('Failed to broadcast avatar update', e)
@@ -10063,7 +10131,6 @@ export default function CollaborationApp() {
                   />
                 )}
                 {/* Updated Container with Custom Pattern Background */}
-                {/* day label computed above via `messageDateLabel` */}
 
                 {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
                   <div className="flex-1 overflow-y-auto py-2 pb-6">
@@ -10101,41 +10168,12 @@ export default function CollaborationApp() {
                 <div className={`${(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
                 <div
                   ref={messagesContainerRef}
-                  onScroll={() => {
-                    const el = messagesContainerRef.current
-                    if (!el) return
-                    if (activeChatId) {
-                      messageScrollPositionsRef.current[String(activeChatId)] = el.scrollTop
-                    }
-                    const threshold = (messageInputRef.current?.offsetHeight || 64) + 16
-                    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
-                    if (activeChatId) {
-                      messageScrollStateRef.current[String(activeChatId)] = {
-                        scrollTop: el.scrollTop,
-                        atBottom,
-                      }
-                    }
-                    setIsAtBottom(atBottom)
-                    // keep track of latest scrollHeight for preserving position when new messages arrive
-                    prevScrollHeightRef.current = el.scrollHeight
-                    // Update the visible date label based on the message near the vertical center
-                    try {
-                      const mid = el.scrollTop + el.clientHeight / 2
-                      const nodes = el.querySelectorAll('[id^="msg-"]')
-                      let foundTs = null
-                      for (let i = 0; i < nodes.length; i++) {
-                        const n = nodes[i]
-                        if (n.offsetTop <= mid) {
-                          foundTs = n.dataset.timestamp || null
-                        } else break
-                      }
-                      if (foundTs) {
-                        const label = formatDateLabel(foundTs, timeTicker)
-                        setVisibleDateLabel(label)
-                      }
-                    } catch (e) {}
-                  }}
-                  className={`flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 scrollbar-thin relative`}
+                  onScroll={handleMessagesScroll}
+                  className={`flex-1 overflow-y-auto scrollbar-thin relative ${
+                    isChannelFeed
+                      ? "px-0 py-3 sm:py-4 space-y-0"
+                      : "p-4 sm:p-8 space-y-8"
+                  }`}
                 >
                   {/* ... (Existing Message Rendering) ... */}
                       {currentMessages.length === 0 ? (
@@ -10171,7 +10209,7 @@ export default function CollaborationApp() {
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => {
-                                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+                                messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
                                 setPinnedMessageId(null)
                                 setHighlightTerm("")
                               }}
@@ -10192,12 +10230,6 @@ export default function CollaborationApp() {
                         </div>
                       )}
 
-                      <div className="sticky top-0 z-10 flex justify-center mb-6 pointer-events-none">
-                        <span className="text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg backdrop-blur-xl bg-white/90 text-slate-500 border border-slate-100">
-                          {visibleDateLabel || messageDateLabel || 'Today'}
-                        </span>
-                      </div>
-
                       {currentMessages.map((msg, idx) => {
                         const user = getUser(msg.userId)
                         const isMe = String(msg.userId) === String(currentUser?.id)
@@ -10208,7 +10240,8 @@ export default function CollaborationApp() {
                         const prevDayLabel = prevMsg ? formatDateLabel(prevMsg.timestamp, timeTicker) : null
                         const showDateSeparator = idx === 0 || msgDayLabel !== prevDayLabel
                         const isSequence =
-                          prevMsg && prevMsg.userId === msg.userId
+                          prevMsg && prevMsg.userId === msg.userId && !showDateSeparator
+                        const showNewDivider = isChannelFeed && Boolean(msg.isNew || msg.unread || msg.isUnread || msg.showNewDivider)
                         const messageStatus = msg.status || "sent"
                         const messageContexts = getMessageContexts(msg)
                         const isMessageSelected = selectedMessageIds.some(id => String(id) === String(msg.id))
@@ -10218,7 +10251,11 @@ export default function CollaborationApp() {
                             return (
                               <button
                                 onClick={() => retryFailedMessage(getActiveChatId(), msg)}
-                                className="flex items-center gap-1 text-[9px] text-rose-200 underline underline-offset-2"
+                                className={`flex items-center gap-1 text-[9px] underline underline-offset-2 ${
+                                  isChannelFeed
+                                    ? isDarkMode ? "text-rose-300" : "text-rose-600"
+                                    : "text-rose-200"
+                                }`}
                               >
                                 <XCircle className="w-3 h-3" />
                                 Retry send
@@ -10227,14 +10264,20 @@ export default function CollaborationApp() {
                           }
                           if (messageStatus === "sending" || messageStatus === "retrying") {
                             return (
-                              <span className="flex items-center gap-1 text-[9px] text-sky-100">
-                                <span className="w-3 h-3 rounded-full border border-white/40 border-t-transparent animate-spin"></span>
+                              <span className={`flex items-center gap-1 text-[9px] ${
+                                isChannelFeed ? isDarkMode ? "text-slate-400" : "text-slate-500" : "text-sky-100"
+                              }`}>
+                                <span className={`w-3 h-3 rounded-full border border-t-transparent animate-spin ${
+                                  isChannelFeed ? isDarkMode ? "border-slate-500" : "border-slate-300" : "border-white/40"
+                                }`}></span>
                                 {messageStatus === "retrying" ? "Retrying" : "Sending"}
                               </span>
                             )
                           }
                           return (
-                            <span className="flex items-center gap-1 text-[9px] text-sky-100">
+                            <span className={`flex items-center gap-1 text-[9px] ${
+                              isChannelFeed ? isDarkMode ? "text-slate-500" : "text-slate-400" : "text-sky-100"
+                            }`}>
                               Sent
                               <Check className="w-3 h-3" />
                             </span>
@@ -10261,60 +10304,86 @@ export default function CollaborationApp() {
                         return (
                           <React.Fragment key={msg.id}>
                             {showDateSeparator && (
-                              <div className="w-full flex justify-center mb-4">
-                                <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
-                                  isDarkMode 
-                                    ? 'bg-slate-800/90 border-slate-700 text-slate-400' 
-                                    : 'bg-white/90 border-slate-100 text-slate-500'
+                              <div className={`w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
+                                {isChannelFeed && (
+                                  <div className={`h-px flex-1 ${isDarkMode ? "bg-white/10" : "bg-slate-200/80"}`} />
+                                )}
+                                <span className={`border ${
+                                  isChannelFeed
+                                    ? isDarkMode
+                                      ? "mx-3 rounded-full border-white/10 bg-[#16191f] px-3 py-0.5 text-xs font-semibold text-slate-400"
+                                      : "mx-3 rounded-full border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold text-slate-600"
+                                    : isDarkMode 
+                                      ? 'text-[11px] font-bold px-3 py-1 rounded-full bg-slate-800/90 border-slate-700 text-slate-400' 
+                                      : 'text-[11px] font-bold px-3 py-1 rounded-full bg-white/90 border-slate-100 text-slate-500'
                                 }`}>
                                   {msgDayLabel}
                                 </span>
+                                {isChannelFeed && (
+                                  <div className={`h-px flex-1 ${isDarkMode ? "bg-white/10" : "bg-slate-200/80"}`} />
+                                )}
+                              </div>
+                            )}
+                            {showNewDivider && (
+                              <div className="my-2 flex w-full items-center px-5">
+                                <div className="h-px flex-1 bg-rose-500/70" />
+                                <span className="ml-2 text-xs font-semibold text-rose-500">New</span>
                               </div>
                             )}
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`relative flex gap-4 ${
-                                isMe ? "flex-row-reverse" : ""
-                              } ${
-                                isSequence ? "mt-1" : "mt-6"
+                              className={`relative flex ${
+                                isChannelFeed
+                                  ? `gap-3 px-5 py-1.5 transition-colors ${isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-slate-100/80"} ${isSequence ? "mt-0" : "mt-1"}`
+                                  : `gap-4 ${isMe ? "flex-row-reverse" : ""} ${isSequence ? "mt-1" : "mt-6"}`
                               } ${
                                 isActionMenuOpen || isContextPickerOpen || isEditingThisMessage ? "z-40" : "z-0"
-                              } group animate-fade-in`}
+                              } group`}
                             >
                             {/* Avatar only for first in sequence */}
-                            <div className="flex-shrink-0 w-10 flex flex-col items-center">
+                            <div className={`flex-shrink-0 flex flex-col items-center ${isChannelFeed ? "w-9" : "w-10"}`}>
                               {!isSequence ? (
                                 <div
-                                  className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-lg border-2 ring-2 ${
-                                    isMe
-                                      ? isDarkMode 
-                                        ? "bg-gradient-to-br from-sky-500/30 to-cyan-500/30 border-sky-500/50 ring-slate-800/50" 
-                                        : "bg-gradient-to-br from-sky-100 to-cyan-100 border-white ring-white/50"
-                                      : isDarkMode 
-                                        ? "bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-800/50 text-sm" 
-                                        : "bg-gradient-to-br from-white to-slate-50 border-white ring-white/50 text-sm"
-                                  } ${isMe ? isDarkMode ? "text-sky-300" : "text-sky-600" : ""}`}
+                                  className={`flex items-center justify-center overflow-hidden ${
+                                    isChannelFeed
+                                      ? `h-9 w-9 rounded-lg text-base ${isDarkMode ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700"}`
+                                      : `w-10 h-10 rounded-full text-lg shadow-lg border-2 ring-2 ${
+                                          isMe
+                                            ? isDarkMode 
+                                              ? "bg-gradient-to-br from-sky-500/30 to-cyan-500/30 border-sky-500/50 ring-slate-800/50" 
+                                              : "bg-gradient-to-br from-sky-100 to-cyan-100 border-white ring-white/50"
+                                            : isDarkMode 
+                                              ? "bg-gradient-to-br from-slate-700 to-slate-800 border-slate-600 ring-slate-800/50 text-sm" 
+                                              : "bg-gradient-to-br from-white to-slate-50 border-white ring-white/50 text-sm"
+                                        } ${isMe ? isDarkMode ? "text-sky-300" : "text-sky-600" : ""}`
+                                  }`}
                                 >
                                   {renderAvatar(user, 36)}
                                 </div>
                               ) : (
-                                <div className="w-10" />
+                                <div className={isChannelFeed ? "w-9" : "w-10"} />
                               )}
                             </div>
 
                             <div
-                              className={`flex flex-col max-w-[70%] ${
-                                isMe ? "items-end" : "items-start"
+                              className={`flex flex-col ${
+                                isChannelFeed
+                                  ? "min-w-0 flex-1 items-start"
+                                  : `max-w-[70%] ${isMe ? "items-end" : "items-start"}`
                               }`}
                             >
                               {/* Name only for first in sequence */}
-                              {!isSequence && !isMe && (
-                                <div className="ml-1 mb-1.5 flex items-baseline gap-2">
-                                  <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    {user?.name}
+                              {!isSequence && (isChannelFeed || !isMe) && (
+                                <div className={`${isChannelFeed ? "mb-0.5" : "ml-1 mb-1.5"} flex items-baseline gap-2`}>
+                                  <span className={`font-bold ${
+                                    isChannelFeed
+                                      ? isDarkMode ? "text-sm text-slate-100" : "text-sm text-slate-900"
+                                      : isDarkMode ? 'text-xs text-slate-400' : 'text-xs text-slate-500'
+                                  }`}>
+                                    {user?.name || "Unknown user"}
                                   </span>
-                                  <span className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  <span className={`${isChannelFeed ? "text-xs" : "text-[10px]"} font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {msg.timestamp
                                       ? formatTime(msg.timestamp)
                                       : "now"}
@@ -10328,26 +10397,32 @@ export default function CollaborationApp() {
                               )}
 
                               <div
-                              onMouseEnter={() => setHoveredMessageId(msg.id)}
-                              onMouseLeave={() => setHoveredMessageId(null)}
                               onTouchStart={() => {
                                 longPressTimerRef.current = setTimeout(() => setShowEmojiPickerFor(msg.id), 600)
                               }}
                               onTouchEnd={() => {
                                 clearTimeout(longPressTimerRef.current)
                               }}
-                              className={`relative overflow-visible text-[15px] leading-relaxed break-words transition-all duration-200 ${
-                                  isAttachmentOnlyMessage
-                                    ? "bg-transparent shadow-none border-0 rounded-none px-0 py-0"
-                                    : isMe
-                                      ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm px-5 py-3.5" 
-                                      : isDarkMode 
-                                        ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm px-5 py-3.5" 
-                                        : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm px-5 py-3.5"
+                              className={`relative overflow-visible break-words ${
+                                  isChannelFeed
+                                    ? `w-full text-sm leading-6 transition-colors duration-75 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`
+                                    : `text-[15px] leading-relaxed transition-all duration-150 ${
+                                        isAttachmentOnlyMessage
+                                          ? "bg-transparent shadow-none border-0 rounded-none px-0 py-0"
+                                          : isMe
+                                            ? "liquid-glass-message-own text-white rounded-2xl rounded-tr-sm px-5 py-3.5" 
+                                            : isDarkMode 
+                                              ? "liquid-glass-message text-slate-100 rounded-2xl rounded-tl-sm px-5 py-3.5" 
+                                              : "liquid-glass-message text-slate-800 rounded-2xl rounded-tl-sm px-5 py-3.5"
+                                      }`
                                 } ${pinnedMessageId === msg.id ? isDarkMode ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 animate-pulse-soft' : 'ring-2 ring-sky-400 ring-offset-2 animate-pulse-soft' : ''}`}
                               >
                                 <div
-                                  className={`absolute ${isMe ? '-left-12' : '-right-12'} -top-3 z-20`}
+                                  className={`absolute z-20 ${
+                                    isChannelFeed
+                                      ? "right-2 -top-2"
+                                      : `${isMe ? '-left-12' : '-right-12'} -top-3`
+                                  }`}
                                   onClick={e => e.stopPropagation()}
                                 >
                                   <MessageActionButton
@@ -10444,7 +10519,7 @@ export default function CollaborationApp() {
                                       </div>
                                       <span className="font-bold">Video Call Started</span>
                                     </div>
-                                    <p className={`text-sm ${isMe ? 'text-white/90' : isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                    <p className={`text-sm ${isChannelFeed ? (isDarkMode ? 'text-slate-300' : 'text-slate-600') : isMe ? 'text-white/90' : isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                                       {msg.meetTitle || 'Join the video meeting'}
                                     </p>
                                     <a
@@ -10471,7 +10546,7 @@ export default function CollaborationApp() {
                                       <FileText className={`w-5 h-5 ${isDarkMode ? 'text-yellow-300' : 'text-yellow-600'}`} />
                                     </div>
                                     <div>
-                                      <div className={`font-bold ${isMe ? 'text-white' : isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{msg.text || (msg.task && msg.task.message)}</div>
+                                      <div className={`font-bold ${isChannelFeed ? (isDarkMode ? 'text-slate-200' : 'text-slate-800') : isMe ? 'text-white' : isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{msg.text || (msg.task && msg.task.message)}</div>
                                       <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{msg.timestamp}</div>
                                     </div>
                                   </div>
@@ -10530,7 +10605,7 @@ export default function CollaborationApp() {
                                 <div className={`flex flex-wrap gap-2 ${msg.text ? 'mt-2' : ''}`}>
                                   {msg.editedAt && (
                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold ${
-                                      isMe
+                                      !isChannelFeed && isMe
                                         ? "bg-white/15 text-white/85"
                                         : isDarkMode
                                           ? "bg-slate-700/70 text-slate-300"
@@ -10726,13 +10801,18 @@ export default function CollaborationApp() {
                                 )}
                               
                                 {/* Timestamp for Me inside bubble, slightly cleaner */}
-                                {isMe && (
+                                {isMe && !isChannelFeed && (
                                   <div className="text-[9px] text-right mt-1 font-bold flex justify-end items-center gap-2 text-sky-100 flex-wrap">
                                     <span>
                                       {msg.timestamp
                                         ? formatTime(msg.timestamp)
                                         : "now"}
                                     </span>
+                                    {statusLabel}
+                                  </div>
+                                )}
+                                {isMe && isChannelFeed && messageStatus !== "sent" && (
+                                  <div className="mt-1 flex items-center gap-2">
                                     {statusLabel}
                                   </div>
                                 )}
@@ -10749,8 +10829,8 @@ export default function CollaborationApp() {
                   {!isAtBottom && currentMessages.length > 0 && (
                     <button
                       onClick={() => {
-                        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-                        setIsAtBottom(true)
+                        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+                        setIsAtBottomFast(true)
                         setPinnedMessageId(null)
                         setHighlightTerm("")
                       }}

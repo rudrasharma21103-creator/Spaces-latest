@@ -6695,3 +6695,257 @@ body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
 }
+
+/* ============================================
+   FINAL PERFORMANCE MOTION PASS
+   Fast, smooth interaction timing across the platform
+   ============================================ */
+
+:root,
+.dark,
+html.dark,
+body.dark {
+  --ease-smooth: cubic-bezier(0.2, 0, 0, 1) !important;
+  --ease-bounce: cubic-bezier(0.2, 0, 0, 1) !important;
+  --ease-elastic: cubic-bezier(0.2, 0, 0, 1) !important;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1) !important;
+  --duration-fast: 70ms !important;
+  --duration-normal: 105ms !important;
+  --duration-slow: 145ms !important;
+  --duration-slower: 180ms !important;
+}
+
+.transition,
+.transition-all,
+.transition-colors,
+.transition-opacity,
+.transition-shadow,
+.transition-transform {
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.transition,
+.transition-all {
+  transition-duration: 105ms !important;
+}
+
+.transition-colors,
+.transition-opacity,
+.transition-shadow,
+.transition-transform {
+  transition-duration: 90ms !important;
+}
+
+.duration-75 { transition-duration: 60ms !important; }
+.duration-100 { transition-duration: 70ms !important; }
+.duration-150 { transition-duration: 90ms !important; }
+.duration-200 { transition-duration: 110ms !important; }
+.duration-300 { transition-duration: 135ms !important; }
+.duration-500 { transition-duration: 170ms !important; }
+.duration-700 { transition-duration: 210ms !important; }
+.duration-1000 { transition-duration: 260ms !important; }
+
+.animate-fade-in,
+.animate-fade-in-up,
+.animate-fade-in-down,
+.animate-fade-in-scale,
+.animate-scale-in,
+.animate-slide-in-right,
+.animate-slide-in-left,
+.animate-slide-in-up,
+.animate-slide-in-down,
+.animate-fadeIn,
+.animate-fadeInUp,
+.animate-fadeInDown,
+.animate-fadeInScale,
+.animate-slideInRight,
+.animate-slideInLeft,
+.animate-message-sent,
+.animate-notification-pop {
+  animation-duration: 140ms !important;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+  animation-fill-mode: both;
+}
+
+.animate-bounce-in,
+.animate-bounceIn {
+  animation-duration: 180ms !important;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.mobile-slide-in-left,
+.mobile-slide-in-right {
+  animation-duration: 180ms !important;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.mobile-slide-in-bottom,
+.mobile-fade-in,
+.mobile-dropdown {
+  animation-duration: 160ms !important;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.animate-pulse {
+  animation-duration: 1.2s !important;
+}
+
+.animate-ping {
+  animation-duration: 0.9s !important;
+}
+
+.animate-bounce {
+  animation-duration: 0.75s !important;
+}
+
+.animate-spin {
+  animation-duration: 0.75s !important;
+}
+
+.animate-shimmer,
+.shimmer {
+  animation-duration: 1s !important;
+}
+
+.animate-float {
+  animation-duration: 2.4s !important;
+}
+
+.backdrop-blur,
+.backdrop-blur-sm,
+.backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.backdrop-blur-lg,
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.glass,
+.glass-subtle,
+.glass-dark,
+.modal-backdrop,
+.modal-backdrop-mobile {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+button,
+a,
+[role="button"],
+.sidebar-item,
+.liquid-glass-sidebar-icon,
+.liquid-glass-nav-item,
+.liquid-glass-button,
+.liquid-glass-header,
+.liquid-glass-card,
+.message-bubble,
+.liquid-glass-message,
+.liquid-glass-message-own,
+.hover-lift,
+.touch-active {
+  backface-visibility: hidden;
+}
+
+button:hover,
+a:hover,
+[role="button"]:hover,
+.sidebar-item:hover,
+.liquid-glass-sidebar-icon:hover,
+.liquid-glass-nav-item:hover,
+.liquid-glass-button:hover {
+  will-change: auto;
+}
+
+button:not(:hover),
+a:not(:hover),
+[role="button"]:not(:hover),
+.sidebar-item:not(:hover),
+.liquid-glass-sidebar-icon:not(:hover),
+.liquid-glass-nav-item:not(:hover),
+.liquid-glass-button:not(:hover) {
+  will-change: auto;
+}
+
+html {
+  scroll-behavior: auto !important;
+}
+
+.liquid-glass-chat-area,
+.liquid-glass-chat-area *,
+[class*="chat-background"],
+[class*="chat-background"] * {
+  scroll-behavior: auto !important;
+}
+
+.liquid-glass-chat-area [id^="msg-"] {
+  animation: none !important;
+  contain: layout paint style;
+  filter: none !important;
+  transform: none !important;
+  transition: background-color 70ms cubic-bezier(0.2, 0, 0, 1) !important;
+  will-change: auto !important;
+}
+
+.channel-chat-background,
+.channel-chat-background-dark {
+  background-attachment: scroll !important;
+  background-image: none !important;
+}
+
+.channel-chat-background::before,
+.channel-chat-background-dark::before {
+  content: none !important;
+  display: none !important;
+}
+
+.channel-chat-background [id^="msg-"],
+.channel-chat-background-dark [id^="msg-"] {
+  content-visibility: auto;
+  contain-intrinsic-size: 76px;
+  contain: layout paint style;
+}
+
+.liquid-glass-chat-area .message-bubble,
+.liquid-glass-chat-area .liquid-glass-message,
+.liquid-glass-chat-area .liquid-glass-message-own {
+  filter: none !important;
+  transition:
+    background-color 70ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 70ms cubic-bezier(0.2, 0, 0, 1),
+    color 70ms cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.animate-fade-in,
+.animate-fade-in-up,
+.animate-fade-in-down,
+.animate-slide-in-left,
+.animate-slide-in-right,
+.animate-slide-in-up,
+.animate-slide-in-down,
+.animate-scale-in,
+.hover-lift,
+.touch-active,
+.page-transition {
+  will-change: auto !important;
+}
+
+.liquid-glass-chat-area,
+.liquid-glass-chat-area *,
+.liquid-glass-sidebar,
+.liquid-glass-sidebar *,
+.liquid-glass-sidebar-right,
+.liquid-glass-sidebar-right * {
+  will-change: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

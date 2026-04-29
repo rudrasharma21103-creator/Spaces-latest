@@ -29,6 +29,8 @@ FRIEND_CARD_PROJECTION = {
     "linkedinURL": 1,
     "avatar_url": 1,
     "avatar_preset": 1,
+    "avatar_version": 1,
+    "avatar_updated_at": 1,
     "isOnline": 1,
     "status": 1,
     "lastActive": 1,
@@ -48,6 +50,8 @@ USER_SEARCH_PROJECTION = {
     "professionalProfile": 1,
     "avatar_url": 1,
     "avatar_preset": 1,
+    "avatar_version": 1,
+    "avatar_updated_at": 1,
     "notifications.id": 1,
     "notifications.type": 1,
     "notifications.status": 1,
@@ -463,6 +467,8 @@ def build_user_search_result(candidate, requester):
         "name": serialized.get("name") or "",
         "avatar_url": serialized.get("avatar_url"),
         "avatar_preset": serialized.get("avatar_preset"),
+        "avatar_version": serialized.get("avatar_version"),
+        "avatar_updated_at": serialized.get("avatar_updated_at"),
         "professionalProfile": serialized.get("professionalProfile"),
         "relationshipStatus": relationship_status,
         "incomingRequestNotificationId": notification_id,
@@ -971,19 +977,34 @@ async def update_user(user_id: str, user: dict, request: Request):
 
     try:
         if any(key in update_doc for key in ("avatar_url", "avatar_preset", "profileImage", "avatar")):
+            timestamp = int(time.time() * 1000)
             raw_url = updated.get("avatar_url")
             avatar_url = raw_url
             if isinstance(raw_url, str) and raw_url and not (raw_url.startswith("data:") or raw_url.startswith("blob:")):
-                timestamp = int(time.time() * 1000)
                 separator = "&" if "?" in raw_url else "?"
                 avatar_url = f"{raw_url}{separator}v={timestamp}"
-                users_collection.update_one({"id": actual_id}, {"$set": {"avatar_url": avatar_url}})
+                users_collection.update_one(
+                    {"id": actual_id},
+                    {"$set": {"avatar_url": avatar_url, "avatar_version": timestamp, "avatar_updated_at": timestamp}},
+                )
                 serialized_updated["avatar_url"] = avatar_url
                 updated["avatar_url"] = avatar_url
+            else:
+                users_collection.update_one(
+                    {"id": actual_id},
+                    {"$set": {"avatar_version": timestamp, "avatar_updated_at": timestamp}},
+                )
+
+            serialized_updated["avatar_version"] = timestamp
+            serialized_updated["avatar_updated_at"] = timestamp
+            updated["avatar_version"] = timestamp
+            updated["avatar_updated_at"] = timestamp
 
             avatar_data = {
                 "avatar_url": avatar_url,
                 "avatar_preset": updated.get("avatar_preset"),
+                "avatar_version": timestamp,
+                "avatar_updated_at": timestamp,
                 "name": updated.get("name"),
             }
 
@@ -1019,6 +1040,8 @@ async def update_user(user_id: str, user: dict, request: Request):
                         "userId": str(actual_id),
                         "avatar_url": avatar_url,
                         "avatar_preset": updated.get("avatar_preset"),
+                        "avatar_version": timestamp,
+                        "avatar_updated_at": timestamp,
                     },
                 )
             except Exception:

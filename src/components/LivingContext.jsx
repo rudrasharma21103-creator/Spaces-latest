@@ -1602,7 +1602,7 @@ export function MessageActionButton({ isDarkMode, onClick, buttonRef, isActive =
     <button
       ref={buttonRef}
       onClick={onClick}
-      className={`${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-all duration-150 p-2 rounded-full border shadow-sm hover:scale-[1.04] ${
+      className={`${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} p-2 rounded-full border transition-[opacity,background-color,border-color,color] duration-75 ${
         isDarkMode
           ? "bg-[#17191d]/95 border-white/10 hover:bg-[#202329] text-slate-300"
           : "bg-white/96 border-slate-200/90 hover:bg-slate-50 text-slate-600"
