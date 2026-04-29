@@ -417,6 +417,7 @@ export default function CollaborationApp() {
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [avatarPreview, setAvatarPreview] = useState(null)
   const [selectedPreset, setSelectedPreset] = useState(null)
+  const [avatarFile, setAvatarFile] = useState(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   // Organization registration modal state
   const [showOrgModal, setShowOrgModal] = useState(false)
@@ -806,6 +807,9 @@ export default function CollaborationApp() {
     }
   }, [])
 
+  const getBackendRelativeImageApiBase = src =>
+    typeof src === "string" && /^\/(?:upload|files|api)\//.test(src) ? API_BASE : undefined
+
   // Helper: render avatar for a user object
   const renderAvatar = (user, size = 40, options = {}) => {
     if (!user) return null
@@ -839,8 +843,9 @@ export default function CollaborationApp() {
       user.updated_at ||
       user.updatedAt ||
       ""
+    const backendImageApiBase = getBackendRelativeImageApiBase(url)
 
-    // Handle relative URLs by prepending API_BASE
+    // Backend upload paths need the API origin; public preset paths should stay on the frontend.
     if (url && typeof url === 'string') {
       if (url.startsWith('data:') || url.startsWith('http') || url.startsWith('blob:')) {
         return (
@@ -861,7 +866,7 @@ export default function CollaborationApp() {
           <SmartImage
             src={url}
             alt={name}
-            apiBase={API_BASE}
+            apiBase={backendImageApiBase}
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
@@ -886,7 +891,7 @@ export default function CollaborationApp() {
           <SmartImage
             src={preset}
             alt={name}
-            apiBase={API_BASE}
+            apiBase={getBackendRelativeImageApiBase(preset)}
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
@@ -950,6 +955,54 @@ export default function CollaborationApp() {
     { id: "ellipse-8", url: "/Ellipse%208.png", label: "Ellipse 8" },
     { id: "ellipse-9", url: "/Ellipse%209.png", label: "Ellipse 9" }
   ]
+
+  const waitForUploadedFile = async fileId => {
+    if (!fileId) return
+
+    const token = getToken()
+    const stored = getStoredUser()
+    const userId = getUserIdValue(stored)
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(userId ? { "X-User-Id": String(userId) } : {})
+    }
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await fetch(`${API_BASE}/upload/file/${fileId}`, { headers })
+      if (response.ok) {
+        const payload = await response.json().catch(() => null)
+        if (!payload || payload.status === "done" || payload.status === undefined) return
+      }
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+  }
+
+  const uploadAvatarFile = async file => {
+    if (!file) return null
+
+    const form = new FormData()
+    form.append("file", file)
+
+    const token = getToken()
+    const stored = getStoredUser()
+    const userId = getUserIdValue(stored)
+    const response = await fetch(`${API_BASE}/upload/file`, {
+      method: "POST",
+      body: form,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(userId ? { "X-User-Id": String(userId) } : {})
+      }
+    })
+
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.file_id) {
+      throw new Error(payload?.detail || payload?.error || "Avatar upload failed")
+    }
+
+    await waitForUploadedFile(payload.file_id)
+    return `/upload/file/${payload.file_id}/download`
+  }
 
   const syncUserCollections = updatedUser => {
     if (!updatedUser) return
@@ -7973,6 +8026,7 @@ export default function CollaborationApp() {
             onClick={() => {
               setAvatarPreview(null)
               setSelectedPreset(null)
+              setAvatarFile(null)
               setShowProfileModal(false)
             }}
           ></div>
@@ -7984,6 +8038,7 @@ export default function CollaborationApp() {
                 onClick={() => {
                   setAvatarPreview(null)
                   setSelectedPreset(null)
+                  setAvatarFile(null)
                   setShowProfileModal(false)
                 }}
                 className="p-2 rounded-full hover:bg-slate-100"
@@ -8005,6 +8060,7 @@ export default function CollaborationApp() {
                         onClick={() => {
                           setSelectedPreset(preset.id)
                           setAvatarPreview(preset.url)
+                          setAvatarFile(null)
                         }}
                         className={`w-16 h-16 rounded-full shadow-md overflow-hidden flex items-center justify-center transition-all ${
                           isActive ? "ring-4 ring-sky-200 scale-105" : "ring-0"
@@ -8036,6 +8092,7 @@ export default function CollaborationApp() {
                         reader.onload = () => {
                           setAvatarPreview(reader.result)
                           setSelectedPreset(null)
+                          setAvatarFile(f)
                         }
                         reader.readAsDataURL(f)
                       }}
@@ -8047,6 +8104,7 @@ export default function CollaborationApp() {
                       <SmartImage
                         src={avatarPreview}
                         alt="preview"
+                        apiBase={getBackendRelativeImageApiBase(avatarPreview)}
                         className="w-32 h-32 rounded-full object-cover border"
                         loading="eager"
                       />
@@ -8079,7 +8137,7 @@ export default function CollaborationApp() {
                   <button
                     type="button"
                     onClick={async (e) => {
-                      try { e?.preventDefault?.() } catch(_){}
+                      e?.preventDefault?.()
                       if (isSavingProfile) return
                       setIsSavingProfile(true)
                       try {
@@ -8089,8 +8147,11 @@ export default function CollaborationApp() {
 
                         // Only send avatar-related fields to avoid overwriting other data
                         const avatarVersion = Date.now()
+                        const savedAvatarUrl = avatarFile
+                          ? await uploadAvatarFile(avatarFile)
+                          : avatarPreview
                         const updates = {
-                          avatar_url: avatarPreview || null,
+                          avatar_url: savedAvatarUrl || null,
                           avatar_preset: selectedPreset || null,
                           avatar_version: avatarVersion,
                           avatar_updated_at: avatarVersion
@@ -8101,6 +8162,7 @@ export default function CollaborationApp() {
                         saveAuth(optimisticMerged, getToken())
                         setCurrentUser(optimisticMerged)
                         syncUserCollections(optimisticMerged)
+                        setAvatarFile(null)
                         setShowProfileModal(false)
                         setIsSavingProfile(false)
 
@@ -8142,6 +8204,7 @@ export default function CollaborationApp() {
                     onClick={() => {
                       setAvatarPreview(null)
                       setSelectedPreset(null)
+                      setAvatarFile(null)
                       setShowProfileModal(false)
                     }}
                     className="px-4 py-2 rounded-xl border"
@@ -8565,6 +8628,7 @@ export default function CollaborationApp() {
           onOpenNotifications={() => setShowNotificationsModal(true)}
           onOpenProfile={() => {
             setAvatarPreview(currentUser?.avatar_url || null)
+            setAvatarFile(null)
             setShowProfileModal(true)
           }}
           connectPreferredPane={connectPreferredPane}
@@ -9790,6 +9854,7 @@ export default function CollaborationApp() {
                               // prepare modal
                               setSelectedPreset(currentUser?.avatar_preset || null)
                               setAvatarPreview(currentUser?.avatar_url || null)
+                              setAvatarFile(null)
                               setShowProfileModal(true)
                               setShowUserMenu(false)
                             }}
@@ -10007,6 +10072,7 @@ export default function CollaborationApp() {
                             onClick={() => {
                               setSelectedPreset(currentUser?.avatar_preset || null)
                               setAvatarPreview(currentUser?.avatar_url || null)
+                              setAvatarFile(null)
                               setShowProfileModal(true)
                               setShowMobileDrawer(false)
                             }}
