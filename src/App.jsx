@@ -40,7 +40,6 @@ import {
   Grid3x3,
   FileText,
   ClipboardList,
-  ArrowDown,
   Download,
   Clock,
   Sun,
@@ -325,13 +324,15 @@ export default function CollaborationApp() {
       String(openContextId || "") === String(contextId || "")
     ) return
     const sourceView = activeView === "contexts" ? contextsSourceView || "channel" : activeView === "dm" ? "dm" : "channel"
-    setDedicatedPageReturn({
-      view: activeView,
-      channelTab: activeChannelTab,
-      homeSection,
-      openContextId,
-      contextsSourceView,
-    })
+    if (activeView !== "contexts") {
+      setDedicatedPageReturn({
+        view: activeView,
+        channelTab: activeChannelTab,
+        homeSection,
+        openContextId,
+        contextsSourceView,
+      })
+    }
     setContextsSourceView(sourceView)
     setActiveChannelTab("messages")
     setOpenContextId(contextId)
@@ -612,8 +613,10 @@ export default function CollaborationApp() {
     const stUser = getStoredUser()
     const token = getToken()
     if (stUser && token) {
+      authResolvedAtRef.current = Date.now()
       setCurrentUser(stUser)
       setIsAuthenticated(true)
+      hydrateCachedSpacesForUser(stUser)
       try {
         const cachedUsers = Storage.peekUsers()
         if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
@@ -732,6 +735,8 @@ export default function CollaborationApp() {
   const [showCalendarConnectModal, setShowCalendarConnectModal] = useState(false)
   const [showSuccessToast, setShowSuccessToast] = useState(false)
   const [successMessage, setSuccessMessage] = useState("")
+  const [attachmentPreview, setAttachmentPreview] = useState(null)
+  const [attachmentPreviewMenuOpen, setAttachmentPreviewMenuOpen] = useState(false)
 
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
@@ -1304,10 +1309,11 @@ export default function CollaborationApp() {
           Storage.getBootstrap({ forceRefresh: !justAuthenticated, cacheTtl: justAuthenticated ? 15000 : 5000 }).catch(() => null),
           isPageHidden ? Promise.resolve(events) : Storage.getEvents()
         ])
+        const expectedSpaceIds = bootstrap?.user?.spaces || currentUser.spaces || []
         let availableSpaces = Array.isArray(bootstrap?.spaces) ? bootstrap.spaces : []
-        if (availableSpaces.length === 0 && (activeSpace || !isPageHidden)) {
+        if (availableSpaces.length === 0 && expectedSpaceIds.length > 0 && (activeSpace || !isPageHidden)) {
           availableSpaces = await Storage.getSpacesForUser(
-            bootstrap?.user?.spaces || currentUser.spaces || [],
+            expectedSpaceIds,
             { forceRefresh: true, cacheTtl: 0 }
           ).catch(() => [])
         }
@@ -1497,14 +1503,24 @@ export default function CollaborationApp() {
 
     if (isAuthenticated && currentUser) {
       const loadInitialData = async () => {
+        const currentUserSpaceIds = Array.isArray(currentUser?.spaces) ? currentUser.spaces : []
+        const eagerSpacesPromise = currentUserSpaceIds.length > 0
+          ? Storage.getSpacesForUser(currentUserSpaceIds).catch(() => [])
+          : Promise.resolve([])
         const bootstrap = await Storage.getBootstrap().catch(() => null)
         const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
           : Storage.getFriends(effectiveUser.friends || []).catch(() => [])
-        const spacesPromise = Array.isArray(bootstrap?.spaces)
+        const expectedSpaceIds = Array.isArray(effectiveUser.spaces) ? effectiveUser.spaces : []
+        const expectedMatchesCurrent =
+          expectedSpaceIds.length === currentUserSpaceIds.length &&
+          expectedSpaceIds.every(id => currentUserSpaceIds.map(String).includes(String(id)))
+        const spacesPromise = Array.isArray(bootstrap?.spaces) && (bootstrap.spaces.length > 0 || expectedSpaceIds.length === 0)
           ? Promise.resolve(bootstrap.spaces)
-          : Storage.getSpacesForUser(effectiveUser.spaces || []).catch(() => [])
+          : expectedMatchesCurrent
+            ? eagerSpacesPromise
+            : Storage.getSpacesForUser(expectedSpaceIds).catch(() => [])
 
         setCurrentUser(prev => {
           if (!prev) return effectiveUser
@@ -1536,20 +1552,13 @@ export default function CollaborationApp() {
         const userSpaces = await spacesPromise
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
+        const cachedFallbackSpaces = safeUserSpaces.length > 0 ? [] : Storage.peekSpacesForUser?.(expectedSpaceIds) || []
+        const spacesForPaint = safeUserSpaces.length > 0 ? safeUserSpaces : cachedFallbackSpaces
+        const enrichedSpaces = enrichSpacesForUi(spacesForPaint)
 
-        const enrichedSpaces = safeUserSpaces.map(s => ({
-          ...s,
-          icon:
-            s.iconType === "graduation" ? (
-              <GraduationCap className="w-5 h-5" />
-            ) : s.iconType === "briefcase" ? (
-              <Briefcase className="w-5 h-5" />
-            ) : (
-              <UserIcon className="w-5 h-5" />
-            )
-        }))
-
-        setSpaces(enrichedSpaces)
+        if (spacesForPaint.length > 0 || expectedSpaceIds.length === 0) {
+          setSpaces(enrichedSpaces)
+        }
         setFriends(safeFriends)
 
         // Non-blocking: load secondary data after core UI is ready.
@@ -2302,6 +2311,52 @@ export default function CollaborationApp() {
     [getSpaceIconElement]
   )
 
+  const getFirstReadableChannel = React.useCallback((space, user) => {
+    if (!space || !user) return null
+    const userId = user.id
+    const channels = Array.isArray(space.channels) ? space.channels : []
+    return (
+      channels.find(channel => {
+        const channelMembers = Array.isArray(channel?.members) ? channel.members : []
+        if (channelMembers.length > 0) {
+          return channelMembers.some(memberId => String(memberId) === String(userId)) || String(space.ownerId) === String(userId)
+        }
+        const spaceMembers = Array.isArray(space.members) ? space.members : []
+        return String(space.ownerId) === String(userId) || spaceMembers.some(memberId => String(memberId) === String(userId))
+      }) ||
+      channels[0] ||
+      null
+    )
+  }, [])
+
+  const hydrateCachedSpacesForUser = React.useCallback((user, options = {}) => {
+    if (!user) return []
+    let cachedSpaces = []
+    try {
+      cachedSpaces = Storage.peekSpacesForUser?.(user.spaces || []) || []
+    } catch (error) {
+      console.warn("Failed to read cached spaces", error)
+      cachedSpaces = []
+    }
+
+    if (!cachedSpaces.length) return []
+
+    const enriched = enrichSpacesForUi(cachedSpaces)
+    setSpaces(enriched)
+
+    if (options.selectFirst !== false) {
+      const hasCurrentSpace = activeSpace && enriched.some(space => String(space.id) === String(activeSpace))
+      if (!hasCurrentSpace) {
+        const firstSpace = enriched[0]
+        const firstChannel = getFirstReadableChannel(firstSpace, user)
+        setActiveSpace(firstSpace.id)
+        setActiveChannel(firstChannel?.id || "")
+      }
+    }
+
+    return enriched
+  }, [activeSpace, enrichSpacesForUi, getFirstReadableChannel])
+
   const buildDefaultSpace = React.useCallback(userId => ({
     id: userId + 1,
     name: "Space 1",
@@ -2356,6 +2411,7 @@ export default function CollaborationApp() {
       setActiveView("home")
       setHomeSection("overview")
       if (seededSpaces) setSpaces(seededSpaces)
+      else hydrateCachedSpacesForUser(safeUser)
       if (options.activeSpaceId !== undefined) setActiveSpace(options.activeSpaceId)
       if (options.activeChannelId !== undefined) setActiveChannel(options.activeChannelId)
       setAuthSuccess(options.successMessage || "")
@@ -2370,7 +2426,7 @@ export default function CollaborationApp() {
     if (options.cacheLookupEmail) {
       authLookupCacheRef.current.set(String(options.cacheLookupEmail).trim().toLowerCase(), safeUser)
     }
-  }, [enrichSpacesForUi])
+  }, [enrichSpacesForUi, hydrateCachedSpacesForUser])
 
   // --- Auth & Logout ---
   const handleAuthSubmit = async e => {
@@ -4539,7 +4595,10 @@ export default function CollaborationApp() {
 
     const request = (async () => {
       try {
-        const url = att.url || att.public_url || null
+        let url = att.url || att.public_url || null
+        if (url && typeof url === "string" && url.startsWith("/") && !url.startsWith("//")) {
+          url = `${API_BASE}${url}`
+        }
         const fid = (att.fileId || att.id) || null
         // Prefer explicit URL if available
         if (url) {
@@ -4584,6 +4643,81 @@ export default function CollaborationApp() {
     }
 
     return objectUrl
+  }
+
+  const isAttachmentUrlProtected = att => {
+    const url = att?.url || att?.public_url || att?.previewUrl || att?.webViewLink
+    if (!url) return Boolean(att?.fileId || att?.drive_file_id)
+
+    try {
+      const parsed = new URL(url, window.location.href)
+      const apiHost = (() => {
+        try { return new URL(API_BASE).host } catch { return null }
+      })()
+      if (!parsed.protocol || parsed.origin === window.location.origin) return true
+      if (apiHost && parsed.host && parsed.host.includes(apiHost)) return true
+    } catch {
+      return true
+    }
+
+    return Boolean(att?.fileId || att?.drive_file_id)
+  }
+
+  const getAttachmentPreviewKind = att => {
+    const mime = String(att?.type || att?.mimeType || att?.mimetype || "").toLowerCase()
+    const name = String(att?.name || att?.filename || "").toLowerCase()
+    if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(name)) return "image"
+    if (mime.startsWith("video/") || /\.(mp4|webm|mov|m4v)$/.test(name)) return "video"
+    if (mime === "application/pdf" || name.endsWith(".pdf")) return "pdf"
+    if (mime.includes("spreadsheet") || mime.includes("excel") || /\.(csv|xlsx?|ods)$/.test(name)) return "sheet"
+    if (mime.includes("presentation") || mime.includes("powerpoint") || /\.(pptx?|odp)$/.test(name)) return "slides"
+    if (mime.includes("document") || mime.includes("word") || mime.includes("text") || /\.(docx?|txt|rtf|md)$/.test(name)) return "doc"
+    return "file"
+  }
+
+  const openAttachmentPreview = async att => {
+    if (!att) return
+
+    const initialUrl = att.url || att.public_url || att.previewUrl || att.webViewLink || null
+    setAttachmentPreview({
+      attachment: att,
+      url: initialUrl,
+      loading: true,
+      error: "",
+    })
+    setAttachmentPreviewMenuOpen(false)
+
+    try {
+      let previewUrl = initialUrl
+
+      if (att.source === "gmail" && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
+        previewUrl = await GoogleService.getGmailAttachmentPreviewUrl(
+          googleAccessToken,
+          att.gmailMessageId,
+          att.gmailAttachmentId,
+          att.type || att.mimeType,
+          att.name
+        )
+      } else if (isAttachmentUrlProtected(att)) {
+        previewUrl = await fetchProtectedUrlAndCreateObjectURL(att)
+      } else if (!previewUrl && (att.fileId || att.id)) {
+        const meta = await fetchFileMetadata(att.fileId || att.id)
+        previewUrl = meta?.url || meta?.public_url || null
+      }
+
+      setAttachmentPreview(current =>
+        current?.attachment === att
+          ? { attachment: att, url: previewUrl || initialUrl, loading: false, error: previewUrl || initialUrl ? "" : "Preview is not available for this attachment." }
+          : current
+      )
+    } catch (error) {
+      console.error("Failed to prepare attachment preview:", error)
+      setAttachmentPreview(current =>
+        current?.attachment === att
+          ? { ...current, loading: false, error: "Preview is not available for this attachment." }
+          : current
+      )
+    }
   }
 
   const startPollingFileStatus = (fileId) => {
@@ -5290,6 +5424,23 @@ export default function CollaborationApp() {
     setMessageContextPicker(null)
   }
 
+  const closeContextsPage = React.useCallback(() => {
+    setOpenContextId(null)
+    setActiveChannelTab("messages")
+
+    if (dedicatedPageReturn?.view === "channel" || dedicatedPageReturn?.view === "dm") {
+      pushAppRoute(restoreFromDedicatedPage())
+      return
+    }
+
+    if (contextsSourceView === "dm") {
+      setActiveView("dm")
+    } else {
+      setActiveView("channel")
+    }
+    pushAppRoute("/")
+  }, [contextsSourceView, dedicatedPageReturn, restoreFromDedicatedPage])
+
   const currentContext = useMemo(
     () => (openContextId ? contextItems.find(context => String(context.id) === String(openContextId)) || null : null),
     [openContextId, contextItems]
@@ -5336,12 +5487,18 @@ export default function CollaborationApp() {
         ]))
           .map(messageId => getMessageById(messageId))
           .filter(Boolean)
-          .map(message => ({
-            id: message.id,
-            text: message.text,
-            timestamp: message.timestamp,
-            author: getUser(message.userId)?.name || "Unknown",
-          }))
+          .map(message => {
+            const author = getUser(message.userId)
+            return {
+              ...message,
+              id: message.id,
+              text: message.text,
+              timestamp: message.timestamp,
+              author: author?.name || "Unknown",
+              authorAvatar: author?.avatar_url || author?.profileImage || author?.profile_image || author?.avatarUrl || "",
+              authorInitials: String(author?.name || message.userName || "Unknown").trim().slice(0, 2).toUpperCase(),
+            }
+          })
       : [],
     [currentContext, currentMessages, usersById]
   )
@@ -5714,62 +5871,7 @@ export default function CollaborationApp() {
 
   // Helper to open or download attachments
   const openAttachment = async att => {
-    if (!att) return
-    
-    // Handle Gmail attachments - download and open directly
-    if (att.source === 'gmail' && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
-      try {
-        const blobUrl = await GoogleService.getGmailAttachmentPreviewUrl(
-          googleAccessToken,
-          att.gmailMessageId,
-          att.gmailAttachmentId,
-          att.type || att.mimeType,
-          att.name
-        )
-        if (blobUrl) {
-          window.open(blobUrl, "_blank")
-          return
-        }
-      } catch (e) {
-        console.error("Failed to open Gmail attachment:", e)
-      }
-    }
-    
-    const url = att.url || att.public_url || att.previewUrl
-    if (url) {
-      // If URL looks internal/protected (relative path, API host, or server upload), fetch with auth
-      let shouldFetchProtected = false
-      try {
-        const parsed = new URL(url, window.location.href)
-        const apiHost = (() => {
-          try { return new URL(API_BASE).host } catch(e) { return null }
-        })()
-        if (!parsed.protocol || parsed.origin === window.location.origin) shouldFetchProtected = true
-        if (apiHost && parsed.host && parsed.host.includes(apiHost)) shouldFetchProtected = true
-      } catch (e) {
-        shouldFetchProtected = true
-      }
-
-      if (shouldFetchProtected || att.fileId || att.drive_file_id) {
-        ;(async () => {
-          const blobUrl = await fetchProtectedUrlAndCreateObjectURL(att)
-          if (blobUrl) window.open(blobUrl, "_blank")
-        })()
-        return
-      }
-
-      // Otherwise open directly
-      window.open(url, "_blank")
-      return
-    }
-    // If we only have a fileId, try to fetch metadata and open
-    const fid = att.fileId || att.id
-    if (fid) {
-      (async () => {
-        const meta = await fetchFileMetadata(fid)
-        if (meta && (meta.url || meta.public_url)) window.open(meta.url || meta.public_url, "_blank")
-      })()
-    }
+    openAttachmentPreview(att)
   }
 
   const downloadAttachment = async att => {
@@ -8692,9 +8794,7 @@ export default function CollaborationApp() {
             contexts={currentChannelContexts}
             renderOwner={getContextOwnerName}
             formatUpdatedTime={formatContextTime}
-            onBack={() => {
-              pushAppRoute(restoreFromDedicatedPage())
-            }}
+            onBack={closeContextsPage}
             onOpenContext={openContext}
             sourceLabel={
               contextsSourceView === "dm"
@@ -9556,9 +9656,7 @@ export default function CollaborationApp() {
               contexts={currentChannelContexts}
               renderOwner={getContextOwnerName}
               formatUpdatedTime={formatContextTime}
-              onBack={() => {
-                pushAppRoute(restoreFromDedicatedPage())
-              }}
+              onBack={closeContextsPage}
               onOpenContext={openContext}
               sourceLabel={
                 contextsSourceView === "dm"
@@ -10214,7 +10312,7 @@ export default function CollaborationApp() {
                         files={currentChannelFiles}
                         isDarkMode={isDarkMode}
                         onAttachFile={addChannelFileAsAttachment}
-                        onDownloadFile={downloadAttachment}
+                        onOpenFile={openAttachment}
                       />
                     )}
                     {activeView === "channel" && activeChannelTab === "decisions" && (
@@ -10724,7 +10822,7 @@ export default function CollaborationApp() {
                                       <div
                                         key={att.id}
                                         onClick={() => openAttachment(att)}
-                                        style={{ cursor: (att.url || att.previewUrl || att.source === 'gmail') ? "pointer" : "default" }}
+                                        style={{ cursor: "pointer" }}
                                         className={`relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
                                           att.source === 'gmail'
                                             ? "bg-red-50 border border-red-100"
@@ -10733,20 +10831,6 @@ export default function CollaborationApp() {
                                               : "bg-black/5"
                                         }`}
                                       >
-                                        {/* Download overlay */}
-                                        {(att.url || att.previewUrl || att.source === 'gmail') && (
-                                          <button
-                                            onClick={e => {
-                                              e.stopPropagation()
-                                              downloadAttachment(att)
-                                            }}
-                                            className="absolute top-2 right-2 z-10 p-1 rounded-lg bg-white/90 border border-slate-100 hover:bg-white shadow-md text-slate-600"
-                                            title="Download"
-                                            aria-label={`Download ${att.name || "attachment"}`}
-                                          >
-                                            <ArrowDown className="w-4 h-4" />
-                                          </button>
-                                        )}
                                         {/* Gmail Attachment */}
                                         {att.source === 'gmail' ? (
                                           <div className="p-3 flex items-center gap-3 rounded-xl min-w-[200px]">
@@ -10761,7 +10845,7 @@ export default function CollaborationApp() {
                                                 <span className="text-[10px] text-slate-500">
                                                   Gmail Attachment
                                                 </span>
-                                                <ArrowDown className="w-3 h-3 text-slate-400" />
+                                                <FileText className="w-3 h-3 text-slate-400" />
                                               </div>
                                             </div>
                                           </div>
@@ -12797,6 +12881,145 @@ export default function CollaborationApp() {
           </div>
         </div>
       )}
+
+      {/* Attachment Preview */}
+      {attachmentPreview && (() => {
+        const att = attachmentPreview.attachment || {}
+        const previewUrl = attachmentPreview.url
+        const previewKind = getAttachmentPreviewKind(att)
+        const title = att.name || att.filename || "Attachment"
+        const sourceLabel =
+          att.source === "gmail"
+            ? "Gmail attachment"
+            : att.drive_file_id || String(att.url || att.webViewLink || "").includes("drive.google.com")
+              ? "Google Drive"
+              : "Shared document"
+        const detail = [
+          sourceLabel,
+          att.size ? `${Math.max(att.size / 1024, 0.1).toFixed(1)} KB` : "",
+        ].filter(Boolean).join(" | ")
+
+        return (
+          <div
+            className={`fixed inset-0 z-[70] flex items-center justify-center p-3 backdrop-blur-md animate-fade-in sm:p-6 ${
+              isDarkMode ? "bg-slate-950/75" : "bg-slate-950/45"
+            }`}
+            onClick={() => {
+              setAttachmentPreview(null)
+              setAttachmentPreviewMenuOpen(false)
+            }}
+          >
+            <section
+              className={`flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border shadow-[0_30px_90px_rgba(2,6,23,0.36)] ${
+                isDarkMode ? "border-white/10 bg-[#0d1218] text-slate-100" : "border-white/80 bg-white text-slate-900"
+              }`}
+              onClick={event => event.stopPropagation()}
+            >
+              <header className={`flex shrink-0 items-start justify-between gap-4 border-b px-4 py-4 sm:px-5 ${
+                isDarkMode ? "border-white/10" : "border-slate-200/80"
+              }`}>
+                <div className="min-w-0">
+                  <div className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                    Preview
+                  </div>
+                  <h3 className={`mt-1 truncate text-lg font-semibold sm:text-xl ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                    {title}
+                  </h3>
+                  <div className={`mt-1 text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                    {detail}
+                  </div>
+                </div>
+
+                <div className="relative flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAttachmentPreviewMenuOpen(open => !open)}
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                      isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+                    }`}
+                    aria-label="Attachment actions"
+                    title="Attachment actions"
+                  >
+                    <MoreVertical className="h-5 w-5" />
+                  </button>
+                  {attachmentPreviewMenuOpen && (
+                    <div className={`absolute right-12 top-0 z-10 w-48 overflow-hidden rounded-[18px] border p-1.5 shadow-[0_18px_45px_rgba(15,23,42,0.2)] ${
+                      isDarkMode ? "border-white/10 bg-[#17191d]" : "border-slate-200 bg-white"
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAttachmentPreviewMenuOpen(false)
+                          downloadAttachment(att)
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left text-sm font-medium transition ${
+                          isDarkMode ? "text-slate-200 hover:bg-white/[0.06]" : "text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachmentPreview(null)
+                      setAttachmentPreviewMenuOpen(false)
+                    }}
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                      isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08]" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+                    }`}
+                    aria-label="Close preview"
+                    title="Close preview"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </header>
+
+              <div className={`min-h-[360px] flex-1 overflow-auto p-3 sm:p-5 ${isDarkMode ? "bg-[#070b10]" : "bg-slate-100/80"}`}>
+                {attachmentPreview.loading ? (
+                  <div className="flex h-[52vh] min-h-[320px] items-center justify-center">
+                    <div className="text-center">
+                      <Loader2 className={`mx-auto h-8 w-8 animate-spin ${isDarkMode ? "text-sky-300" : "text-sky-600"}`} />
+                      <div className={`mt-3 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Preparing preview...</div>
+                    </div>
+                  </div>
+                ) : previewKind === "image" && previewUrl ? (
+                  <div className="flex min-h-[52vh] items-center justify-center">
+                    <SmartImage src={previewUrl} alt={title} className="max-h-[68vh] max-w-full rounded-[20px] object-contain shadow-2xl" />
+                  </div>
+                ) : previewKind === "video" && previewUrl ? (
+                  <div className="flex min-h-[52vh] items-center justify-center">
+                    <video className="max-h-[68vh] w-full max-w-4xl rounded-[20px] bg-black" controls>
+                      <source src={previewUrl} type={att.type || att.mimeType || undefined} />
+                    </video>
+                  </div>
+                ) : previewKind === "pdf" && previewUrl ? (
+                  <iframe src={previewUrl} title={title} className={`h-[68vh] w-full rounded-[20px] border ${
+                    isDarkMode ? "border-white/10 bg-white" : "border-slate-200 bg-white"
+                  }`} />
+                ) : (
+                  <div className="flex h-[52vh] min-h-[320px] items-center justify-center px-4 text-center">
+                    <div className="max-w-sm">
+                      <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-[26px] ${
+                        isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-white text-slate-600 shadow-sm"
+                      }`}>
+                        <FileIcon className="h-10 w-10" />
+                      </div>
+                      <h4 className={`mt-5 text-xl font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>{title}</h4>
+                      <p className={`mt-2 text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                        {attachmentPreview.error || "This file type does not have an inline preview."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        )
+      })()}
 
       {/* Docs Modal */}
       {showDocsModal && (

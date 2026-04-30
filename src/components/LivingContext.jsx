@@ -2,7 +2,6 @@ import React from "react"
 import { createPortal } from "react-dom"
 import {
   ArrowLeft,
-  ArrowDown,
   Check,
   Clock3,
   File,
@@ -852,6 +851,97 @@ function Section({ title, count, icon, isDarkMode, children }) {
   )
 }
 
+function formatMessageClock(timestamp) {
+  if (!timestamp) return ""
+  try {
+    return new Date(timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  } catch {
+    return ""
+  }
+}
+
+function ContextMessageRow({ message, isDarkMode }) {
+  const attachmentCount = Array.isArray(message.attachments) ? message.attachments.length : 0
+  const avatar = message.authorAvatar || message.avatar || ""
+  const initials = message.authorInitials || getNameInitials(message.author)
+  const timeLabel = formatMessageClock(message.timestamp)
+
+  return (
+    <article
+      className={cx(
+        "group flex gap-3 rounded-none px-1 py-3.5 transition-colors sm:px-3",
+        isDarkMode ? "hover:bg-white/[0.03]" : "hover:bg-slate-100/70"
+      )}
+    >
+      <div className="mt-0.5 h-11 w-11 shrink-0 overflow-hidden rounded-full">
+        {avatar ? (
+          <SmartImage
+            src={avatar}
+            alt=""
+            className="h-full w-full object-cover"
+            fallback={
+              <div className={`flex h-full w-full items-center justify-center text-sm font-semibold ${isDarkMode ? "bg-white/[0.07] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
+                {initials}
+              </div>
+            }
+          />
+        ) : (
+          <div className={`flex h-full w-full items-center justify-center text-sm font-semibold ${isDarkMode ? "bg-white/[0.07] text-slate-100" : "bg-slate-100 text-slate-700"}`}>
+            {initials}
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <div className={`truncate text-[15px] font-bold sm:text-base ${isDarkMode ? "text-white" : "text-slate-950"}`}>
+            {message.author || "Unknown"}
+          </div>
+          {timeLabel ? (
+            <div className={`text-xs font-semibold ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+              {timeLabel}
+            </div>
+          ) : null}
+          {message.editedAt ? (
+            <div className={`text-[11px] italic ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+              edited
+            </div>
+          ) : null}
+        </div>
+
+        <p className={`mt-1 whitespace-pre-wrap break-words text-[15px] leading-6 ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>
+          {getMessagePreview(message)}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {message.isDecision ? (
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-700"}`}>
+              <Check className="h-3.5 w-3.5" />
+              Decision
+            </span>
+          ) : null}
+          {message.editedAt ? (
+            <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-500"}`}>
+              Edited
+            </span>
+          ) : null}
+          {attachmentCount > 0 ? (
+            (message.attachments || []).slice(0, 3).map((attachment, index) => (
+              <span key={`${attachment.id || attachment.fileId || attachment.name || index}`} className={`inline-flex max-w-[220px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? "bg-sky-500/12 text-sky-200" : "bg-sky-50 text-sky-700"}`}>
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{attachment.name || "Attachment"}</span>
+              </span>
+            ))
+          ) : null}
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function MessageFocusedContextPanel({
   isDarkMode,
   context,
@@ -883,7 +973,115 @@ function MessageFocusedContextPanel({
 
   return (
     <div className={`flex h-full min-h-0 w-full flex-col overflow-hidden animate-fade-in ${isDarkMode ? "bg-[#08111a]" : "bg-[#f6f8fb]"}`} style={panelStyle}>
-      <section className="mx-auto flex min-h-0 h-full w-full max-w-[1540px] flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+      <section className="flex h-full min-h-0 w-full flex-col overflow-hidden md:hidden">
+        <div className={`shrink-0 border-b px-4 pb-4 pt-4 ${isDarkMode ? "border-slate-800/90 bg-[#0b131c]" : "border-slate-200/80 bg-white"}`}>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className={`inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium ${isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200" : "border-slate-200 bg-slate-50 text-slate-700"}`}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </button>
+            <span className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+              Context
+            </span>
+            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>
+              {statusMeta.label}
+            </span>
+          </div>
+
+          <h1 className={`mt-4 break-words text-[1.8rem] font-semibold leading-tight tracking-[-0.04em] ${isDarkMode ? "text-white" : "text-slate-950"}`}>
+            {context.title}
+          </h1>
+          <p className={`mt-3 text-[15px] leading-7 ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+            {summary || "Captured discussion, ownership, and follow-up work organized into one focused review workflow."}
+          </p>
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {metrics.slice(0, 3).map(metric => (
+              <div key={metric.label} className={`rounded-[18px] border px-3 py-3 ${isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
+                <div className={`text-[9px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{metric.label}</div>
+                <div className={`mt-1 text-xl font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>{metric.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className={`mt-4 flex flex-wrap gap-x-4 gap-y-2 text-[13px] ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="h-4 w-4" />
+              {ownerName}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="h-4 w-4" />
+              {contributorNames.length} contributor{contributorNames.length === 1 ? "" : "s"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock3 className="h-4 w-4" />
+              {formatTime(context.updatedAt)}
+            </span>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <div className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                Messages
+              </div>
+              <div className={`mt-1 text-sm leading-6 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                Read the captured conversation in order.
+              </div>
+            </div>
+            <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${isDarkMode ? "bg-sky-500/12 text-sky-200" : "bg-sky-50 text-sky-700"}`}>
+              {linkedMessages.length} in view
+            </span>
+          </div>
+
+          {linkedMessages.length === 0 ? (
+            <div className={`flex min-h-[260px] items-center justify-center rounded-[24px] border border-dashed px-6 text-center ${isDarkMode ? "border-slate-700/70 bg-[#0d151d] text-slate-500" : "border-slate-200 bg-white text-slate-500"}`}>
+              No linked messages yet.
+            </div>
+          ) : (
+            <div className={`overflow-hidden rounded-[22px] border pb-28 ${isDarkMode ? "border-slate-800 bg-[#0d151d]" : "border-slate-200 bg-white"}`}>
+              {linkedMessages.map(message => (
+                <ContextMessageRow key={message.id} message={message} isDarkMode={isDarkMode} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={`shrink-0 border-t px-4 py-3 ${isDarkMode ? "border-slate-800/90 bg-[#0b131c]" : "border-slate-200 bg-white"}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={onAddSelectedMessage}
+              disabled={!canAddSelectedMessage}
+              className={`rounded-full border px-4 py-2.5 text-sm font-medium ${
+                canAddSelectedMessage
+                  ? isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200" : "border-slate-200 bg-white text-slate-700"
+                  : isDarkMode ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-slate-500" : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+              }`}
+            >
+              Add selected
+            </button>
+            {onMarkDecision && (
+              <button onClick={onMarkDecision} className={`rounded-full border px-4 py-2.5 text-sm font-medium ${isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+                Mark decision
+              </button>
+            )}
+            <button onClick={onCreateTask} className={`rounded-full border px-4 py-2.5 text-sm font-medium ${isDarkMode ? "border-white/10 bg-white/[0.05] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+              Create task
+            </button>
+            {canEdit && (
+              <button onClick={onEdit} className={`ml-auto rounded-full px-4 py-2.5 text-sm font-semibold ${isDarkMode ? "bg-sky-500 text-white" : "bg-slate-900 text-white"}`}>
+                Edit
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto hidden min-h-0 h-full w-full max-w-[1540px] flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 md:flex lg:px-8 lg:py-7">
         <header className={cx("shrink-0 rounded-[1.9rem] border px-5 py-5 sm:px-6", isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_22px_55px_rgba(15,23,42,0.04)]")}>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
@@ -973,44 +1171,9 @@ function MessageFocusedContextPanel({
                   No linked messages yet.
                 </div>
               ) : (
-                <div className="space-y-4 pb-1">
-                  {linkedMessages.map((message, index) => (
-                    <div key={message.id} className="relative pl-5">
-                      {index < linkedMessages.length - 1 ? (
-                        <span className={cx("absolute left-[9px] top-16 bottom-[-18px] w-px", isDarkMode ? "bg-slate-800" : "bg-slate-200")} />
-                      ) : null}
-                      <span className={cx("absolute left-0 top-8 h-[10px] w-[10px] rounded-full", isDarkMode ? "bg-sky-400" : "bg-sky-500")} />
-
-                      <article className={`overflow-hidden rounded-[22px] border ${isDarkMode ? "border-slate-800/90 bg-[#0d151d]" : "border-slate-200/90 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]"}`}>
-                        <div className={`flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4 ${isDarkMode ? "border-slate-800/80" : "border-slate-200/80"}`}>
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] text-sm font-semibold ${isDarkMode ? "bg-white/[0.06] text-slate-100" : "bg-[#f3f5f7] text-slate-700"}`}>
-                              {getNameInitials(message.author)}
-                            </div>
-                            <div className="min-w-0">
-                              <div className={`truncate text-[15px] font-semibold ${isDarkMode ? "text-white" : "text-slate-900"}`}>
-                                {message.author}
-                              </div>
-                              <div className={`mt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-                                Message {String(index + 1).padStart(2, "0")}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <div className={`rounded-full px-3 py-1 text-xs font-medium ${isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-[#f3f5f7] text-slate-600"}`}>
-                              {formatTime(message.timestamp)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="px-5 py-5">
-                          <p className={`whitespace-pre-wrap break-words text-[15px] leading-8 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
-                            {getMessagePreview(message)}
-                          </p>
-                        </div>
-                      </article>
-                    </div>
+                <div className={`overflow-hidden rounded-[18px] ${isDarkMode ? "bg-[#0d151d]" : "bg-white"}`}>
+                  {linkedMessages.map(message => (
+                    <ContextMessageRow key={message.id} message={message} isDarkMode={isDarkMode} />
                   ))}
                 </div>
               )}
@@ -1464,7 +1627,7 @@ export function FilesList({ files, isDarkMode }) {
   )
 }
 
-export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloadFile }) {
+export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFile }) {
   if (!files.length) {
     return (
       <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
@@ -1493,6 +1656,15 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
           return (
             <div
               key={file.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenFile?.(file)}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault()
+                  onOpenFile?.(file)
+                }
+              }}
               className={`min-w-0 transition-all duration-200 hover:-translate-y-0.5 ${
                 isDarkMode
                   ? "sm:overflow-hidden sm:rounded-[1.5rem] sm:border sm:bg-[#16181c] sm:p-3 sm:border-slate-800 sm:hover:border-slate-700"
@@ -1513,18 +1685,6 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
                       {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={event => {
-                      event.stopPropagation()
-                      onDownloadFile?.(file)
-                    }}
-                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-slate-100"}`}
-                    title="Download file"
-                    aria-label={`Download ${file.name}`}
-                  >
-                    <MoreVertical className="h-3.5 w-3.5" />
-                  </button>
                 </div>
               </div>
 
@@ -1538,18 +1698,6 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onDownloa
                       {file.name}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={event => {
-                      event.stopPropagation()
-                      onDownloadFile?.(file)
-                    }}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isDarkMode ? "text-slate-400 hover:bg-slate-800" : "text-slate-500 hover:bg-white/80"}`}
-                    title="Download file"
-                    aria-label={`Download ${file.name}`}
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </button>
                 </div>
 
                 <FilePreview file={file} isDarkMode={isDarkMode} />

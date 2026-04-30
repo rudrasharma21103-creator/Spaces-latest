@@ -322,6 +322,15 @@ export const peekUsers = () => {
   return Array.isArray(data) ? data : []
 }
 
+export const peekSpacesForUser = userSpaceIds => {
+  if (!Array.isArray(userSpaceIds) || userSpaceIds.length === 0) return []
+  const { data } = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+  if (!Array.isArray(data) || data.length === 0) return []
+
+  const ids = new Set(userSpaceIds.map(id => String(id)))
+  return data.filter(space => ids.has(String(space?.id)))
+}
+
 export const getCurrentUser = async (options = {}) => {
   const { forceRefresh = false, cacheTtl = 5000 } = options
   const requestKey = "me"
