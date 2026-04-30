@@ -1,6 +1,17 @@
 import React, { startTransition, useState, useEffect, useRef, useMemo, useLayoutEffect } from "react"
 import {
   Send,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Link,
+  ListOrdered,
+  List,
+  AlignLeft,
+  Code2,
+  Braces,
+  Type,
   Hash,
   Users,
   Search,
@@ -82,6 +93,19 @@ import * as TasksService from "./services/tasks"
 import * as RolesService from "./services/roles"
 import * as DraftsService from "./services/drafts"
 import AdminDashboard from "./AdminDashboard"
+
+const COMPOSER_FORMAT_ACTIONS = [
+  { key: "bold", label: "Bold", icon: Bold },
+  { key: "italic", label: "Italic", icon: Italic },
+  { key: "underline", label: "Underline", icon: Underline },
+  { key: "strike", label: "Strikethrough", icon: Strikethrough },
+  { key: "link", label: "Link", icon: Link, dividerBefore: true },
+  { key: "ordered-list", label: "Numbered list", icon: ListOrdered },
+  { key: "bullet-list", label: "Bulleted list", icon: List },
+  { key: "quote", label: "Quote", icon: AlignLeft, dividerBefore: true },
+  { key: "inline-code", label: "Inline code", icon: Code2 },
+  { key: "code-block", label: "Code block", icon: Braces },
+]
 
 // Backend API base used for uploads and metadata fetches
 // Prefer explicit env `VITE_API_URL`. If it's missing or malformed (e.g. ":8000"),
@@ -397,6 +421,8 @@ export default function CollaborationApp() {
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
+  const [composerIsEmpty, setComposerIsEmpty] = useState(true)
+  const [showComposerFormatting, setShowComposerFormatting] = useState(false)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingMessageText, setEditingMessageText] = useState("")
   const [isSavingEditedMessage, setIsSavingEditedMessage] = useState(false)
@@ -747,6 +773,8 @@ export default function CollaborationApp() {
   const chatSocketRef = useRef(null)
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
+  const composerEditorRef = useRef(null)
+  const composerLastValueRef = useRef("")
   const previousActiveChatIdRef = useRef(null)
   const previousChannelTabRef = useRef("messages")
   const restoreMessageScrollRef = useRef(false)
@@ -4015,14 +4043,14 @@ export default function CollaborationApp() {
     return filteredUser
   }
 
-  const renderWithHighlight = (text, highlight) => {
+  const renderHighlightedText = (text, highlight, keyPrefix = "text") => {
     if (!highlight || !text) return text
     const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     const parts = text.split(new RegExp(`(${escapedHighlight})`, "gi"))
     return parts.map((part, i) =>
       part.toLowerCase() === highlight.toLowerCase() ? (
         <span
-          key={i}
+          key={`${keyPrefix}-${i}`}
           className="bg-yellow-300 text-slate-900 px-0.5 rounded shadow-sm"
         >
           {part}
@@ -4031,6 +4059,115 @@ export default function CollaborationApp() {
         part
       )
     )
+  }
+
+  const renderFormattedInline = (text, highlight, keyPrefix = "inline") => {
+    if (!text) return null
+    const tokenPattern = /(\*\*[^*]+\*\*|~~[^~]+~~|<u>[\s\S]*?<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\)|_[^_]+_)/g
+    const nodes = []
+    let cursor = 0
+    let match
+
+    while ((match = tokenPattern.exec(text)) !== null) {
+      if (match.index > cursor) {
+        nodes.push(renderHighlightedText(text.slice(cursor, match.index), highlight, `${keyPrefix}-plain-${nodes.length}`))
+      }
+
+      const token = match[0]
+      const key = `${keyPrefix}-fmt-${nodes.length}`
+      if (token.startsWith("**") && token.endsWith("**")) {
+        nodes.push(<strong key={key}>{renderHighlightedText(token.slice(2, -2), highlight, key)}</strong>)
+      } else if (token.startsWith("~~") && token.endsWith("~~")) {
+        nodes.push(<s key={key}>{renderHighlightedText(token.slice(2, -2), highlight, key)}</s>)
+      } else if (token.startsWith("<u>") && token.endsWith("</u>")) {
+        nodes.push(<u key={key}>{renderHighlightedText(token.slice(3, -4), highlight, key)}</u>)
+      } else if (token.startsWith("`") && token.endsWith("`")) {
+        nodes.push(
+          <code key={key} className={`rounded px-1.5 py-0.5 text-[0.92em] ${isDarkMode ? "bg-white/10 text-sky-100" : "bg-slate-100 text-slate-800"}`}>
+            {token.slice(1, -1)}
+          </code>
+        )
+      } else if (token.startsWith("[") && token.includes("](") && token.endsWith(")")) {
+        const labelEnd = token.indexOf("](")
+        const label = token.slice(1, labelEnd)
+        const href = token.slice(labelEnd + 2, -1)
+        const safeHref = /^(https?:\/\/|mailto:)/i.test(href) ? href : `https://${href.replace(/^\/+/, "")}`
+        nodes.push(
+          <a key={key} href={safeHref} target="_blank" rel="noreferrer" className={isDarkMode ? "text-sky-300 underline" : "text-sky-700 underline"}>
+            {renderHighlightedText(label, highlight, key)}
+          </a>
+        )
+      } else if (token.startsWith("_") && token.endsWith("_")) {
+        nodes.push(<em key={key}>{renderHighlightedText(token.slice(1, -1), highlight, key)}</em>)
+      }
+
+      cursor = match.index + token.length
+    }
+
+    if (cursor < text.length) {
+      nodes.push(renderHighlightedText(text.slice(cursor), highlight, `${keyPrefix}-plain-${nodes.length}`))
+    }
+
+    return nodes
+  }
+
+  const renderFormattedLine = (line, highlight, keyPrefix) => {
+    const orderedMatch = line.match(/^\s*(\d+)\.\s+(.*)$/)
+    if (orderedMatch) {
+      return (
+        <div key={keyPrefix} className="flex gap-2">
+          <span className="min-w-5 text-right opacity-60">{orderedMatch[1]}.</span>
+          <span>{renderFormattedInline(orderedMatch[2], highlight, `${keyPrefix}-ordered`)}</span>
+        </div>
+      )
+    }
+
+    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/)
+    if (bulletMatch) {
+      return (
+        <div key={keyPrefix} className="flex gap-2">
+          <span className="opacity-60">•</span>
+          <span>{renderFormattedInline(bulletMatch[1], highlight, `${keyPrefix}-bullet`)}</span>
+        </div>
+      )
+    }
+
+    const quoteMatch = line.match(/^\s*>\s+(.*)$/)
+    if (quoteMatch) {
+      return (
+        <div key={keyPrefix} className={`border-l-2 pl-3 ${isDarkMode ? "border-slate-600 text-slate-300" : "border-slate-300 text-slate-700"}`}>
+          {renderFormattedInline(quoteMatch[1], highlight, `${keyPrefix}-quote`)}
+        </div>
+      )
+    }
+
+    return <div key={keyPrefix}>{renderFormattedInline(line, highlight, keyPrefix)}</div>
+  }
+
+  const renderWithHighlight = (text, highlight) => {
+    if (!text) return text
+    const segments = String(text).split(/```([\s\S]*?)```/g)
+
+    return segments.map((segment, index) => {
+      if (index % 2 === 1) {
+        return (
+          <pre key={`code-block-${index}`} className={`my-2 overflow-x-auto rounded-xl px-3 py-2 text-xs ${isDarkMode ? "bg-black/25 text-sky-100" : "bg-slate-100 text-slate-800"}`}>
+            <code>{segment}</code>
+          </pre>
+        )
+      }
+
+      const lines = segment.split("\n")
+      if (lines.length === 1) {
+        return <React.Fragment key={`text-block-${index}`}>{renderFormattedInline(segment, highlight, `text-block-${index}`)}</React.Fragment>
+      }
+
+      return (
+        <div key={`text-block-${index}`} className="space-y-1">
+          {lines.map((line, lineIndex) => renderFormattedLine(line, highlight, `line-${index}-${lineIndex}`))}
+        </div>
+      )
+    })
   }
 
   const currentSpace = useMemo(
@@ -4182,7 +4319,7 @@ export default function CollaborationApp() {
   }
 
   const saveWorkspaceDraft = async () => {
-    const text = messageInput.trim()
+    const text = syncComposerInputFromEditor().trim()
     if (!text || !currentUser) return
 
     if (activeView === "channel" && activeChannel) {
@@ -4195,7 +4332,7 @@ export default function CollaborationApp() {
         spaceId: activeSpace,
         channelId: activeChannel,
       })
-      setMessageInput("")
+      resetComposerEditor()
       setSelectedFiles([])
       setActiveDraftId(null)
       return
@@ -4211,7 +4348,7 @@ export default function CollaborationApp() {
         recipientId: activeDMUser,
         recipientName: friend?.name || "",
       })
-      setMessageInput("")
+      resetComposerEditor()
       setSelectedFiles([])
       setActiveDraftId(null)
     }
@@ -5836,8 +5973,361 @@ export default function CollaborationApp() {
     }
   }
 
+  const COMPOSER_EMPTY_MARKER = "\u200B"
+
+  const escapeHtml = value =>
+    String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+
+  const normalizeComposerUrl = value => {
+    const trimmed = String(value || "").trim()
+    if (!trimmed) return ""
+    if (/^(https?:\/\/|mailto:)/i.test(trimmed)) return trimmed
+    return `https://${trimmed.replace(/^\/+/, "")}`
+  }
+
+  const markdownInlineToComposerHtml = value => {
+    const tokenPattern = /(\*\*[^*]+\*\*|~~[^~]+~~|<u>[\s\S]*?<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\)|_[^_]+_)/g
+    const text = String(value || "")
+    let html = ""
+    let cursor = 0
+    let match
+
+    while ((match = tokenPattern.exec(text)) !== null) {
+      html += escapeHtml(text.slice(cursor, match.index))
+      const token = match[0]
+
+      if (token.startsWith("**") && token.endsWith("**")) {
+        html += `<strong>${escapeHtml(token.slice(2, -2))}</strong>`
+      } else if (token.startsWith("~~") && token.endsWith("~~")) {
+        html += `<s>${escapeHtml(token.slice(2, -2))}</s>`
+      } else if (token.startsWith("<u>") && token.endsWith("</u>")) {
+        html += `<u>${escapeHtml(token.slice(3, -4))}</u>`
+      } else if (token.startsWith("`") && token.endsWith("`")) {
+        html += `<code>${escapeHtml(token.slice(1, -1))}</code>`
+      } else if (token.startsWith("[") && token.includes("](") && token.endsWith(")")) {
+        const labelEnd = token.indexOf("](")
+        const label = token.slice(1, labelEnd)
+        const href = normalizeComposerUrl(token.slice(labelEnd + 2, -1))
+        html += href
+          ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+          : escapeHtml(label)
+      } else if (token.startsWith("_") && token.endsWith("_")) {
+        html += `<em>${escapeHtml(token.slice(1, -1))}</em>`
+      }
+
+      cursor = match.index + token.length
+    }
+
+    html += escapeHtml(text.slice(cursor))
+    return html
+  }
+
+  const markdownToComposerHtml = value => {
+    const text = String(value || "")
+    if (!text) return ""
+    const segments = text.split(/```([\s\S]*?)```/g)
+
+    return segments
+      .map((segment, index) => {
+        if (index % 2 === 1) {
+          return `<pre><code>${escapeHtml(segment.replace(/^\n|\n$/g, ""))}</code></pre>`
+        }
+
+        const lines = segment.split("\n")
+        let html = ""
+        let openList = null
+
+        const closeList = () => {
+          if (openList) {
+            html += `</${openList}>`
+            openList = null
+          }
+        }
+
+        lines.forEach(line => {
+          const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/)
+          const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/)
+
+          if (orderedMatch || bulletMatch) {
+            const listTag = orderedMatch ? "ol" : "ul"
+            if (openList !== listTag) {
+              closeList()
+              html += `<${listTag}>`
+              openList = listTag
+            }
+            html += `<li>${markdownInlineToComposerHtml(orderedMatch ? orderedMatch[1] : bulletMatch[1])}</li>`
+            return
+          }
+
+          closeList()
+          html += line ? `<div>${markdownInlineToComposerHtml(line)}</div>` : "<div><br></div>"
+        })
+
+        closeList()
+        return html
+      })
+      .join("")
+  }
+
+  const composerNodeToMarkdown = node => {
+    if (!node) return ""
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.nodeValue.replaceAll(COMPOSER_EMPTY_MARKER, "")
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return ""
+
+    const tag = node.tagName.toLowerCase()
+    const childMarkdown = () => Array.from(node.childNodes).map(composerNodeToMarkdown).join("")
+
+    if (tag === "br") return "\n"
+    if (tag === "strong" || tag === "b") {
+      const content = childMarkdown()
+      return content ? `**${content}**` : ""
+    }
+    if (tag === "em" || tag === "i") {
+      const content = childMarkdown()
+      return content ? `_${content}_` : ""
+    }
+    if (tag === "u") {
+      const content = childMarkdown()
+      return content ? `<u>${content}</u>` : ""
+    }
+    if (tag === "s" || tag === "strike" || tag === "del") {
+      const content = childMarkdown()
+      return content ? `~~${content}~~` : ""
+    }
+    if (tag === "a") {
+      const label = childMarkdown()
+      const href = normalizeComposerUrl(node.getAttribute("href"))
+      return label && href ? `[${label}](${href})` : label
+    }
+    if (tag === "code" && node.parentElement?.tagName?.toLowerCase() !== "pre") {
+      const content = childMarkdown()
+      return content ? `\`${content}\`` : ""
+    }
+    if (tag === "pre") {
+      const code = node.textContent.replaceAll(COMPOSER_EMPTY_MARKER, "").replace(/\n$/g, "")
+      return code ? `\`\`\`\n${code}\n\`\`\`\n` : ""
+    }
+    if (tag === "ol" || tag === "ul") {
+      const items = Array.from(node.children)
+        .filter(child => child.tagName?.toLowerCase() === "li")
+        .map(child => composerNodeToMarkdown(child).replace(/\n+$/g, ""))
+        .filter(item => item.trim())
+        .map((item, index) => {
+          const marker = tag === "ol" ? `${index + 1}. ` : "- "
+          return `${marker}${item}`
+        })
+      return items.length ? `${items.join("\n")}\n` : ""
+    }
+    if (tag === "blockquote") {
+      return childMarkdown()
+        .split("\n")
+        .filter(Boolean)
+        .map(line => `> ${line}`)
+        .join("\n")
+    }
+    if (tag === "li") return childMarkdown()
+    if (tag === "div" || tag === "p") return `${childMarkdown()}\n`
+
+    return childMarkdown()
+  }
+
+  const getComposerMarkdown = () => {
+    const editor = composerEditorRef.current
+    if (!editor) return messageInput
+    return Array.from(editor.childNodes)
+      .map(composerNodeToMarkdown)
+      .join("")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\s+$/g, "")
+  }
+
+  const syncComposerInputFromEditor = () => {
+    const nextValue = getComposerMarkdown()
+    composerLastValueRef.current = nextValue
+    setMessageInput(nextValue)
+    setComposerIsEmpty(!nextValue.trim())
+    return nextValue
+  }
+
+  const resetComposerEditor = () => {
+    const editor = composerEditorRef.current
+    if (editor) editor.innerHTML = ""
+    composerLastValueRef.current = ""
+    setMessageInput("")
+    setComposerIsEmpty(true)
+  }
+
+  const selectComposerRange = (node, offset = 0) => {
+    const selection = window.getSelection?.()
+    if (!selection) return
+    const range = document.createRange()
+    range.setStart(node, offset)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  const ensureComposerRange = () => {
+    const editor = composerEditorRef.current
+    if (!editor) return null
+    editor.focus()
+
+    const selection = window.getSelection?.()
+    if (selection?.rangeCount && editor.contains(selection.anchorNode) && editor.contains(selection.focusNode)) {
+      return selection.getRangeAt(0)
+    }
+
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return range
+  }
+
+  const insertComposerInlineElement = tagName => {
+    const range = ensureComposerRange()
+    if (!range) return
+
+    const element = document.createElement(tagName)
+    if (range.collapsed) {
+      const marker = document.createTextNode(COMPOSER_EMPTY_MARKER)
+      element.appendChild(marker)
+      range.insertNode(element)
+      selectComposerRange(marker, marker.length)
+      return
+    }
+
+    element.appendChild(range.extractContents())
+    range.insertNode(element)
+
+    const selection = window.getSelection?.()
+    const nextRange = document.createRange()
+    nextRange.selectNodeContents(element)
+    selection?.removeAllRanges()
+    selection?.addRange(nextRange)
+  }
+
+  const applyComposerLink = () => {
+    const range = ensureComposerRange()
+    if (!range) return
+
+    const href = normalizeComposerUrl(window.prompt("Enter link URL", "https://") || "")
+    if (!href) return
+
+    if (range.collapsed) {
+      const anchor = document.createElement("a")
+      anchor.href = href
+      const marker = document.createTextNode(COMPOSER_EMPTY_MARKER)
+      anchor.appendChild(marker)
+      range.insertNode(anchor)
+      selectComposerRange(marker, marker.length)
+      syncComposerInputFromEditor()
+      return
+    }
+
+    const selection = window.getSelection?.()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    document.execCommand("createLink", false, href)
+    syncComposerInputFromEditor()
+  }
+
+  const applyComposerCodeBlock = () => {
+    const range = ensureComposerRange()
+    if (!range) return
+
+    if (!range.collapsed) {
+      const pre = document.createElement("pre")
+      const code = document.createElement("code")
+      code.textContent = range.toString()
+      pre.appendChild(code)
+      range.deleteContents()
+      range.insertNode(pre)
+
+      const selection = window.getSelection?.()
+      const nextRange = document.createRange()
+      nextRange.setStartAfter(pre)
+      nextRange.collapse(true)
+      selection?.removeAllRanges()
+      selection?.addRange(nextRange)
+      syncComposerInputFromEditor()
+      return
+    }
+
+    document.execCommand("formatBlock", false, "pre")
+    syncComposerInputFromEditor()
+  }
+
+  const runComposerCommand = (command, value = null) => {
+    if (!ensureComposerRange()) return
+    document.execCommand(command, false, value)
+    syncComposerInputFromEditor()
+  }
+
+  const applyComposerFormat = format => {
+    switch (format) {
+      case "bold":
+        runComposerCommand("bold")
+        break
+      case "italic":
+        runComposerCommand("italic")
+        break
+      case "underline":
+        runComposerCommand("underline")
+        break
+      case "strike":
+        runComposerCommand("strikeThrough")
+        break
+      case "link":
+        applyComposerLink()
+        break
+      case "ordered-list":
+        runComposerCommand("insertOrderedList")
+        break
+      case "bullet-list":
+        runComposerCommand("insertUnorderedList")
+        break
+      case "quote":
+        runComposerCommand("formatBlock", "blockquote")
+        break
+      case "inline-code":
+        insertComposerInlineElement("code")
+        syncComposerInputFromEditor()
+        break
+      case "code-block":
+        applyComposerCodeBlock()
+        break
+      default:
+        break
+    }
+  }
+
+  useEffect(() => {
+    const editor = composerEditorRef.current
+    if (!editor) return
+
+    const editorHasSyncedContent = messageInput
+      ? Boolean(editor.innerHTML)
+      : !editor.textContent?.replaceAll(COMPOSER_EMPTY_MARKER, "").trim()
+
+    if (messageInput === composerLastValueRef.current && editorHasSyncedContent) return
+
+    editor.innerHTML = markdownToComposerHtml(messageInput)
+    composerLastValueRef.current = messageInput
+    setComposerIsEmpty(!messageInput.trim())
+  }, [messageInput, activeView, activeChannel, activeDMUser])
+
   const sendMessage = async () => {
-    if ((!messageInput.trim() && selectedFiles.length === 0) || !currentUser)
+    const composerText = syncComposerInputFromEditor()
+    if ((!composerText.trim() && selectedFiles.length === 0) || !currentUser)
       return
     const chatId = getActiveChatId()
     if (!chatId) return
@@ -5848,7 +6338,7 @@ export default function CollaborationApp() {
     const newMsg = {
       id: tempId,
       userId: currentUser.id,
-      text: messageInput,
+      text: composerText,
       timestamp: new Date().toISOString(),
       reactions: {},
       thread: [],
@@ -5864,7 +6354,7 @@ export default function CollaborationApp() {
       ...prev,
       [chatId]: [...(prev[chatId] || []), newMsg]
     }))
-    setMessageInput("")
+    resetComposerEditor()
     setSelectedFiles([])
     setSelectedComposerContextId(null)
     setComposerContextPickerOpen(false)
@@ -11116,6 +11606,39 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
+                    {showComposerFormatting && (
+                      <div className={`mx-2 mb-2 flex flex-wrap items-center gap-1 rounded-[1.35rem] border px-2 py-2 ${
+                        isDarkMode
+                          ? 'border-slate-700/80 bg-slate-900/60'
+                          : 'border-slate-200/80 bg-white/75'
+                      }`}>
+                        {COMPOSER_FORMAT_ACTIONS.map(action => {
+                          const FormatIcon = action.icon
+                          return (
+                            <React.Fragment key={action.key}>
+                              {action.dividerBefore && (
+                                <span className={`mx-1 h-6 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                              )}
+                              <button
+                                type="button"
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => applyComposerFormat(action.key)}
+                                className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
+                                  isDarkMode
+                                    ? 'text-slate-300 hover:bg-slate-800 hover:text-cyan-300'
+                                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                                }`}
+                                title={action.label}
+                                aria-label={action.label}
+                              >
+                                <FormatIcon className="h-5 w-5" />
+                              </button>
+                            </React.Fragment>
+                          )
+                        })}
+                      </div>
+                    )}
+
                     <div className="flex items-end gap-2 px-2 pb-1 relative">
                       <div className="relative">
                         <button
@@ -11226,20 +11749,62 @@ export default function CollaborationApp() {
                         onChange={handleFileSelect}
                       />
 
-                      <textarea
-                        rows={1}
-                        placeholder={`Message ${getActiveViewName()}`}
-                        value={messageInput}
-                        onChange={e => setMessageInput(e.target.value)}
-                        onKeyPress={e => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault()
-                            sendMessage()
-                          }
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowComposerFormatting(prev => !prev)
+                          setComposerAttachMenuOpen(false)
+                          setComposerContextPickerOpen(false)
                         }}
-                        className={`flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 resize-none leading-relaxed font-medium ${isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'}`}
-                        style={{ minHeight: "48px" }}
-                      />
+                        className={`p-3 mb-1 rounded-full transition-colors ${
+                          showComposerFormatting
+                            ? isDarkMode
+                              ? 'bg-slate-800 text-cyan-300'
+                              : 'bg-white text-sky-700'
+                            : isDarkMode
+                              ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400'
+                              : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'
+                        }`}
+                        title={showComposerFormatting ? "Hide formatting" : "Show formatting"}
+                        aria-label={showComposerFormatting ? "Hide formatting options" : "Show formatting options"}
+                        aria-pressed={showComposerFormatting}
+                      >
+                        <Type className="w-5 h-5" />
+                      </button>
+
+                      <div className="relative flex-1">
+                        {composerIsEmpty && (
+                          <span
+                            className={`pointer-events-none absolute left-0 top-3.5 font-medium ${
+                              isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                            }`}
+                          >
+                            {`Message ${getActiveViewName()}`}
+                          </span>
+                        )}
+                        <div
+                          ref={composerEditorRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          role="textbox"
+                          aria-label={`Message ${getActiveViewName()}`}
+                          aria-multiline="true"
+                          onInput={syncComposerInputFromEditor}
+                          onBlur={syncComposerInputFromEditor}
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault()
+                              sendMessage()
+                            }
+                          }}
+                          className={`w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed font-medium [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:px-3 [&_pre]:py-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
+                            isDarkMode
+                              ? 'text-white [&_a]:text-sky-300 [&_blockquote]:border-slate-600 [&_code]:bg-white/10 [&_code]:text-sky-100 [&_pre]:bg-black/25'
+                              : 'text-slate-800 [&_a]:text-sky-700 [&_blockquote]:border-slate-300 [&_code]:bg-slate-100 [&_code]:text-slate-800 [&_pre]:bg-slate-100'
+                          }`}
+                          style={{ minHeight: "48px" }}
+                        />
+                      </div>
 
                       {(activeView === "channel" || activeView === "dm") && (
                         <button
