@@ -58,6 +58,137 @@ def _message_filter(chat_id: str, message_id):
     return {"chatId": chat_id, "message.id": {"$in": _message_id_candidates(str(message_id))}}
 
 
+def _extract_id(value):
+    if value is None:
+        return None
+    try:
+        if isinstance(value, dict):
+            if "id" in value:
+                return str(value.get("id"))
+            if "userId" in value:
+                return str(value.get("userId"))
+            if "_id" in value:
+                nested_id = value.get("_id")
+                if isinstance(nested_id, dict) and "$oid" in nested_id:
+                    return str(nested_id.get("$oid"))
+                return str(nested_id)
+    except Exception:
+        pass
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _id_in_list(uid, values):
+    if uid is None or not values:
+        return False
+
+    expected = str(uid)
+    for item in values:
+        if _extract_id(item) == expected:
+            return True
+    return False
+
+
+def _normalized_chat_ids(chat_id: str):
+    normalized_ids = {chat_id}
+    try:
+        normalized_ids.add(str(chat_id))
+    except Exception:
+        pass
+
+    try:
+        cid = int(chat_id)
+        normalized_ids.add(cid)
+        normalized_ids.add(str(cid))
+    except Exception:
+        pass
+
+    return normalized_ids
+
+
+def _get_channel_role(chat_id: str, user_id: int):
+    if user_id is None:
+        return None
+
+    # DMs have no owner/admin moderation role. A participant can only manage
+    # their own messages.
+    if isinstance(chat_id, str) and chat_id.startswith("dm_"):
+        try:
+            parts = chat_id.split("_")
+            ids = [int(parts[1]), int(parts[2])]
+            return "member" if user_id in ids else None
+        except Exception:
+            return None
+
+    normalized_ids = _normalized_chat_ids(chat_id)
+    space = spaces_collection.find_one({
+        "channels.id": {"$in": list(normalized_ids)}
+    }, {"ownerId": 1, "createdBy": 1, "members": 1, "channels.id": 1, "channels.members": 1, "channels.roles": 1})
+    if not space:
+        return None
+
+    target_str_ids = {str(val) for val in normalized_ids if val is not None}
+    channel = None
+    for ch in (space.get("channels") or []):
+        if str(ch.get("id")) in target_str_ids:
+            channel = ch
+            break
+    if not channel:
+        return None
+
+    owner_id = space.get("ownerId") or space.get("createdBy")
+    if _extract_id(owner_id) == str(user_id):
+        return "owner"
+
+    roles = channel.get("roles") or {}
+    explicit_role = roles.get(str(user_id))
+    if explicit_role in ("owner", "admin", "member"):
+        return explicit_role
+
+    if _id_in_list(user_id, channel.get("members") or []) or _id_in_list(user_id, space.get("members") or []):
+        return "member"
+
+    return None
+
+
+def _message_owner_id(message: dict):
+    for key in ("userId", "user_id", "createdBy", "created_by", "senderId", "sender_id"):
+        owner = _extract_id(message.get(key))
+        if owner is not None:
+            return owner
+    return None
+
+
+def _can_delete_message(chat_id: str, user_id: int, message: dict):
+    if user_id is None or not message:
+        return False
+
+    if _message_owner_id(message) == str(user_id):
+        return True
+
+    return _get_channel_role(chat_id, user_id) in ("owner", "admin")
+
+
+def _attachment_matches(attachment: dict, attachment_id: str):
+    if not attachment or attachment_id is None:
+        return False
+
+    candidates = (
+        "id",
+        "fileId",
+        "drive_file_id",
+        "driveId",
+        "url",
+        "public_url",
+        "webViewLink",
+        "name",
+    )
+    target = str(attachment_id)
+    return any(attachment.get(key) is not None and str(attachment.get(key)) == target for key in candidates)
+
+
 def _check_channel_access(chat_id: str, user_id: int):
     cache_key = (str(chat_id), str(user_id))
     cached = _channel_access_cache.get(cache_key)
@@ -78,19 +209,7 @@ def _check_channel_access(chat_id: str, user_id: int):
 
     # Normalize id representations so we can match regardless of whether Mongo stored the channel
     # id as an int or a string (PyMongo may store JSON numbers as strings depending on source data).
-    normalized_ids = set()
-    normalized_ids.add(chat_id)
-    try:
-        normalized_ids.add(str(chat_id))
-    except Exception:
-        pass
-
-    try:
-        cid = int(chat_id)
-        normalized_ids.add(cid)
-        normalized_ids.add(str(cid))
-    except Exception:
-        cid = None
+    normalized_ids = _normalized_chat_ids(chat_id)
 
     # Find the space and channel that contains this channel id, using any normalized form
     space = spaces_collection.find_one({
@@ -118,47 +237,6 @@ def _check_channel_access(chat_id: str, user_id: int):
     space_members = space.get("members") or []
 
     channel_members = channel.get("members") or []
-
-    # Helper: compare ids type-insensitively (str/int)
-    def _id_in_list(uid, lst):
-        if uid is None or not lst:
-            return False
-
-        # Normalize a member entry into a comparable id string
-        def _extract_id(x):
-            if x is None:
-                return None
-            # If it's a dict-like object, try common id fields
-            try:
-                if isinstance(x, dict):
-                    if "id" in x:
-                        return str(x.get("id"))
-                    if "userId" in x:
-                        return str(x.get("userId"))
-                    if "_id" in x:
-                        # support nested {_id: {"$oid": ...}} or plain _id
-                        val = x.get("_id")
-                        if isinstance(val, dict) and "$oid" in val:
-                            return str(val.get("$oid"))
-                        return str(val)
-            except Exception:
-                pass
-
-            # Fallback: primitive values (int/str)
-            try:
-                return str(x)
-            except Exception:
-                return None
-
-        s_uid = str(uid)
-        for item in lst:
-            try:
-                item_id = _extract_id(item)
-                if item_id is not None and item_id == s_uid:
-                    return True
-            except Exception:
-                continue
-        return False
 
     # Compare owner id type-insensitively as well
     # Normalize owner id which may be stored as a number, string or nested dict
@@ -200,6 +278,10 @@ def _fetch_messages(chat_id: str):
     return [d["message"] for d in docs]
 
 
+def _fetch_message_document(chat_id: str, message_id: str):
+    return messages_collection.find_one(_message_filter(chat_id, message_id), {"_id": 0})
+
+
 def _count_messages(chat_id: str):
     return messages_collection.count_documents({"chatId": chat_id})
 
@@ -219,6 +301,40 @@ def _save_message_document(chat_id: str, message: dict):
 
 def _delete_message_documents(chat_id: str, message_id: str):
     return messages_collection.delete_many(_message_filter(chat_id, message_id))
+
+
+def _remove_message_attachment(chat_id: str, message_id: str, attachment_id: str):
+    doc = _fetch_message_document(chat_id, message_id)
+    if not doc or not doc.get("message"):
+        return {"found": False}
+
+    message = doc["message"]
+    attachments = message.get("attachments") or []
+    remaining = [att for att in attachments if not _attachment_matches(att, attachment_id)]
+    if len(remaining) == len(attachments):
+        return {"found": True, "attachment_found": False, "message": message}
+
+    message["attachments"] = remaining
+    text = str(message.get("text") or "").strip()
+    if not remaining and not text:
+        res = _delete_message_documents(chat_id, message_id)
+        return {
+            "found": True,
+            "attachment_found": True,
+            "message_deleted": res.deleted_count > 0,
+            "message": message,
+        }
+
+    messages_collection.update_one(
+        _message_filter(chat_id, message_id),
+        {"$set": {"message.attachments": remaining, "message.attachmentsUpdatedAt": time.time()}}
+    )
+    return {
+        "found": True,
+        "attachment_found": True,
+        "message_deleted": False,
+        "message": message,
+    }
 
 
 @router.get("/{chat_id}")
@@ -279,12 +395,53 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
     return {"status": "updated"}
 
 
+@router.delete("/{chat_id}/{message_id}/attachments/{attachment_id}")
+async def delete_message_attachment(request: Request, chat_id: str, message_id: str, attachment_id: str):
+    user_id = _get_user_id_from_request(request)
+    has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
+    if user_id is None or not has_access:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    doc = await run_in_threadpool(_fetch_message_document, chat_id, message_id)
+    if not doc or not doc.get("message"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    message = doc["message"]
+    if not _can_delete_message(chat_id, user_id, message):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete another user's file")
+
+    result = await run_in_threadpool(_remove_message_attachment, chat_id, message_id, attachment_id)
+    if not result.get("attachment_found"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    try:
+        if result.get("message_deleted"):
+            await manager.broadcast(chat_id, {
+                "type": "message_deleted",
+                "chatId": chat_id,
+                "messageId": message_id,
+            })
+        else:
+            await manager.broadcast(chat_id, result.get("message"))
+    except Exception:
+        pass
+
+    return {"status": "deleted", "messageDeleted": bool(result.get("message_deleted"))}
+
+
 @router.delete("/{chat_id}/{message_id}")
 async def delete_message(request: Request, chat_id: str, message_id: str):
     user_id = _get_user_id_from_request(request)
     has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
     if user_id is None or not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    doc = await run_in_threadpool(_fetch_message_document, chat_id, message_id)
+    if not doc or not doc.get("message"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    if not _can_delete_message(chat_id, user_id, doc["message"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete another user's message")
 
     res = await run_in_threadpool(_delete_message_documents, chat_id, message_id)
 

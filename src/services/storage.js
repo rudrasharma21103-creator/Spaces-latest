@@ -881,6 +881,37 @@ export const deleteMessage = async (chatId, messageId) => {
   }
 }
 
+export const deleteMessageAttachment = async (chatId, messageId, attachmentId) => {
+  if (!chatId || !messageId || !attachmentId) return { status: "skipped" }
+
+  const attachmentMatches = attachment =>
+    [attachment?.id, attachment?.fileId, attachment?.drive_file_id, attachment?.driveId, attachment?.url, attachment?.public_url, attachment?.webViewLink, attachment?.name]
+      .some(value => value !== undefined && value !== null && String(value) === String(attachmentId))
+
+  try {
+    const cached = peekMessages(chatId)
+    const next = Array.isArray(cached)
+      ? cached.flatMap(message => {
+          if (String(message.id) !== String(messageId)) return [message]
+          const remaining = (message.attachments || []).filter(attachment => !attachmentMatches(attachment))
+          if (remaining.length === 0 && !String(message.text || "").trim()) return []
+          return [{ ...message, attachments: remaining }]
+        })
+      : []
+    writeMessagesCache(chatId, next)
+    writeMessageCountCache(chatId, next.length)
+  } catch (e) {}
+
+  const res = await authFetch(`${API_BASE}/messages/${chatId}/${messageId}/attachments/${encodeURIComponent(String(attachmentId))}`, {
+    method: "DELETE"
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(data?.detail || `Failed to delete file (${res.status})`)
+  }
+  return data
+}
+
 export const getContextState = async chatId => {
   if (!chatId) return { chatId: null, contexts: [], decisions: [], tasks: [] }
   const requestKey = String(chatId)

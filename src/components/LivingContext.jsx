@@ -1690,7 +1690,7 @@ export function FilesList({ files, isDarkMode }) {
   )
 }
 
-export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFile }) {
+export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFile, onDeleteFile }) {
   if (!files.length) {
     return (
       <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
@@ -1748,6 +1748,24 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                       {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
                     </div>
                   </div>
+                  {file.canDelete && (
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation()
+                        onDeleteFile?.(file)
+                      }}
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors ${
+                        isDarkMode
+                          ? "bg-rose-500/15 text-rose-200 hover:bg-rose-500/25"
+                          : "bg-white text-rose-600 hover:bg-rose-50"
+                      }`}
+                      title={`Delete ${file.name}`}
+                      aria-label={`Delete ${file.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1781,22 +1799,42 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                         </div>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={event => {
-                        event.stopPropagation()
-                        onAttachFile?.(file)
-                      }}
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
-                        isDarkMode
-                          ? "bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
-                          : "bg-white text-sky-700 hover:bg-sky-50"
-                      }`}
-                      title={`Attach ${file.name} to message`}
-                      aria-label={`Attach ${file.name} to message`}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {file.canDelete && (
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation()
+                            onDeleteFile?.(file)
+                          }}
+                          className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                            isDarkMode
+                              ? "bg-rose-500/15 text-rose-200 hover:bg-rose-500/25"
+                              : "bg-white text-rose-600 hover:bg-rose-50"
+                          }`}
+                          title={`Delete ${file.name}`}
+                          aria-label={`Delete ${file.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={event => {
+                          event.stopPropagation()
+                          onAttachFile?.(file)
+                        }}
+                        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                          isDarkMode
+                            ? "bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
+                            : "bg-white text-sky-700 hover:bg-sky-50"
+                        }`}
+                        title={`Attach ${file.name} to message`}
+                        aria-label={`Attach ${file.name} to message`}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -4543,6 +4543,22 @@ export default function CollaborationApp() {
     return roles[String(memberId)] || 'member'
   }
 
+  const canModerateCurrentChannel = () => {
+    if (!currentUser) return false
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    if (resolvedView !== "channel") return false
+    const currentSpace = getCurrentSpace()
+    if (currentSpace && String(currentSpace.ownerId) === String(currentUser.id)) return true
+    const role = getChannelRole(currentUser.id)
+    return role === "owner" || role === "admin"
+  }
+
+  const canDeleteMessage = message => {
+    if (!message || !currentUser) return false
+    if (String(message.userId) === String(currentUser.id)) return true
+    return canModerateCurrentChannel()
+  }
+
   const MAX_MESSAGE_SEND_RETRIES = 3
 
   const sanitizeMessagePayload = message => {
@@ -5386,22 +5402,29 @@ export default function CollaborationApp() {
 
   const currentChannelFiles = useMemo(
     () =>
-      currentMessages.flatMap(message =>
-        (message.attachments || []).map(att => ({
-          id: `${message.id}-${att.fileId || att.id}`,
-          name: att.name || "Attachment",
-          messageId: message.id,
-          messageLabel: message.text || "Shared in channel",
-          sourceLabel: att.source || "chat",
-          fileId: att.fileId || att.id,
-          author: getUser(message.userId)?.name || "Unknown",
-          timestamp: message.timestamp,
-          url: att.url || att.public_url || att.webViewLink || null,
-          mimeType: att.type || att.mimeType || att.mimetype || "",
-          size: att.size || 0,
-        }))
-      ),
-    [currentMessages, usersById]
+      currentMessages
+        .flatMap(message =>
+          (message.attachments || []).map((att, index) => ({
+            id: `${message.id}-${att.fileId || att.id || index}`,
+            name: att.name || "Attachment",
+            messageId: message.id,
+            messageLabel: message.text || "Shared in channel",
+            sourceLabel: att.source || "chat",
+            fileId: att.fileId || att.id || att.drive_file_id || att.driveId || att.url || att.webViewLink || att.name,
+            author: getUser(message.userId)?.name || "Unknown",
+            timestamp: message.timestamp,
+            url: att.url || att.public_url || att.webViewLink || null,
+            mimeType: att.type || att.mimeType || att.mimetype || "",
+            size: att.size || 0,
+            canDelete: canDeleteMessage(message),
+          }))
+        )
+        .sort((a, b) => {
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0
+          return timeB - timeA
+        }),
+    [currentMessages, usersById, currentUser, activeView, contextsSourceView, activeChannelData, currentSpace]
   )
 
   const currentChannelDecisionItems = useMemo(
@@ -5417,6 +5440,19 @@ export default function CollaborationApp() {
         })),
     [currentMessages, usersById]
   )
+
+  const openDeleteChannelFileConfirm = file => {
+    if (!file?.canDelete) return
+    const chatId = getActiveChatId()
+    if (!chatId || !file.messageId || !file.fileId) return
+    setShowDeleteConfirm({
+      type: "file",
+      id: file.fileId,
+      chatId,
+      messageId: file.messageId,
+      fileName: file.name || "Attachment",
+    })
+  }
 
   const openContext = contextId => {
     openContextsPage(contextId)
@@ -6114,6 +6150,26 @@ export default function CollaborationApp() {
       setSelectedMessageIds(prev =>
         prev.filter(messageId => String(messageId) !== String(showDeleteConfirm.id))
       )
+    } else if (showDeleteConfirm.type === "file" && showDeleteConfirm.chatId && showDeleteConfirm.messageId) {
+      const attachmentMatches = attachment =>
+        [attachment?.id, attachment?.fileId, attachment?.drive_file_id, attachment?.driveId, attachment?.url, attachment?.public_url, attachment?.webViewLink, attachment?.name]
+          .some(value => value !== undefined && value !== null && String(value) === String(showDeleteConfirm.id))
+
+      const result = await Storage.deleteMessageAttachment(
+        showDeleteConfirm.chatId,
+        showDeleteConfirm.messageId,
+        showDeleteConfirm.id
+      )
+
+      setMessages(prev => ({
+        ...prev,
+        [showDeleteConfirm.chatId]: (prev[showDeleteConfirm.chatId] || []).flatMap(message => {
+          if (String(message.id) !== String(showDeleteConfirm.messageId)) return [message]
+          const remaining = (message.attachments || []).filter(attachment => !attachmentMatches(attachment))
+          if (result?.messageDeleted || (remaining.length === 0 && !String(message.text || "").trim())) return []
+          return [{ ...message, attachments: remaining }]
+        }),
+      }))
     }
     setShowDeleteConfirm(null)
   }
@@ -10313,6 +10369,7 @@ export default function CollaborationApp() {
                         isDarkMode={isDarkMode}
                         onAttachFile={addChannelFileAsAttachment}
                         onOpenFile={openAttachment}
+                        onDeleteFile={openDeleteChannelFileConfirm}
                       />
                     )}
                     {activeView === "channel" && activeChannelTab === "decisions" && (
@@ -10624,7 +10681,7 @@ export default function CollaborationApp() {
                                           setMessageActionMenu(null)
                                         }}
                                         onEdit={canEditMessage ? () => startEditingMessage(msg) : undefined}
-                                        onDelete={() => {
+                                        onDelete={canDeleteMessage(msg) ? () => {
                                           const chatId = getActiveChatId()
                                           if (!chatId) return
                                           setShowDeleteConfirm({
@@ -10634,7 +10691,7 @@ export default function CollaborationApp() {
                                             optimistic: Boolean(msg.optimistic),
                                           })
                                           setMessageActionMenu(null)
-                                        }}
+                                        } : undefined}
                                         onToggleSelection={() => {
                                           toggleMessageSelection(msg.id)
                                           setMessageActionMenu(null)
@@ -11822,8 +11879,9 @@ export default function CollaborationApp() {
               Are you sure?
             </h3>
             <p className={`text-center text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-              You are about to delete this {showDeleteConfirm.type}. This action
-              cannot be undone.
+              {showDeleteConfirm.type === "file"
+                ? `You are about to remove "${showDeleteConfirm.fileName || "this file"}" from this channel. This action cannot be undone.`
+                : `You are about to delete this ${showDeleteConfirm.type}. This action cannot be undone.`}
             </p>
             <div className="flex gap-4">
               <button
