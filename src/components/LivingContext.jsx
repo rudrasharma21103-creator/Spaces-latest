@@ -66,6 +66,65 @@ function clampValue(value, min, max) {
   return Math.min(Math.max(value, min), max)
 }
 
+function GlassMenuSurface({ children, isDarkMode, position, menuRef, onClick }) {
+  const backgroundColor = isDarkMode ? "#08090b" : "#ffffff"
+  const borderColor = isDarkMode ? "rgba(255, 255, 255, 0.12)" : "rgba(203, 213, 225, 0.9)"
+  const textColor = isDarkMode ? "#f8fafc" : "#0f172a"
+  const insetHighlight = isDarkMode
+    ? "inset 0 1px 0 rgba(255, 255, 255, 0.08)"
+    : "inset 0 1px 0 rgba(255, 255, 255, 0.9)"
+
+  return (
+    <div
+      ref={menuRef}
+      onClick={onClick}
+      className={`message-actions-solid-menu fixed isolate w-[260px] overflow-hidden rounded-[22px] border transition-[opacity,transform] duration-150 ${
+        position.ready ? "opacity-100 scale-100" : "opacity-0 scale-95"
+      }`}
+      style={{
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        zIndex: 3,
+        isolation: "isolate",
+        pointerEvents: "auto",
+        opacity: 1,
+        background: backgroundColor,
+        backgroundColor,
+        backgroundImage: "none",
+        borderColor,
+        color: textColor,
+        mixBlendMode: "normal",
+        boxShadow: isDarkMode
+          ? `${insetHighlight}, 0 24px 70px rgba(0, 0, 0, 0.62), 0 6px 18px rgba(0, 0, 0, 0.45)`
+          : `${insetHighlight}, 0 24px 70px rgba(15, 23, 42, 0.18), 0 6px 18px rgba(15, 23, 42, 0.1)`,
+        transformOrigin: `${position.openUpward ? "bottom" : "top"} ${position.align === "left" ? "left" : "right"}`,
+        visibility: position.ready ? "visible" : "hidden",
+      }}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 z-0 rounded-[22px]"
+        style={{
+          background: backgroundColor,
+          backgroundColor,
+          opacity: 1,
+        }}
+      />
+      <div
+        className="relative z-10 p-2"
+        style={{
+          backgroundColor,
+          color: textColor,
+          maxHeight: "min(420px, calc(100vh - 7rem))",
+          overflowY: "auto",
+          scrollbarGutter: "stable",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function getNameInitials(name) {
   const initials = String(name || "")
     .trim()
@@ -217,6 +276,8 @@ export function MessageActionsMenu({
   const [position, setPosition] = React.useState({
     left: 0,
     top: 0,
+    width: 260,
+    height: 0,
     ready: false,
     openUpward: false,
     align: preferredAlign,
@@ -246,21 +307,22 @@ export function MessageActionsMenu({
     const minTop = Math.max(viewportPadding, boundaryRect.top + boundaryPadding)
     const maxBottom = Math.min(window.innerHeight - viewportPadding, boundaryRect.bottom - boundaryPadding)
 
+    const menuWidth = Math.max(menuRect.width || 260, 260)
     const preferredLeft =
       preferredAlign === "left"
-        ? anchorRect.left
-        : anchorRect.right - menuRect.width
+        ? maxRight - menuWidth
+        : anchorRect.right - menuWidth
 
     let left = clampValue(
       preferredLeft,
       minLeft,
-      Math.max(minLeft, maxRight - menuRect.width)
+      Math.max(minLeft, maxRight - menuWidth)
     )
 
     left = clampValue(
       left,
       viewportPadding,
-      Math.max(viewportPadding, window.innerWidth - viewportPadding - menuRect.width)
+      Math.max(viewportPadding, window.innerWidth - viewportPadding - menuWidth)
     )
 
     let openUpward = false
@@ -294,6 +356,8 @@ export function MessageActionsMenu({
     setPosition({
       left,
       top,
+      width: menuWidth,
+      height: menuRect.height,
       ready: true,
       openUpward,
       align: resolvedAlign,
@@ -339,21 +403,21 @@ export function MessageActionsMenu({
 
   if (!anchorEl) return null
 
-  const reactionButtonClass = `flex h-9 w-9 items-center justify-center rounded-full text-[18px] transition-all duration-150 ${
+  const reactionButtonClass = `flex h-8 w-8 items-center justify-center rounded-full text-base transition-all duration-150 ${
     isDarkMode
       ? "bg-transparent text-slate-100 hover:bg-white/10 hover:scale-[1.06]"
       : "bg-transparent text-slate-700 hover:bg-slate-100 hover:scale-[1.06]"
   }`
 
-  const actionBaseClass = `group flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left text-[13px] font-medium transition-all duration-150`
+  const actionBaseClass = `group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[13px] font-medium whitespace-nowrap transition-all duration-150`
   const actionClass = `${actionBaseClass} ${
     isDarkMode
-      ? "text-slate-200 hover:bg-white/8 hover:text-white"
+      ? "text-slate-100 hover:bg-white/10 hover:text-white"
       : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
   }`
   const destructiveClass = `${actionBaseClass} ${
     isDarkMode
-      ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
+      ? "text-rose-300 hover:bg-rose-500/15 hover:text-rose-200"
       : "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
   }`
 
@@ -375,79 +439,78 @@ export function MessageActionsMenu({
 
   const menuNode = (
     <div
-      ref={menuRef}
-      onClick={event => event.stopPropagation()}
-      className={`fixed z-[95] w-[238px] overflow-hidden rounded-[22px] border p-2 backdrop-blur-xl transition-[opacity,transform] duration-150 ${
-        position.ready ? "opacity-100 scale-100" : "opacity-0 scale-95"
-      } ${
-        isDarkMode
-          ? "bg-[#17191d]/96 border-white/8 shadow-[0_18px_48px_rgba(2,6,23,0.55)]"
-          : "bg-white/96 border-slate-200/80 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
-      }`}
       style={{
-        left: `${position.left}px`,
-        top: `${position.top}px`,
-        visibility: position.ready ? "visible" : "hidden",
-        transformOrigin: `${position.openUpward ? "bottom" : "top"} ${position.align === "left" ? "left" : "right"}`,
+        position: "fixed",
+        inset: 0,
+        zIndex: 2147483647,
+        pointerEvents: "none",
+        isolation: "isolate",
       }}
     >
-      {emojis.length > 0 && (
-        <div
-          className={`mb-1.5 rounded-[18px] border px-2 py-1.5 ${
-            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-slate-200/80 bg-slate-50/90"
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-1">
-            {emojis.map(emoji => (
-              <button
-                key={emoji}
-                onClick={() => onReact?.(emoji)}
-                className={reactionButtonClass}
-              >
-                {emoji}
-              </button>
-            ))}
+      <GlassMenuSurface
+        menuRef={menuRef}
+        isDarkMode={isDarkMode}
+        position={position}
+        onClick={event => event.stopPropagation()}
+      >
+        {emojis.length > 0 && (
+          <div
+            className={`mb-1.5 rounded-[18px] border px-2 py-1.5 ${
+              isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-1">
+              {emojis.map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => onReact?.(emoji)}
+                  className={reactionButtonClass}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="space-y-1">
-        {primaryActions.map(action => {
-          const ActionIcon = action.icon
-          return (
-            <button key={action.key} onClick={action.onClick} className={actionClass}>
+        <div className="space-y-0.5">
+          {primaryActions.map(action => {
+            const ActionIcon = action.icon
+            return (
+              <button key={action.key} onClick={action.onClick} className={actionClass}>
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                    isDarkMode
+                      ? "bg-white/[0.08] text-slate-300 group-hover:bg-white/[0.12]"
+                      : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                  }`}
+                >
+                  <ActionIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{action.label}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {onDelete && (
+          <>
+            <div className={`my-1.5 h-px ${isDarkMode ? "bg-white/10" : "bg-slate-200"}`} />
+            <button onClick={onDelete} className={destructiveClass}>
               <span
-                className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
                   isDarkMode
-                    ? "bg-white/[0.05] text-slate-300 group-hover:bg-white/[0.08]"
-                    : "bg-slate-100 text-slate-500 group-hover:bg-white"
+                    ? "bg-rose-500/15 text-rose-300 group-hover:bg-rose-500/20"
+                    : "bg-rose-50 text-rose-500 group-hover:bg-white"
                 }`}
               >
-                <ActionIcon className="h-4 w-4" />
+                <Trash2 className="h-4 w-4" />
               </span>
-              <span className="flex-1 truncate">{action.label}</span>
+              <span className="min-w-0 flex-1 truncate">Delete message</span>
             </button>
-          )
-        })}
-      </div>
-
-      {onDelete && (
-        <>
-          <div className={`my-2 h-px ${isDarkMode ? "bg-white/8" : "bg-slate-200/80"}`} />
-          <button onClick={onDelete} className={destructiveClass}>
-            <span
-              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
-                isDarkMode
-                  ? "bg-rose-500/12 text-rose-300 group-hover:bg-rose-500/18"
-                  : "bg-rose-50 text-rose-500 group-hover:bg-white"
-              }`}
-            >
-              <Trash2 className="h-4 w-4" />
-            </span>
-            <span className="flex-1 truncate">Delete message</span>
-          </button>
-        </>
-      )}
+          </>
+        )}
+      </GlassMenuSurface>
     </div>
   )
 
@@ -1750,13 +1813,15 @@ export function MessageActionButton({ isDarkMode, onClick, buttonRef, isActive =
     <button
       ref={buttonRef}
       onClick={onClick}
-      className={`${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} p-2 rounded-full border transition-[opacity,background-color,border-color,color] duration-75 ${
+      aria-label="Message actions"
+      title="Message actions"
+      className={`${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} flex h-7 w-7 items-center justify-center rounded-full border transition-[opacity,background-color,border-color,color] duration-75 ${
         isDarkMode
           ? "bg-[#17191d]/95 border-white/10 hover:bg-[#202329] text-slate-300"
           : "bg-white/96 border-slate-200/90 hover:bg-slate-50 text-slate-600"
       }`}
     >
-      <MoreVertical className="w-4 h-4" />
+      <MoreVertical className="h-3.5 w-3.5" />
     </button>
   )
 }

@@ -10569,7 +10569,7 @@ export default function CollaborationApp() {
                               }}
                               className={`relative overflow-visible break-words ${
                                   isChannelFeed
-                                    ? `w-full text-sm leading-6 transition-colors duration-75 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`
+                                    ? `w-full pr-9 text-sm leading-6 transition-colors duration-75 ${isDarkMode ? "text-slate-200" : "text-slate-800"}`
                                     : `text-[15px] leading-relaxed transition-all duration-150 ${
                                         isAttachmentOnlyMessage
                                           ? "bg-transparent shadow-none border-0 rounded-none px-0 py-0"
@@ -10584,8 +10584,8 @@ export default function CollaborationApp() {
                                 <div
                                   className={`absolute z-20 ${
                                     isChannelFeed
-                                      ? "right-2 -top-2"
-                                      : `${isMe ? '-left-12' : '-right-12'} -top-3`
+                                      ? "right-0 -top-1"
+                                      : `${isMe ? '-left-10' : '-right-10'} -top-2`
                                   }`}
                                   onClick={e => e.stopPropagation()}
                                 >
@@ -10614,6 +10614,7 @@ export default function CollaborationApp() {
                                       <MessageActionsMenu
                                         anchorEl={messageActionAnchor}
                                         boundaryEl={messagesContainerRef.current}
+                                        preferredAlign={isChannelFeed ? "left" : "right"}
                                         isDarkMode={isDarkMode}
                                         isSelected={isMessageSelected}
                                         emojis={EMOJIS}

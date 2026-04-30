@@ -6939,6 +6939,16 @@ html {
   will-change: auto !important;
 }
 
+.message-actions-solid-menu {
+  background-image: none !important;
+  mix-blend-mode: normal !important;
+}
+
+.message-actions-solid-menu,
+.message-actions-solid-menu * {
+  mix-blend-mode: normal !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
