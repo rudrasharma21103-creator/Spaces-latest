@@ -11272,7 +11272,7 @@ export default function CollaborationApp() {
                     </div>
                   </div>
                   <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Press <strong>Enter</strong> to send
+                   
                   </div>
                 </div>
                 </div>
