@@ -4887,10 +4887,70 @@ export default function CollaborationApp() {
     return "file"
   }
 
+  const isGoogleDriveAttachment = att => {
+    if (!att) return false
+    const url = String(att.webViewLink || att.url || att.previewUrl || "")
+    return att.source === "drive" || url.includes("drive.google.com") || url.includes("docs.google.com")
+  }
+
+  const getGoogleDrivePreviewUrl = att => {
+    const fileId = att?.fileId || att?.drive_file_id || att?.id
+    if (!fileId || !isGoogleDriveAttachment(att)) return null
+
+    const encodedId = encodeURIComponent(String(fileId))
+    const mime = String(att?.type || att?.mimeType || att?.mimetype || "").toLowerCase()
+    if (mime === "application/vnd.google-apps.document") {
+      return `https://docs.google.com/document/d/${encodedId}/preview`
+    }
+    if (mime === "application/vnd.google-apps.spreadsheet") {
+      return `https://docs.google.com/spreadsheets/d/${encodedId}/preview`
+    }
+    if (mime === "application/vnd.google-apps.presentation") {
+      return `https://docs.google.com/presentation/d/${encodedId}/preview`
+    }
+    return `https://drive.google.com/file/d/${encodedId}/preview`
+  }
+
+  const fetchGoogleDriveMediaPreviewUrl = async att => {
+    const fileId = att?.fileId || att?.drive_file_id || att?.id
+    const mime = String(att?.type || att?.mimeType || att?.mimetype || "").toLowerCase()
+    if (!fileId || !googleAccessToken || mime.startsWith("application/vnd.google-apps.")) return null
+
+    const cacheKey = `google-drive-media:${fileId}`
+    if (protectedFileUrlCacheRef.current.has(cacheKey)) {
+      return protectedFileUrlCacheRef.current.get(cacheKey)
+    }
+    if (protectedFileInflightRef.current.has(cacheKey)) {
+      return protectedFileInflightRef.current.get(cacheKey)
+    }
+
+    const request = (async () => {
+      try {
+        const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(String(fileId))}?alt=media`, {
+          headers: { Authorization: `Bearer ${googleAccessToken}` },
+        })
+        if (!resp.ok) return null
+        const blob = await resp.blob()
+        return URL.createObjectURL(blob)
+      } catch (error) {
+        console.error("Failed to fetch Google Drive preview media:", error)
+        return null
+      } finally {
+        protectedFileInflightRef.current.delete(cacheKey)
+      }
+    })()
+
+    protectedFileInflightRef.current.set(cacheKey, request)
+    const objectUrl = await request
+    if (objectUrl) protectedFileUrlCacheRef.current.set(cacheKey, objectUrl)
+    return objectUrl
+  }
+
   const openAttachmentPreview = async att => {
     if (!att) return
 
-    const initialUrl = att.url || att.public_url || att.previewUrl || att.webViewLink || null
+    const googleDrivePreviewUrl = getGoogleDrivePreviewUrl(att)
+    const initialUrl = googleDrivePreviewUrl || att.url || att.public_url || att.previewUrl || att.webViewLink || null
     setAttachmentPreview({
       attachment: att,
       url: initialUrl,
@@ -4902,7 +4962,9 @@ export default function CollaborationApp() {
     try {
       let previewUrl = initialUrl
 
-      if (att.source === "gmail" && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
+      if (googleDrivePreviewUrl) {
+        previewUrl = await fetchGoogleDriveMediaPreviewUrl(att) || googleDrivePreviewUrl
+      } else if (att.source === "gmail" && att.gmailMessageId && att.gmailAttachmentId && googleAccessToken) {
         previewUrl = await GoogleService.getGmailAttachmentPreviewUrl(
           googleAccessToken,
           att.gmailMessageId,
@@ -13582,11 +13644,12 @@ export default function CollaborationApp() {
         const att = attachmentPreview.attachment || {}
         const previewUrl = attachmentPreview.url
         const previewKind = getAttachmentPreviewKind(att)
+        const isGooglePreviewFrame = typeof previewUrl === "string" && /\/preview(?:\?|$)/.test(previewUrl) && (previewUrl.includes("drive.google.com") || previewUrl.includes("docs.google.com"))
         const title = att.name || att.filename || "Attachment"
         const sourceLabel =
           att.source === "gmail"
             ? "Gmail attachment"
-            : att.drive_file_id || String(att.url || att.webViewLink || "").includes("drive.google.com")
+            : isGoogleDriveAttachment(att)
               ? "Google Drive"
               : "Shared document"
         const detail = [
@@ -13681,6 +13744,10 @@ export default function CollaborationApp() {
                       <div className={`mt-3 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Preparing preview...</div>
                     </div>
                   </div>
+                ) : isGooglePreviewFrame ? (
+                  <iframe src={previewUrl} title={title} className={`h-[68vh] w-full rounded-[20px] border ${
+                    isDarkMode ? "border-white/10 bg-white" : "border-slate-200 bg-white"
+                  }`} />
                 ) : previewKind === "image" && previewUrl ? (
                   <div className="flex min-h-[52vh] items-center justify-center">
                     <SmartImage src={previewUrl} alt={title} className="max-h-[68vh] max-w-full rounded-[20px] object-contain shadow-2xl" />

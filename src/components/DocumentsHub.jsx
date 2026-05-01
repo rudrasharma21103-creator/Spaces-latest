@@ -121,13 +121,37 @@ function MobileFilterPill({ filter, isSelected, isDarkMode = false, onClick }) {
   )
 }
 
-function DocumentCard({ title, meta, sourceLabel, icon, emoji, onOpen, onAdd, extraAction, badgeClass, isDarkMode = false, isCompact = false }) {
+function DocumentCard({ title, meta, sourceLabel, icon, emoji, onOpen, onPreview, onAdd, extraAction, badgeClass, isDarkMode = false, isCompact = false }) {
+  const handlePreview = () => {
+    if (typeof onPreview === "function") onPreview()
+    else if (typeof onOpen === "function") onOpen()
+  }
+  const handleKeyboardPreview = event => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      handlePreview()
+    }
+  }
+  const handleOpen = event => {
+    event.stopPropagation()
+    if (typeof onOpen === "function") onOpen()
+  }
+  const handleAdd = event => {
+    event.stopPropagation()
+    if (typeof onAdd === "function") onAdd()
+  }
   const safeMeta = typeof meta === "string" ? meta.replaceAll("Â·", "|").replaceAll("·", "|") : meta
 
   return (
-    <article className={cx("group flex h-full flex-col border p-4 transition", isCompact ? "rounded-[24px]" : "rounded-[26px]", isDarkMode ? "border-white/10 bg-white/[0.04] hover:border-sky-400/20 hover:bg-white/[0.05]" : "border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-[0_20px_40px_rgba(15,23,42,0.08)]")}>
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={handlePreview}
+      onKeyDown={handleKeyboardPreview}
+      className={cx("group flex h-full cursor-pointer flex-col border p-4 transition focus:outline-none focus:ring-2 focus:ring-sky-400/50", isCompact ? "rounded-[24px]" : "rounded-[26px]", isDarkMode ? "border-white/10 bg-white/[0.04] hover:border-sky-400/20 hover:bg-white/[0.05]" : "border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-[0_20px_40px_rgba(15,23,42,0.08)]")}
+    >
       <div className="flex items-start justify-between gap-3">
-        <button onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+        <div className="flex min-w-0 flex-1 items-start gap-3 text-left">
           <div className={cx("flex shrink-0 items-center justify-center border", isCompact ? "h-12 w-12 rounded-[18px]" : "h-14 w-14 rounded-[20px]", isDarkMode ? "border-white/10 bg-white/[0.06]" : "border-slate-200 bg-slate-50")}>
             {icon ? <SmartImage src={icon} alt="" className={cx("object-contain", isCompact ? "h-7 w-7" : "h-8 w-8")} fallback={<span className={isCompact ? "text-xl" : "text-2xl"}>{emoji}</span>} /> : <span className={isCompact ? "text-xl" : "text-2xl"}>{emoji}</span>}
           </div>
@@ -135,18 +159,18 @@ function DocumentCard({ title, meta, sourceLabel, icon, emoji, onOpen, onAdd, ex
             <div className={cx(isCompact ? "line-clamp-2 text-[0.98rem] font-semibold leading-6" : "line-clamp-2 text-[1rem] font-semibold leading-6", isDarkMode ? "text-slate-100" : "text-slate-900")}>{title}</div>
             <div className={cx(isCompact ? "mt-1.5 line-clamp-2 text-[13px] leading-5" : "mt-2 line-clamp-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>{safeMeta}</div>
           </div>
-        </button>
+        </div>
         <span className={cx("shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold", badgeClass)}>{sourceLabel}</span>
       </div>
 
       <div className={cx("flex items-center justify-between gap-3", isCompact ? "mt-4" : "mt-5")}>
-        <button onClick={onOpen} className={cx("inline-flex items-center gap-2 rounded-full text-sm font-semibold transition", isDarkMode ? "text-slate-200 hover:text-white" : "text-slate-700 hover:text-slate-900")}>
+        <button onClick={handleOpen} className={cx("inline-flex items-center gap-2 rounded-full text-sm font-semibold transition", isDarkMode ? "text-slate-200 hover:text-white" : "text-slate-700 hover:text-slate-900")}>
           Open file
           <ArrowUpRight className="h-4 w-4" />
         </button>
         <div className="flex items-center gap-2">
-          {extraAction}
-          <button onClick={onAdd} className={cx("inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-sm font-semibold transition", isDarkMode ? "bg-sky-400/12 text-sky-200 hover:bg-sky-400/18" : "bg-sky-100 text-sky-700 hover:bg-sky-200")} title="Add to message">
+          {extraAction && <span onClick={event => event.stopPropagation()}>{extraAction}</span>}
+          <button onClick={handleAdd} className={cx("inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-sm font-semibold transition", isDarkMode ? "bg-sky-400/12 text-sky-200 hover:bg-sky-400/18" : "bg-sky-100 text-sky-700 hover:bg-sky-200")} title="Add to message">
             <Plus className="h-4 w-4" />
             Add
           </button>
@@ -254,6 +278,7 @@ export default function DocumentsHub(props) {
         sourceLabel: label,
         icon: attachment.iconLink || appIcon.iconUrl,
         emoji: appIcon.emoji,
+        onPreview: () => onOpenAttachment(attachment),
         onOpen: () => onOpenAttachment(attachment),
         onAdd: () => onAddDocument({
           id: attachment.id,
@@ -297,6 +322,7 @@ export default function DocumentsHub(props) {
             icon: doc.iconLink || appIcon.iconUrl,
             emoji: appIcon.emoji,
             badgeClass: isDarkMode ? palette.dark : palette.light,
+            onPreview: () => onOpenAttachment({ ...doc, source: "drive" }),
             onOpen: () => openInNewTab(doc.webViewLink),
             onAdd: () => onAddDocument(doc),
             extraAction: (
@@ -337,6 +363,16 @@ export default function DocumentsHub(props) {
             sourceLabel: "Gmail",
             icon: appIcon.iconUrl,
             emoji: appIcon.emoji,
+            onPreview: () => onOpenAttachment({
+              id: attachment.id,
+              name: attachment.filename,
+              mimeType: attachment.mimeType,
+              size: attachment.size,
+              source: "gmail",
+              gmailMessageId: attachment.messageId,
+              gmailAttachmentId: attachment.id,
+              webViewLink: emailUrl,
+            }),
             onOpen: () => openInNewTab(emailUrl),
             onAdd: () => onAddDocument({
               id: attachment.id,
@@ -605,6 +641,7 @@ export default function DocumentsHub(props) {
                                       sourceLabel={item.sourceLabel}
                                       icon={item.icon}
                                       emoji={item.emoji}
+                                      onPreview={item.onPreview}
                                       onOpen={item.onOpen}
                                       onAdd={item.onAdd}
                                       extraAction={item.extraAction}
@@ -680,7 +717,7 @@ export default function DocumentsHub(props) {
                                   <span className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", section.badgeClass)}>{section.items.length} items</span>
                                 </div>
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                                  {section.items.map(item => <DocumentCard key={item.id} title={item.title} meta={item.meta} sourceLabel={item.sourceLabel} icon={item.icon} emoji={item.emoji} onOpen={item.onOpen} onAdd={item.onAdd} extraAction={item.extraAction} badgeClass={item.badgeClass || section.badgeClass} isDarkMode={isDarkMode} />)}
+                                  {section.items.map(item => <DocumentCard key={item.id} title={item.title} meta={item.meta} sourceLabel={item.sourceLabel} icon={item.icon} emoji={item.emoji} onPreview={item.onPreview} onOpen={item.onOpen} onAdd={item.onAdd} extraAction={item.extraAction} badgeClass={item.badgeClass || section.badgeClass} isDarkMode={isDarkMode} />)}
                                 </div>
                               </div>
                             ))}
