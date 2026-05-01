@@ -1,4 +1,4 @@
-import React, { startTransition, useState, useEffect, useRef, useMemo, useLayoutEffect } from "react"
+import React, { startTransition, useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from "react"
 import {
   Send,
   Bold,
@@ -423,6 +423,7 @@ export default function CollaborationApp() {
   const [messageInput, setMessageInput] = useState("")
   const [composerIsEmpty, setComposerIsEmpty] = useState(true)
   const [showComposerFormatting, setShowComposerFormatting] = useState(false)
+  const [activeComposerFormats, setActiveComposerFormats] = useState({})
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingMessageText, setEditingMessageText] = useState("")
   const [isSavingEditedMessage, setIsSavingEditedMessage] = useState(false)
@@ -786,6 +787,64 @@ export default function CollaborationApp() {
   const protectedFileInflightRef = useRef(new Map())
   const messageActionButtonRefs = useRef({})
   const composerAttachButtonRef = useRef(null)
+
+  const refreshComposerFormatState = useCallback(() => {
+    const editor = composerEditorRef.current
+    if (!editor || typeof window === "undefined" || typeof document === "undefined") return
+
+    const selection = window.getSelection?.()
+    const selectionInComposer = Boolean(
+      selection?.rangeCount &&
+      editor.contains(selection.anchorNode) &&
+      editor.contains(selection.focusNode)
+    )
+
+    if (!selectionInComposer && document.activeElement !== editor) {
+      setActiveComposerFormats(prev => (Object.keys(prev).length ? {} : prev))
+      return
+    }
+
+    const queryState = command => {
+      try {
+        return document.queryCommandState(command)
+      } catch {
+        return false
+      }
+    }
+
+    const anchorNode = selection?.anchorNode
+    const anchorElement =
+      anchorNode?.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode?.parentElement
+
+    const hasAncestor = selector => {
+      const match = anchorElement?.closest?.(selector)
+      return Boolean(match && editor.contains(match))
+    }
+
+    const next = {
+      bold: queryState("bold") || hasAncestor("b,strong"),
+      italic: queryState("italic") || hasAncestor("i,em"),
+      underline: queryState("underline") || hasAncestor("u"),
+      strike: queryState("strikeThrough") || hasAncestor("s,strike,del"),
+      link: hasAncestor("a"),
+      "ordered-list": queryState("insertOrderedList") || hasAncestor("ol"),
+      "bullet-list": queryState("insertUnorderedList") || hasAncestor("ul"),
+      quote: hasAncestor("blockquote"),
+      "inline-code": hasAncestor("code") && !hasAncestor("pre"),
+      "code-block": hasAncestor("pre"),
+    }
+
+    setActiveComposerFormats(prev => {
+      const keys = Object.keys(next)
+      const changed = keys.some(key => Boolean(prev[key]) !== Boolean(next[key]))
+      return changed ? next : prev
+    })
+  }, [])
+
+  useEffect(() => {
+    document.addEventListener("selectionchange", refreshComposerFormatState)
+    return () => document.removeEventListener("selectionchange", refreshComposerFormatState)
+  }, [refreshComposerFormatState])
 
   useEffect(() => {
     currentUserRef.current = currentUser
@@ -6153,6 +6212,7 @@ export default function CollaborationApp() {
     composerLastValueRef.current = nextValue
     setMessageInput(nextValue)
     setComposerIsEmpty(!nextValue.trim())
+    window.requestAnimationFrame?.(refreshComposerFormatState)
     return nextValue
   }
 
@@ -6162,6 +6222,7 @@ export default function CollaborationApp() {
     composerLastValueRef.current = ""
     setMessageInput("")
     setComposerIsEmpty(true)
+    setActiveComposerFormats({})
   }
 
   const selectComposerRange = (node, offset = 0) => {
@@ -6308,6 +6369,7 @@ export default function CollaborationApp() {
       default:
         break
     }
+    window.requestAnimationFrame?.(refreshComposerFormatState)
   }
 
   useEffect(() => {
@@ -11542,10 +11604,10 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={`p-6 pt-2 ${isMobile ? "pb-20" : ""}`}>
+                <div ref={messageInputRef} className={isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`rounded-[2rem] p-2 relative transition-all duration-300 ${
+                    className={`${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
                       isDarkMode
                         ? 'bg-[#191b1f] border border-slate-700/50'
                         : 'bg-[#e9eef6]'
@@ -11607,31 +11669,37 @@ export default function CollaborationApp() {
                     )}
 
                     {showComposerFormatting && (
-                      <div className={`mx-2 mb-2 flex flex-wrap items-center gap-1 rounded-[1.35rem] border px-2 py-2 ${
+                      <div className={`${isMobile ? "mx-1 mb-1 gap-0.5 rounded-2xl px-1.5 py-1" : "mx-2 mb-2 gap-1 rounded-[1.35rem] px-2 py-2"} flex flex-wrap items-center border ${
                         isDarkMode
                           ? 'border-slate-700/80 bg-slate-900/60'
                           : 'border-slate-200/80 bg-white/75'
                       }`}>
                         {COMPOSER_FORMAT_ACTIONS.map(action => {
                           const FormatIcon = action.icon
+                          const isActiveFormat = Boolean(activeComposerFormats[action.key])
                           return (
                             <React.Fragment key={action.key}>
                               {action.dividerBefore && (
-                                <span className={`mx-1 h-6 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                                <span className={`${isMobile ? "mx-0.5 h-5" : "mx-1 h-6"} w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
                               )}
                               <button
                                 type="button"
                                 onMouseDown={event => event.preventDefault()}
                                 onClick={() => applyComposerFormat(action.key)}
-                                className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
-                                  isDarkMode
-                                    ? 'text-slate-300 hover:bg-slate-800 hover:text-cyan-300'
-                                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                                className={`flex ${isMobile ? "h-8 w-8 rounded-lg" : "h-9 w-9 rounded-xl"} items-center justify-center transition-colors ${
+                                  isActiveFormat
+                                    ? isDarkMode
+                                      ? 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-400/30'
+                                      : 'bg-sky-100 text-sky-700 ring-1 ring-sky-200'
+                                    : isDarkMode
+                                      ? 'text-slate-300 hover:bg-slate-800 hover:text-cyan-300'
+                                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                                 }`}
                                 title={action.label}
                                 aria-label={action.label}
+                                aria-pressed={isActiveFormat}
                               >
-                                <FormatIcon className="h-5 w-5" />
+                                <FormatIcon className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
                               </button>
                             </React.Fragment>
                           )
@@ -11639,7 +11707,7 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
-                    <div className="flex items-end gap-2 px-2 pb-1 relative">
+                    <div className={`flex items-end ${isMobile ? "gap-1 px-1 pb-0.5" : "gap-2 px-2 pb-1"} relative`}>
                       <div className="relative">
                         <button
                           ref={composerAttachButtonRef}
@@ -11650,9 +11718,9 @@ export default function CollaborationApp() {
                             setMessageActionMenu(null)
                             setMessageContextPicker(null)
                           }}
-                          className={`p-3 mb-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                          className={`${isMobile ? "p-2.5 mb-0.5" : "p-3 mb-1"} rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                         >
-                          <Paperclip className="w-5 h-5" />
+                          <Paperclip className={isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} />
                         </button>
 
                         {composerAttachMenuOpen && (
@@ -11756,7 +11824,7 @@ export default function CollaborationApp() {
                           setComposerAttachMenuOpen(false)
                           setComposerContextPickerOpen(false)
                         }}
-                        className={`p-3 mb-1 rounded-full transition-colors ${
+                        className={`${isMobile ? "p-2.5 mb-0.5" : "p-3 mb-1"} rounded-full transition-colors ${
                           showComposerFormatting
                             ? isDarkMode
                               ? 'bg-slate-800 text-cyan-300'
@@ -11769,13 +11837,13 @@ export default function CollaborationApp() {
                         aria-label={showComposerFormatting ? "Hide formatting options" : "Show formatting options"}
                         aria-pressed={showComposerFormatting}
                       >
-                        <Type className="w-5 h-5" />
+                        <Type className={isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} />
                       </button>
 
                       <div className="relative flex-1">
                         {composerIsEmpty && (
                           <span
-                            className={`pointer-events-none absolute left-0 top-3.5 font-medium ${
+                            className={`pointer-events-none absolute left-0 ${isMobile ? "top-2.5 text-sm" : "top-3.5"} font-medium ${
                               isDarkMode ? 'text-slate-500' : 'text-slate-400'
                             }`}
                           >
@@ -11791,18 +11859,21 @@ export default function CollaborationApp() {
                           aria-multiline="true"
                           onInput={syncComposerInputFromEditor}
                           onBlur={syncComposerInputFromEditor}
+                          onFocus={refreshComposerFormatState}
+                          onKeyUp={refreshComposerFormatState}
+                          onMouseUp={refreshComposerFormatState}
                           onKeyDown={e => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault()
                               sendMessage()
                             }
                           }}
-                          className={`w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 py-3.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed font-medium [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:px-3 [&_pre]:py-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
+                          className={`w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 ${isMobile ? "py-2 max-h-24 text-sm" : "py-3.5 max-h-32"} overflow-y-auto whitespace-pre-wrap break-words leading-relaxed font-medium [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:px-3 [&_pre]:py-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
                             isDarkMode
                               ? 'text-white [&_a]:text-sky-300 [&_blockquote]:border-slate-600 [&_code]:bg-white/10 [&_code]:text-sky-100 [&_pre]:bg-black/25'
                               : 'text-slate-800 [&_a]:text-sky-700 [&_blockquote]:border-slate-300 [&_code]:bg-slate-100 [&_code]:text-slate-800 [&_pre]:bg-slate-100'
                           }`}
-                          style={{ minHeight: "48px" }}
+                          style={{ minHeight: isMobile ? "36px" : "48px" }}
                         />
                       </div>
 
@@ -11810,13 +11881,13 @@ export default function CollaborationApp() {
                         <button
                           onClick={saveWorkspaceDraft}
                           disabled={!messageInput.trim()}
-                          className={`mb-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition-all duration-300 ${
+                          className={`${isMobile ? "mb-0.5 rounded-xl px-3 py-2.5 text-xs" : "mb-1 rounded-2xl px-4 py-3 text-sm"} border font-semibold transition-all duration-300 ${
                             isDarkMode
                               ? 'border-slate-700 text-slate-300 hover:bg-slate-800 disabled:text-slate-500'
                               : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:text-slate-400'
                           } disabled:cursor-not-allowed disabled:opacity-70`}
                         >
-                          Save draft
+                          {isMobile ? "Save" : "Save draft"}
                         </button>
                       )}
 
@@ -11826,13 +11897,13 @@ export default function CollaborationApp() {
                           (!messageInput.trim() && selectedFiles.length === 0) ||
                           isUploading
                         }
-                        className={`p-3.5 mb-1 rounded-2xl border shadow-sm transition-all duration-300 active:scale-95 transform ${
+                        className={`${isMobile ? "p-2.5 mb-0.5 rounded-xl" : "p-3.5 mb-1 rounded-2xl"} border shadow-sm transition-all duration-300 active:scale-95 transform ${
                           isDarkMode
                             ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
                             : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
                         } disabled:opacity-70 hover:scale-105`}
                       >
-                        <Send className="w-5 h-5 ml-0.5" />
+                        <Send className={`${isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} ml-0.5`} />
                       </button>
                     </div>
                   </div>
