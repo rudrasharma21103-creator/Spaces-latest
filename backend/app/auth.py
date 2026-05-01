@@ -25,6 +25,18 @@ def verify_ws_token(token: str):
         except Exception:
             pass
         return None
+
+
+def decode_token(token: str):
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        user_id = verify_ws_token(token)
+        if user_id is None:
+            return None
+        return {"user_id": user_id}
+
+
 def hash_password(password: str):
     # Ensure password is a string and safely truncate at the byte level to avoid
     # bcrypt's 72-byte limit which would raise ValueError.

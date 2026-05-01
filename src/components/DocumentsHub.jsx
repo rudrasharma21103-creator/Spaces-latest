@@ -1,4 +1,4 @@
-import React, { useMemo } from "react"
+import React, { useMemo, useState } from "react"
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -8,6 +8,7 @@ import {
   Mail,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
 } from "lucide-react"
 import SmartImage from "./SmartImage"
@@ -194,6 +195,34 @@ function EmptyState({ title, description, isDarkMode = false }) {
   )
 }
 
+const normalizeGmailDoc = attachment => {
+  if (!attachment) return null
+  const attachmentId = attachment.attachmentId || attachment.gmailAttachmentId || attachment.id
+  const messageId = attachment.messageId || attachment.gmailMessageId
+  const senderEmail = attachment.senderEmail || attachment.from || "unknown"
+  const senderName = attachment.senderName || senderEmail
+  const emailDateMs = Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0)
+  return {
+    ...attachment,
+    id: attachmentId,
+    attachmentId,
+    gmailAttachmentId: attachmentId,
+    messageId,
+    gmailMessageId: messageId,
+    threadId: attachment.threadId || null,
+    filename: attachment.filename || attachment.name || "Attachment",
+    name: attachment.name || attachment.filename || "Attachment",
+    mimeType: attachment.mimeType || attachment.type || "application/octet-stream",
+    size: Number(attachment.size || 0),
+    senderName,
+    senderEmail,
+    subject: attachment.subject || attachment.emailSubject || "No subject",
+    emailDate: attachment.emailDate || attachment.date || attachment.internalDate || null,
+    emailDateMs,
+    source: "gmail",
+  }
+}
+
 export default function DocumentsHub(props) {
   const {
     isDarkMode = false,
@@ -233,6 +262,51 @@ export default function DocumentsHub(props) {
     detail: docsCollectionSummary?.detail || "A cleaner library surface for your workspace documents.",
     count: docsCollectionSummary?.count || 0,
   }
+
+  const [gmailSearch, setGmailSearch] = useState("")
+
+  const displayedGmailAttachments = useMemo(() => {
+    const normalized = Array.isArray(gmailAttachments) ? gmailAttachments.map(normalizeGmailDoc).filter(Boolean) : []
+    const term = selectedAppFilter === "gmail" ? gmailSearch.trim().toLowerCase() : ""
+    const filtered = term
+      ? normalized.filter(attachment => [
+        attachment.senderName,
+        attachment.senderEmail,
+        attachment.subject,
+        attachment.filename,
+      ].some(value => String(value || "").toLowerCase().includes(term)))
+      : normalized
+
+    return filtered.sort((a, b) => Number(b.emailDateMs || b.internalDate || b.date || 0) - Number(a.emailDateMs || a.internalDate || a.date || 0))
+  }, [gmailAttachments, gmailSearch, selectedAppFilter])
+
+  const gmailSearchSummary = useMemo(() => {
+    const term = gmailSearch.trim()
+    if (!term) return "Search by sender email, sender name, subject, or filename."
+    return `${displayedGmailAttachments.length} Gmail attachment${displayedGmailAttachments.length === 1 ? "" : "s"} matched "${term}".`
+  }, [displayedGmailAttachments.length, gmailSearch])
+
+  const shouldShowGmailSearch = selectedAppFilter === "gmail"
+
+  const renderGmailSearch = () => (
+    <div className={cx("mb-5 rounded-[24px] border p-3", isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-slate-200/80 bg-slate-50/80")}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <label className={cx("flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border px-4", isDarkMode ? "border-white/10 bg-[#101620] text-slate-300" : "border-slate-200 bg-white text-slate-500")}>
+          <Search className="h-4 w-4 shrink-0" />
+          <input
+            value={gmailSearch}
+            onChange={event => setGmailSearch(event.target.value)}
+            placeholder="Search Gmail docs by email, sender, subject, or filename"
+            className={cx("w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-inherit", isDarkMode ? "text-slate-100" : "text-slate-900")}
+          />
+        </label>
+        <span className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-300" : "bg-white text-slate-600")}>
+          Latest files first
+        </span>
+      </div>
+      <p className={cx("mt-2 px-2 text-xs", isDarkMode ? "text-slate-400" : "text-slate-500")}>{gmailSearchSummary}</p>
+    </div>
+  )
 
   const filters = useMemo(() => {
     const allGoogleDocs = Array.isArray(googleDocs) ? googleDocs : []
@@ -345,13 +419,13 @@ export default function DocumentsHub(props) {
       })
     }
 
-    if ((selectedAppFilter === "all" || selectedAppFilter === "gmail") && gmailAttachments.length > 0) {
+    if ((selectedAppFilter === "all" || selectedAppFilter === "gmail") && displayedGmailAttachments.length > 0) {
       nextSections.push({
         key: "gmail",
         title: "Gmail attachments",
         description: "Recent email files that can move directly into workspace conversations.",
         badgeClass: isDarkMode ? sourceStyles.gmail.dark : sourceStyles.gmail.light,
-        items: gmailAttachments.map((attachment, index) => {
+        items: displayedGmailAttachments.map((attachment, index) => {
           const appType = GoogleService.getAppTypeFromMime(attachment.mimeType)
           const appIcon = GoogleService.getAppIcon(appType)
           const emailUrl = `https://mail.google.com/mail/u/0/#inbox/${attachment.messageId}`
@@ -395,7 +469,7 @@ export default function DocumentsHub(props) {
     }
 
     return nextSections
-  }, [selectedAppFilter, isDarkMode, sharedChatDocs, googleDocs.length, sortedGoogleDocs, gmailAttachments, formatDocsDate, formatDocsSize, onOpenAttachment, onAddDocument])
+  }, [selectedAppFilter, isDarkMode, sharedChatDocs, googleDocs.length, sortedGoogleDocs, displayedGmailAttachments, formatDocsDate, formatDocsSize, onOpenAttachment, onAddDocument])
 
   return (
     <div className={cx("h-full min-h-0 w-full overflow-y-auto", isDarkMode ? "bg-[#0f1115] text-slate-100" : "bg-[#f4f6fa] text-slate-900")}>
@@ -619,6 +693,7 @@ export default function DocumentsHub(props) {
                       </div>
 
                       <div className="px-4 py-4">
+                        {shouldShowGmailSearch && renderGmailSearch()}
                         {sections.length === 0 ? (
                           <EmptyState title="No documents in this collection" description="Try a different source or reconnect Google to surface files here." isDarkMode={isDarkMode} />
                         ) : (
@@ -703,6 +778,7 @@ export default function DocumentsHub(props) {
                       </div>
 
                       <div className="px-5 py-5 sm:px-6">
+                        {shouldShowGmailSearch && renderGmailSearch()}
                         {sections.length === 0 ? (
                           <EmptyState title="No documents in this collection" description="Try a different source, reconnect Google, or wait for files to sync into the library." isDarkMode={isDarkMode} />
                         ) : (

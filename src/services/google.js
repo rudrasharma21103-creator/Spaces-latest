@@ -1,8 +1,44 @@
 import axios from 'axios'
+import { getStoredUser, getToken } from './auth'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY
 let googleScriptLoadPromise = null
+
+let API_BASE = 'http://localhost:8000'
+try {
+  const raw = import.meta.env.VITE_API_URL || ''
+  if (raw && typeof raw === 'string') {
+    if (/^https?:\/\//.test(raw)) {
+      API_BASE = raw
+    } else if (/^:\d+/.test(raw)) {
+      API_BASE = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}${raw}` : `http://localhost${raw}`
+    } else if (raw.startsWith('//')) {
+      API_BASE = typeof window !== 'undefined' ? `${window.location.protocol}${raw}` : `http:${raw}`
+    } else if (/^[A-Za-z0-9.-]+(:\d+)?$/.test(raw)) {
+      API_BASE = /^localhost|127\.0\.0\.1|[A-Za-z0-9.-]+:\d+$/.test(raw) ? `http://${raw}` : raw
+    } else {
+      API_BASE = raw
+    }
+  } else if (typeof window !== 'undefined') {
+    API_BASE = window.location.origin
+  }
+} catch {
+  if (typeof window !== 'undefined') API_BASE = window.location.origin
+}
+
+const getAppAuthHeaders = () => {
+  const token = getToken()
+  const storedUser = getStoredUser()
+  const userId = storedUser
+    ? (storedUser.id || storedUser._id || (storedUser._id && storedUser._id.$oid) || storedUser.userId)
+    : null
+
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(userId ? { 'X-User-Id': String(userId) } : {})
+  }
+}
 
 const ensureGooglePreconnect = () => {
   if (typeof document === 'undefined') return
@@ -345,13 +381,157 @@ export const getAppIcon = (appType) => {
   return icons[appType] || icons.drive
 }
 
+const parseSender = value => {
+  const raw = value || ''
+  const match = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/)
+  if (!match) {
+    const fallback = raw.trim() || 'unknown'
+    return { senderName: fallback, senderEmail: fallback }
+  }
+  const senderEmail = match[2].trim()
+  const senderName = match[1].trim() || senderEmail
+  return { senderName, senderEmail }
+}
+
+const normalizeGmailAttachment = attachment => {
+  if (!attachment) return null
+  const attachmentId = attachment.attachmentId || attachment.gmailAttachmentId || attachment.id
+  const messageId = attachment.messageId || attachment.gmailMessageId
+  const senderEmail = attachment.senderEmail || parseSender(attachment.from).senderEmail
+  const senderName = attachment.senderName || parseSender(attachment.from).senderName || senderEmail
+  const emailDate = attachment.emailDate || attachment.date || attachment.internalDate || attachment.timestamp || null
+  return {
+    ...attachment,
+    id: attachmentId,
+    attachmentId,
+    gmailAttachmentId: attachmentId,
+    messageId,
+    gmailMessageId: messageId,
+    threadId: attachment.threadId || null,
+    filename: attachment.filename || attachment.name || 'Attachment',
+    name: attachment.name || attachment.filename || 'Attachment',
+    mimeType: attachment.mimeType || attachment.type || 'application/octet-stream',
+    size: Number(attachment.size || 0),
+    senderName: senderName || senderEmail,
+    senderEmail,
+    subject: attachment.subject || attachment.emailSubject || 'No subject',
+    emailSubject: attachment.emailSubject || attachment.subject || 'No subject',
+    emailDate,
+    emailDateMs: Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0),
+    source: 'gmail'
+  }
+}
+
+export const groupGmailAttachmentsBySender = (attachments = []) => {
+  const senders = new Map()
+
+  attachments.map(normalizeGmailAttachment).filter(Boolean).forEach(attachment => {
+    const senderEmail = attachment.senderEmail || 'unknown'
+    const senderName = attachment.senderName || senderEmail
+    const emailDateMs = Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0)
+    const sender = senders.get(senderEmail) || {
+      senderName,
+      senderEmail,
+      totalAttachments: 0,
+      latestEmailDate: null,
+      latestEmailDateMs: 0,
+      emails: new Map()
+    }
+
+    sender.totalAttachments += 1
+    if (emailDateMs > sender.latestEmailDateMs) {
+      sender.latestEmailDateMs = emailDateMs
+      sender.latestEmailDate = attachment.emailDate || attachment.internalDate || attachment.date || null
+    }
+
+    const emailKey = attachment.messageId || `${attachment.subject}-${emailDateMs}`
+    const email = sender.emails.get(emailKey) || {
+      messageId: attachment.messageId,
+      threadId: attachment.threadId,
+      subject: attachment.subject || 'No subject',
+      emailDate: attachment.emailDate || attachment.internalDate || attachment.date || null,
+      emailDateMs,
+      attachments: []
+    }
+    email.attachments.push(attachment)
+    sender.emails.set(emailKey, email)
+    senders.set(senderEmail, sender)
+  })
+
+  return Array.from(senders.values())
+    .map(sender => ({
+      ...sender,
+      emails: Array.from(sender.emails.values()).sort((a, b) => Number(b.emailDateMs || 0) - Number(a.emailDateMs || 0))
+    }))
+    .sort((a, b) => Number(b.latestEmailDateMs || 0) - Number(a.latestEmailDateMs || 0))
+}
+
+export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
+  if (!accessToken || !getToken()) return null
+
+  const response = await axios.post(
+    `${API_BASE}/gmail-docs/sync`,
+    {
+      accessToken,
+      pageSize: options.pageSize || 50,
+      backgroundPages: options.backgroundPages ?? 20
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAppAuthHeaders()
+      }
+    }
+  )
+
+  const attachments = Array.isArray(response.data?.attachments)
+    ? response.data.attachments.map(normalizeGmailAttachment).filter(Boolean)
+    : []
+  const senders = Array.isArray(response.data?.senders) ? response.data.senders : groupGmailAttachmentsBySender(attachments)
+
+  if (attachments.length > 0) {
+    try {
+      localStorage.setItem('google_gmail_cache', JSON.stringify({ time: Date.now(), attachments, senders }))
+    } catch {
+      // Cache writes can fail in private browsing or low-storage environments.
+    }
+  }
+
+  return { ...response.data, attachments, senders }
+}
+
+export const fetchGroupedGmailDocs = async (params = {}) => {
+  if (!getToken()) return null
+
+  const response = await axios.get(`${API_BASE}/gmail-docs/grouped`, {
+    params,
+    headers: getAppAuthHeaders()
+  })
+  const attachments = Array.isArray(response.data?.attachments)
+    ? response.data.attachments.map(normalizeGmailAttachment).filter(Boolean)
+    : []
+  const senders = Array.isArray(response.data?.senders) ? response.data.senders : groupGmailAttachmentsBySender(attachments)
+  return { ...response.data, attachments, senders }
+}
+
 // Fetch Gmail Attachments with full details (sender, subject, etc.)
-export const fetchGmailAttachments = async (accessToken) => {
+export const fetchGmailAttachments = async (accessToken, options = {}) => {
   if (!accessToken) {
     return []
   }
 
   try {
+    if (!options.skipBackend) {
+      try {
+        const synced = await syncGmailDocsMetadata(accessToken)
+        if (synced && Array.isArray(synced.attachments) && synced.attachments.length > 0) {
+          return synced.attachments
+        }
+      } catch (backendError) {
+        console.warn('Backend Gmail metadata sync unavailable, using direct Gmail API fallback:', backendError)
+      }
+    }
+
     // First, get messages with attachments (fetch more for better coverage)
     const messagesResponse = await axios.get(
       'https://gmail.googleapis.com/gmail/v1/users/me/messages',
@@ -374,8 +554,8 @@ export const fetchGmailAttachments = async (accessToken) => {
 
     const attachments = []
 
-    // Fetch details for each message (limit to 20 to balance coverage and rate limits)
-    for (const message of messages.slice(0, 20)) {
+    // Fetch details for each recent message without downloading attachment bytes.
+    for (const message of messages.slice(0, 50)) {
       try {
         const messageDetail = await axios.get(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}`,
@@ -436,16 +616,24 @@ export const fetchGmailAttachments = async (accessToken) => {
               
               attachments.push({
                 id: attachmentId || `${parentMessageId}-${part.partId}`,
+                attachmentId: attachmentId || `${parentMessageId}-${part.partId}`,
+                gmailAttachmentId: attachmentId || `${parentMessageId}-${part.partId}`,
                 messageId: parentMessageId,
+                gmailMessageId: parentMessageId,
                 partId: part.partId,
                 filename: part.filename,
+                name: part.filename,
                 mimeType: mimeType,
                 size: size,
                 date: messageDetail.data.internalDate,
+                emailDate: date || messageDetail.data.internalDate,
+                emailDateMs: Number(messageDetail.data.internalDate || 0),
                 subject: subject,
+                emailSubject: subject,
                 senderName: senderName,
                 senderEmail: senderEmail,
                 from: from,
+                source: 'gmail',
                 isDocument: isDocument,
                 fileIcon: fileIcon,
                 snippet: messageDetail.data.snippet || '',
@@ -468,16 +656,24 @@ export const fetchGmailAttachments = async (accessToken) => {
           
           attachments.push({
             id: payload.body.attachmentId,
+            attachmentId: payload.body.attachmentId,
+            gmailAttachmentId: payload.body.attachmentId,
             messageId: message.id,
+            gmailMessageId: message.id,
             partId: '0',
             filename: payload.filename,
+            name: payload.filename,
             mimeType: mimeType,
             size: payload.body.size || 0,
             date: messageDetail.data.internalDate,
+            emailDate: date || messageDetail.data.internalDate,
+            emailDateMs: Number(messageDetail.data.internalDate || 0),
             subject: subject,
+            emailSubject: subject,
             senderName: senderName,
             senderEmail: senderEmail,
             from: from,
+            source: 'gmail',
             isDocument: true,
             fileIcon: fileIcon,
             snippet: messageDetail.data.snippet || '',
@@ -495,11 +691,16 @@ export const fetchGmailAttachments = async (accessToken) => {
     // Sort by date (newest first)
     attachments.sort((a, b) => parseInt(b.date) - parseInt(a.date))
 
-      try {
-        localStorage.setItem('google_gmail_cache', JSON.stringify({ time: Date.now(), attachments }))
-      } catch (e) {}
+    const normalizedAttachments = attachments.map(normalizeGmailAttachment).filter(Boolean)
+    const senders = groupGmailAttachmentsBySender(normalizedAttachments)
 
-      return attachments
+    try {
+      localStorage.setItem('google_gmail_cache', JSON.stringify({ time: Date.now(), attachments: normalizedAttachments, senders }))
+    } catch {
+      // Cache writes can fail in private browsing or low-storage environments.
+    }
+
+    return normalizedAttachments
   } catch (error) {
     if (error.response?.status === 403) {
       throw new Error('Gmail access denied. Please ensure Gmail permissions are granted.')
@@ -689,7 +890,7 @@ export const checkNewGmailAttachments = async (accessToken, lastCheckTime) => {
     }
 
     // Fetch full details for new messages
-    const newAttachments = await fetchGmailAttachments(accessToken)
+    const newAttachments = await fetchGmailAttachments(accessToken, { skipBackend: true })
     const filteredAttachments = newAttachments.filter(att => parseInt(att.date) > (lastCheckTime || 0))
 
     return {

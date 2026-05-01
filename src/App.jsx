@@ -2746,7 +2746,7 @@ export default function CollaborationApp() {
             setGoogleDocs(cachedDrive.files)
           }
           const cachedGmail = JSON.parse(localStorage.getItem('google_gmail_cache') || 'null')
-          if (cachedGmail && Array.isArray(cachedGmail.attachments)) {
+          if (cachedGmail && Array.isArray(cachedGmail.attachments) && cachedGmail.attachments.length > 0) {
             setGmailAttachments(cachedGmail.attachments)
             setGmailLastCheckTime(cachedGmail.time || Date.now())
           }
@@ -2789,21 +2789,20 @@ export default function CollaborationApp() {
         setDocsError(driveError.message || "Failed to load Google Drive files.")
         setGoogleDocs([])
       }
+      setLoadingDocs(false)
       
       // Fetch Gmail attachments (fetch all when no specific app or when gmail is requested)
       if (!specificApp || specificApp === 'gmail' || specificApp === 'all') {
-        try {
-          const gmailFiles = await GoogleService.fetchGmailAttachments(token)
-          setGmailAttachments(gmailFiles)
-          setGmailLastCheckTime(Date.now()) // Track last fetch time for real-time sync
-        } catch (gmailError) {
-          console.warn('Gmail fetch error:', gmailError)
-          // Gmail is optional, just log the error
-          setGmailAttachments([])
-        }
+        GoogleService.fetchGmailAttachments(token)
+          .then(gmailFiles => {
+            setGmailAttachments(prev => (gmailFiles.length > 0 || prev.length === 0 ? gmailFiles : prev))
+            setGmailLastCheckTime(Date.now()) // Track last fetch time for real-time sync
+          })
+          .catch(gmailError => {
+            console.warn('Gmail fetch error:', gmailError)
+            // Keep any cached Gmail files visible if a background refresh fails.
+          })
       }
-      
-      setLoadingDocs(false)
     } catch (error) {
       setDocsError(error.message || "Failed to load documents. Please try again.")
       setLoadingDocs(false)

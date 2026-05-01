@@ -32,6 +32,7 @@ events_collection = db["events"]
 files_collection = db["files"]
 drafts_collection = db["drafts"]
 organizations_collection = db["organizations"]
+gmail_docs_collection = db["gmail_docs"]
 
 # Create indexes for faster queries
 try:
@@ -76,5 +77,10 @@ try:
 
     organizations_collection.create_index("domain", unique=True)
     organizations_collection.create_index("adminEmail")
+
+    gmail_docs_collection.create_index([("userId", 1), ("senderEmail", 1), ("emailDateMs", -1)])
+    gmail_docs_collection.create_index([("userId", 1), ("messageId", 1), ("attachmentId", 1)], unique=True)
+    gmail_docs_collection.create_index([("userId", 1), ("emailDateMs", -1)])
+    gmail_docs_collection.create_index([("userId", 1), ("mimeType", 1)])
 except Exception:
     pass
