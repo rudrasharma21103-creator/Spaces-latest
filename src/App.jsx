@@ -2747,7 +2747,7 @@ export default function CollaborationApp() {
           }
           const cachedGmail = JSON.parse(localStorage.getItem('google_gmail_cache') || 'null')
           if (cachedGmail && Array.isArray(cachedGmail.attachments) && cachedGmail.attachments.length > 0) {
-            setGmailAttachments(cachedGmail.attachments)
+            setGmailAttachments(GoogleService.dedupeGmailAttachmentsByFilename(cachedGmail.attachments))
             setGmailLastCheckTime(cachedGmail.time || Date.now())
           }
         } catch (e) {}
@@ -2795,7 +2795,8 @@ export default function CollaborationApp() {
       if (!specificApp || specificApp === 'gmail' || specificApp === 'all') {
         GoogleService.fetchGmailAttachments(token)
           .then(gmailFiles => {
-            setGmailAttachments(prev => (gmailFiles.length > 0 || prev.length === 0 ? gmailFiles : prev))
+            const dedupedGmailFiles = GoogleService.dedupeGmailAttachmentsByFilename(gmailFiles)
+            setGmailAttachments(prev => (dedupedGmailFiles.length > 0 || prev.length === 0 ? dedupedGmailFiles : GoogleService.dedupeGmailAttachmentsByFilename(prev)))
             setGmailLastCheckTime(Date.now()) // Track last fetch time for real-time sync
           })
           .catch(gmailError => {
@@ -2873,16 +2874,16 @@ export default function CollaborationApp() {
         if (result.hasNew && result.attachments.length > 0) {
           // Merge new attachments with existing ones, avoiding duplicates
           setGmailAttachments(prev => {
-            const existingIds = new Set(prev.map(a => `${a.messageId}-${a.id}`))
-            const newOnes = result.attachments.filter(a => !existingIds.has(`${a.messageId}-${a.id}`))
+            const existingNames = new Set(GoogleService.dedupeGmailAttachmentsByFilename(prev).map(a => a.normalizedFileName || GoogleService.normalizeGmailFilename(a.filename || a.name)))
+            const newOnes = GoogleService.dedupeGmailAttachmentsByFilename(result.attachments).filter(a => !existingNames.has(a.normalizedFileName || GoogleService.normalizeGmailFilename(a.filename || a.name)))
             if (newOnes.length > 0) {
               // Show toast for new attachments
               setSuccessMessage(`${newOnes.length} new Gmail attachment${newOnes.length > 1 ? 's' : ''} found`)
               setShowSuccessToast(true)
               setTimeout(() => setShowSuccessToast(false), 3000)
-              return [...newOnes, ...prev]
+              return GoogleService.dedupeGmailAttachmentsByFilename([...newOnes, ...prev])
             }
-            return prev
+            return GoogleService.dedupeGmailAttachmentsByFilename(prev)
           })
         }
         setGmailLastCheckTime(Date.now())
@@ -2968,21 +2969,26 @@ export default function CollaborationApp() {
     })
   }, [googleDocs])
 
+  const dedupedGmailAttachments = useMemo(
+    () => GoogleService.dedupeGmailAttachmentsByFilename(gmailAttachments),
+    [gmailAttachments]
+  )
+
   const docsOverview = useMemo(() => {
     const docsCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'docs').length
     const sheetsCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'sheets').length
     const slidesCount = googleDocs.filter(doc => GoogleService.getAppTypeFromMime(doc.mimeType) === 'slides').length
 
     return {
-      total: googleDocs.length + gmailAttachments.length + sharedChatDocs.length,
+      total: googleDocs.length + dedupedGmailAttachments.length + sharedChatDocs.length,
       drive: googleDocs.length,
       docs: docsCount,
       sheets: sheetsCount,
       slides: slidesCount,
-      gmail: gmailAttachments.length,
+      gmail: dedupedGmailAttachments.length,
       shared: sharedChatDocs.length,
     }
-  }, [googleDocs, gmailAttachments, sharedChatDocs])
+  }, [googleDocs, dedupedGmailAttachments, sharedChatDocs])
 
   const formatDocsDate = value => {
     if (!value) return "No recent activity"
@@ -3169,7 +3175,7 @@ export default function CollaborationApp() {
       source: "drive",
     }))
 
-    const gmailFiles = gmailAttachments.map(file => ({
+    const gmailFiles = dedupedGmailAttachments.map(file => ({
       id: `gmail-${file.messageId}-${file.id}`,
       name: file.filename,
       source: "gmail",
@@ -3183,7 +3189,7 @@ export default function CollaborationApp() {
     }))
 
     return [...sharedFiles, ...driveFiles, ...gmailFiles]
-  }, [messages, sortedGoogleDocs, gmailAttachments])
+  }, [messages, sortedGoogleDocs, dedupedGmailAttachments])
 
   const homeDMChatId = useMemo(() => getDMChatId(homeActiveDMUser), [currentUser?.id, homeActiveDMUser])
   const homeDMMessages = useMemo(() => (homeDMChatId ? messages[homeDMChatId] || [] : []), [messages, homeDMChatId])
@@ -13799,7 +13805,7 @@ export default function CollaborationApp() {
               googleDocs={googleDocs}
               sortedGoogleDocs={sortedGoogleDocs}
               sharedChatDocs={sharedChatDocs}
-              gmailAttachments={gmailAttachments}
+              gmailAttachments={dedupedGmailAttachments}
               formatDocsDate={formatDocsDate}
               formatDocsSize={formatDocsSize}
               onBackHome={() => setShowDocsModal(false)}

@@ -202,6 +202,8 @@ const normalizeGmailDoc = attachment => {
   const senderEmail = attachment.senderEmail || attachment.from || "unknown"
   const senderName = attachment.senderName || senderEmail
   const emailDateMs = Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0)
+  const filename = attachment.filename || attachment.name || "Attachment"
+  const normalizedFileName = attachment.normalizedFileName || GoogleService.normalizeGmailFilename(filename)
   return {
     ...attachment,
     id: attachmentId,
@@ -210,8 +212,9 @@ const normalizeGmailDoc = attachment => {
     messageId,
     gmailMessageId: messageId,
     threadId: attachment.threadId || null,
-    filename: attachment.filename || attachment.name || "Attachment",
+    filename,
     name: attachment.name || attachment.filename || "Attachment",
+    normalizedFileName,
     mimeType: attachment.mimeType || attachment.type || "application/octet-stream",
     size: Number(attachment.size || 0),
     senderName,
@@ -266,7 +269,9 @@ export default function DocumentsHub(props) {
   const [gmailSearch, setGmailSearch] = useState("")
 
   const displayedGmailAttachments = useMemo(() => {
-    const normalized = Array.isArray(gmailAttachments) ? gmailAttachments.map(normalizeGmailDoc).filter(Boolean) : []
+    const normalized = Array.isArray(gmailAttachments)
+      ? GoogleService.dedupeGmailAttachmentsByFilename(gmailAttachments).map(normalizeGmailDoc).filter(Boolean)
+      : []
     const term = selectedAppFilter === "gmail" ? gmailSearch.trim().toLowerCase() : ""
     const filtered = term
       ? normalized.filter(attachment => [

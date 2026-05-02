@@ -393,6 +393,11 @@ const parseSender = value => {
   return { senderName, senderEmail }
 }
 
+export const normalizeGmailFilename = filename => {
+  const normalized = String(filename || 'Attachment').trim().replace(/\s+/g, ' ').toLowerCase()
+  return normalized || 'attachment'
+}
+
 const normalizeGmailAttachment = attachment => {
   if (!attachment) return null
   const attachmentId = attachment.attachmentId || attachment.gmailAttachmentId || attachment.id
@@ -410,6 +415,7 @@ const normalizeGmailAttachment = attachment => {
     threadId: attachment.threadId || null,
     filename: attachment.filename || attachment.name || 'Attachment',
     name: attachment.name || attachment.filename || 'Attachment',
+    normalizedFileName: attachment.normalizedFileName || normalizeGmailFilename(attachment.filename || attachment.name),
     mimeType: attachment.mimeType || attachment.type || 'application/octet-stream',
     size: Number(attachment.size || 0),
     senderName: senderName || senderEmail,
@@ -422,10 +428,43 @@ const normalizeGmailAttachment = attachment => {
   }
 }
 
+export const dedupeGmailAttachmentsByFilename = (attachments = []) => {
+  const byFilename = new Map()
+
+  attachments.map(normalizeGmailAttachment).filter(Boolean).forEach(attachment => {
+    const key = attachment.normalizedFileName || normalizeGmailFilename(attachment.filename || attachment.name)
+    const existing = byFilename.get(key)
+    if (!existing) {
+      byFilename.set(key, {
+        ...attachment,
+        normalizedFileName: key,
+        occurrenceCount: Number(attachment.occurrenceCount || 1)
+      })
+      return
+    }
+
+    const existingDate = Number(existing.emailDateMs || existing.internalDate || existing.date || 0)
+    const nextDate = Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0)
+    const latest = nextDate >= existingDate ? attachment : existing
+    const previous = nextDate >= existingDate ? existing : attachment
+    byFilename.set(key, {
+      ...latest,
+      normalizedFileName: key,
+      occurrenceCount: Math.max(Number(existing.occurrenceCount || 1), 1) + 1,
+      relatedMessageIds: Array.from(new Set([...(existing.relatedMessageIds || existing.messageIds || []), ...(attachment.relatedMessageIds || attachment.messageIds || []), existing.messageId, attachment.messageId].filter(Boolean))),
+      messageIds: Array.from(new Set([...(existing.messageIds || existing.relatedMessageIds || []), ...(attachment.messageIds || attachment.relatedMessageIds || []), existing.messageId, attachment.messageId].filter(Boolean))),
+      relatedEmails: [...(previous.relatedEmails || []), ...(latest.relatedEmails || [])]
+    })
+  })
+
+  return Array.from(byFilename.values())
+    .sort((a, b) => Number(b.emailDateMs || b.internalDate || b.date || 0) - Number(a.emailDateMs || a.internalDate || a.date || 0))
+}
+
 export const groupGmailAttachmentsBySender = (attachments = []) => {
   const senders = new Map()
 
-  attachments.map(normalizeGmailAttachment).filter(Boolean).forEach(attachment => {
+  dedupeGmailAttachmentsByFilename(attachments).forEach(attachment => {
     const senderEmail = attachment.senderEmail || 'unknown'
     const senderName = attachment.senderName || senderEmail
     const emailDateMs = Number(attachment.emailDateMs || attachment.internalDate || attachment.date || 0)
@@ -473,7 +512,7 @@ export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
     `${API_BASE}/gmail-docs/sync`,
     {
       accessToken,
-      pageSize: options.pageSize || 50,
+      pageSize: options.pageSize || 20,
       backgroundPages: options.backgroundPages ?? 20
     },
     {
@@ -485,9 +524,9 @@ export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
   )
 
   const attachments = Array.isArray(response.data?.attachments)
-    ? response.data.attachments.map(normalizeGmailAttachment).filter(Boolean)
+    ? dedupeGmailAttachmentsByFilename(response.data.attachments)
     : []
-  const senders = Array.isArray(response.data?.senders) ? response.data.senders : groupGmailAttachmentsBySender(attachments)
+  const senders = groupGmailAttachmentsBySender(attachments)
 
   if (attachments.length > 0) {
     try {
@@ -508,9 +547,9 @@ export const fetchGroupedGmailDocs = async (params = {}) => {
     headers: getAppAuthHeaders()
   })
   const attachments = Array.isArray(response.data?.attachments)
-    ? response.data.attachments.map(normalizeGmailAttachment).filter(Boolean)
+    ? dedupeGmailAttachmentsByFilename(response.data.attachments)
     : []
-  const senders = Array.isArray(response.data?.senders) ? response.data.senders : groupGmailAttachmentsBySender(attachments)
+  const senders = groupGmailAttachmentsBySender(attachments)
   return { ...response.data, attachments, senders }
 }
 
@@ -538,12 +577,13 @@ export const fetchGmailAttachments = async (accessToken, options = {}) => {
       {
         params: {
           q: 'has:attachment',
-          maxResults: 50
+          maxResults: options.maxResults || 80
         },
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Accept': 'application/json'
-        }
+        },
+        timeout: 45000
       }
     )
 
@@ -555,7 +595,7 @@ export const fetchGmailAttachments = async (accessToken, options = {}) => {
     const attachments = []
 
     // Fetch details for each recent message without downloading attachment bytes.
-    for (const message of messages.slice(0, 50)) {
+    for (const message of messages.slice(0, options.maxResults || 80)) {
       try {
         const messageDetail = await axios.get(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}`,
@@ -566,7 +606,8 @@ export const fetchGmailAttachments = async (accessToken, options = {}) => {
             headers: {
               Authorization: `Bearer ${accessToken}`,
               'Accept': 'application/json'
-            }
+            },
+            timeout: 45000
           }
         )
 
@@ -691,7 +732,7 @@ export const fetchGmailAttachments = async (accessToken, options = {}) => {
     // Sort by date (newest first)
     attachments.sort((a, b) => parseInt(b.date) - parseInt(a.date))
 
-    const normalizedAttachments = attachments.map(normalizeGmailAttachment).filter(Boolean)
+    const normalizedAttachments = dedupeGmailAttachmentsByFilename(attachments)
     const senders = groupGmailAttachmentsBySender(normalizedAttachments)
 
     try {

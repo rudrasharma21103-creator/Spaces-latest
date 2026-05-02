@@ -1,12 +1,14 @@
 import logging
+import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
 
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 from starlette import status
 
 from app.database import gmail_docs_collection
@@ -18,11 +20,27 @@ logger = logging.getLogger("app.routes.gmail_docs")
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 SYNC_CACHE_SECONDS = 60
 GMAIL_DOCS_PER_USER_LIMIT = 600
+GMAIL_REQUEST_TIMEOUT = (5, 45)
+GMAIL_REQUEST_RETRIES = 2
+GMAIL_MESSAGE_WORKERS = 6
+GMAIL_MESSAGE_FIELDS = (
+    "id,threadId,internalDate,labelIds,snippet,"
+    "payload(headers(name,value),filename,mimeType,partId,body/attachmentId,body/size,"
+    "parts(filename,mimeType,partId,body/attachmentId,body/size,"
+    "parts(filename,mimeType,partId,body/attachmentId,body/size,"
+    "parts(filename,mimeType,partId,body/attachmentId,body/size,"
+    "parts(filename,mimeType,partId,body/attachmentId,body/size)))))"
+)
+
+
+def _normalize_filename(filename: str | None):
+    normalized = re.sub(r"\s+", " ", (filename or "Attachment").strip()).lower()
+    return normalized or "attachment"
 
 
 class GmailSyncPayload(BaseModel):
     accessToken: str = Field(min_length=10)
-    pageSize: int = Field(default=50, ge=1, le=50)
+    pageSize: int = Field(default=20, ge=1, le=50)
     backgroundPages: int = Field(default=20, ge=0, le=50)
 
 
@@ -31,7 +49,20 @@ def _gmail_headers(access_token: str):
 
 
 def _request_gmail(access_token: str, path: str, params: dict | None = None):
-    response = requests.get(f"{GMAIL_API}{path}", params=params or {}, headers=_gmail_headers(access_token), timeout=20)
+    last_timeout = None
+    for attempt in range(GMAIL_REQUEST_RETRIES + 1):
+        try:
+            response = requests.get(f"{GMAIL_API}{path}", params=params or {}, headers=_gmail_headers(access_token), timeout=GMAIL_REQUEST_TIMEOUT)
+            break
+        except requests.Timeout as exc:
+            last_timeout = exc
+            if attempt >= GMAIL_REQUEST_RETRIES:
+                logger.warning("Gmail API request timed out for %s after %s attempts", path, attempt + 1)
+                raise
+            time.sleep(0.35 * (attempt + 1))
+    else:
+        raise last_timeout or HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gmail API request failed")
+
     if response.status_code in (401, 403):
         raise HTTPException(status_code=response.status_code, detail="Gmail access denied or expired")
     try:
@@ -87,22 +118,18 @@ def _iter_attachment_parts(part: dict | None):
 
 
 def _metadata_for_message(access_token: str, message_id: str):
-    # Fetch lightweight headers first so the sync can cheaply establish context.
-    metadata = _request_gmail(
+    # This returns attachment ids and sizes, not attachment bytes, so sync stays
+    # metadata-only. A single full request is more reliable than metadata+full.
+    detail = _request_gmail(
         access_token,
         f"/messages/{message_id}",
         {
-            "format": "metadata",
-            "metadataHeaders": ["From", "Subject", "Date"],
+            "format": "full",
+            "fields": GMAIL_MESSAGE_FIELDS,
         },
     )
-    meta_headers = _headers_map(metadata.get("payload"))
-
-    # Then fetch the message structure. This returns attachment ids and sizes, not
-    # attachment bytes, so sync stays metadata-only.
-    detail = _request_gmail(access_token, f"/messages/{message_id}", {"format": "full"})
     detail_headers = _headers_map(detail.get("payload"))
-    headers = {**detail_headers, **meta_headers}
+    headers = detail_headers
 
     sender_name, sender_email = _parse_sender(headers.get("from"))
     email_date, email_date_ms = _parse_email_date(headers.get("date"), detail.get("internalDate"))
@@ -144,31 +171,132 @@ def _store_attachments(user_id: str, attachments: list[dict]):
         return 0
 
     now = datetime.now(timezone.utc).isoformat()
-    operations = []
+    stored = 0
     for item in attachments:
         if not item.get("messageId") or not item.get("attachmentId"):
             continue
-        doc = {**item, "userId": str(user_id), "updatedAt": now}
-        operations.append(
-            UpdateOne(
+        normalized_filename = _normalize_filename(item.get("filename"))
+        occurrence_key = f"{item['messageId']}:{item['attachmentId']}"
+        latest_doc = {
+            **item,
+            "userId": str(user_id),
+            "source": "gmail",
+            "originalFilename": item.get("filename") or "Attachment",
+            "normalizedFileName": normalized_filename,
+            "latestSenderName": item.get("senderName"),
+            "latestSenderEmail": item.get("senderEmail"),
+            "latestEmailSubject": item.get("subject") or item.get("emailSubject"),
+            "latestEmailDate": item.get("emailDate"),
+            "latestEmailDateMs": int(item.get("emailDateMs") or 0),
+        }
+        related_email = {
+            "messageId": item.get("messageId"),
+            "threadId": item.get("threadId"),
+            "senderName": item.get("senderName"),
+            "senderEmail": item.get("senderEmail"),
+            "subject": item.get("subject") or item.get("emailSubject"),
+            "emailDate": item.get("emailDate"),
+            "emailDateMs": int(item.get("emailDateMs") or 0),
+        }
+        update_pipeline = _gmail_doc_upsert_pipeline(latest_doc, occurrence_key, related_email, now)
+
+        try:
+            result = gmail_docs_collection.update_one(
                 {
                     "userId": str(user_id),
-                    "messageId": item["messageId"],
-                    "attachmentId": item["attachmentId"],
+                    "source": "gmail",
+                    "normalizedFileName": normalized_filename,
                 },
-                {
-                    "$set": doc,
-                    "$setOnInsert": {"createdAt": now},
-                },
+                update_pipeline,
                 upsert=True,
             )
-        )
+        except DuplicateKeyError:
+            logger.info("Gmail doc duplicate key during upsert for user %s and file %s", user_id, normalized_filename)
+            result = gmail_docs_collection.update_one(
+                {
+                    "userId": str(user_id),
+                    "source": "gmail",
+                    "normalizedFileName": normalized_filename,
+                },
+                update_pipeline,
+                upsert=False,
+            )
+        except BulkWriteError as exc:
+            if not any(error.get("code") == 11000 for error in exc.details.get("writeErrors", [])):
+                raise
+            logger.info("Gmail doc bulk duplicate key during upsert for user %s and file %s", user_id, normalized_filename)
+            result = gmail_docs_collection.update_one(
+                {
+                    "userId": str(user_id),
+                    "source": "gmail",
+                    "normalizedFileName": normalized_filename,
+                },
+                update_pipeline,
+                upsert=False,
+            )
 
-    if not operations:
-        return 0
-    result = gmail_docs_collection.bulk_write(operations, ordered=False)
+        stored += int(result.upserted_id is not None or result.modified_count > 0)
+
     _enforce_user_doc_limit(user_id)
-    return int(result.upserted_count + result.modified_count)
+    return stored
+
+
+def _gmail_doc_upsert_pipeline(doc: dict, occurrence_key: str, related_email: dict, now: str):
+    def literal(value):
+        return {"$literal": value}
+
+    email_date_ms = int(doc.get("emailDateMs") or 0)
+    existing_occurrences = {"$ifNull": ["$relatedAttachmentKeys", []]}
+    occurrence_keys = {"$setUnion": [existing_occurrences, literal([occurrence_key])]}
+    existing_message_ids = {"$ifNull": ["$relatedMessageIds", []]}
+    message_ids = {"$setUnion": [existing_message_ids, literal([doc.get("messageId")])]}
+    existing_related_emails = {"$ifNull": ["$relatedEmails", []]}
+    is_new_occurrence = {"$not": [{"$in": [literal(occurrence_key), existing_occurrences]}]}
+    is_latest_email = {"$gte": [email_date_ms, {"$ifNull": ["$latestEmailDateMs", {"$ifNull": ["$emailDateMs", -1]}]}]}
+
+    latest_fields = {
+        key: {"$cond": [is_latest_email, literal(value), f"${key}"]}
+        for key, value in doc.items()
+        if key
+        not in {
+            "createdAt",
+            "occurrenceCount",
+            "relatedAttachmentKeys",
+            "relatedMessageIds",
+            "relatedEmails",
+            "updatedAt",
+        }
+    }
+
+    return [
+        {
+            "$set": {
+                **latest_fields,
+                "userId": literal(doc["userId"]),
+                "source": "gmail",
+                "originalFilename": {"$ifNull": ["$originalFilename", literal(doc.get("originalFilename") or doc.get("filename"))]},
+                "normalizedFileName": literal(doc["normalizedFileName"]),
+                "latestSenderName": {"$cond": [is_latest_email, literal(doc.get("latestSenderName")), "$latestSenderName"]},
+                "latestSenderEmail": {"$cond": [is_latest_email, literal(doc.get("latestSenderEmail")), "$latestSenderEmail"]},
+                "latestEmailSubject": {"$cond": [is_latest_email, literal(doc.get("latestEmailSubject")), "$latestEmailSubject"]},
+                "latestEmailDate": {"$cond": [is_latest_email, literal(doc.get("latestEmailDate")), "$latestEmailDate"]},
+                "latestEmailDateMs": {"$cond": [is_latest_email, literal(doc.get("latestEmailDateMs")), "$latestEmailDateMs"]},
+                "relatedAttachmentKeys": occurrence_keys,
+                "relatedMessageIds": message_ids,
+                "messageIds": message_ids,
+                "relatedEmails": {
+                    "$cond": [
+                        is_new_occurrence,
+                        {"$concatArrays": [existing_related_emails, literal([related_email])]},
+                        existing_related_emails,
+                    ]
+                },
+                "occurrenceCount": {"$size": occurrence_keys},
+                "updatedAt": literal(now),
+                "createdAt": {"$ifNull": ["$createdAt", literal(now)]},
+            }
+        }
+    ]
 
 
 def _enforce_user_doc_limit(user_id: str):
@@ -197,16 +325,18 @@ def _sync_page(access_token: str, user_id: str, page_size: int, page_token: str 
 
     message_list = _request_gmail(access_token, "/messages", params)
     attachments = []
-    for message in message_list.get("messages") or []:
-        message_id = message.get("id")
-        if not message_id:
-            continue
-        try:
-            attachments.extend(_metadata_for_message(access_token, message_id))
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.warning("Skipping Gmail message %s during sync: %s", message_id, exc)
+    message_ids = [message.get("id") for message in message_list.get("messages") or [] if message.get("id")]
+    if message_ids:
+        with ThreadPoolExecutor(max_workers=min(GMAIL_MESSAGE_WORKERS, len(message_ids))) as executor:
+            futures = {executor.submit(_metadata_for_message, access_token, message_id): message_id for message_id in message_ids}
+            for future in as_completed(futures):
+                message_id = futures[future]
+                try:
+                    attachments.extend(future.result())
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.warning("Skipping Gmail message %s during sync: %s", message_id, exc)
 
     stored = _store_attachments(user_id, attachments)
     return {
@@ -239,7 +369,125 @@ def _serialize_attachment(doc: dict):
     return clean
 
 
+def _doc_email_date_ms(doc: dict):
+    try:
+        return int(doc.get("latestEmailDateMs") or doc.get("emailDateMs") or doc.get("internalDate") or doc.get("date") or 0)
+    except Exception:
+        return 0
+
+
+def _related_email_for_doc(doc: dict):
+    return {
+        "messageId": doc.get("messageId"),
+        "threadId": doc.get("threadId"),
+        "senderName": doc.get("senderName") or doc.get("latestSenderName"),
+        "senderEmail": doc.get("senderEmail") or doc.get("latestSenderEmail"),
+        "subject": doc.get("subject") or doc.get("emailSubject") or doc.get("latestEmailSubject"),
+        "emailDate": doc.get("emailDate") or doc.get("latestEmailDate"),
+        "emailDateMs": _doc_email_date_ms(doc),
+    }
+
+
+def _merge_gmail_docs(docs: list[dict], now: str | None = None):
+    if not docs:
+        return {}
+
+    latest = max(docs, key=lambda doc: (_doc_email_date_ms(doc), str(doc.get("updatedAt") or "")))
+    merged = dict(latest)
+    merged.pop("_id", None)
+    merged.pop("_needsNormalizedUpdate", None)
+    related_attachment_keys = []
+    related_message_ids = []
+    related_emails = []
+    seen_email_keys = set()
+
+    def add_unique(values: list, value):
+        if value and value not in values:
+            values.append(value)
+
+    for doc in docs:
+        for key in doc.get("relatedAttachmentKeys") or []:
+            add_unique(related_attachment_keys, key)
+        if doc.get("messageId") and (doc.get("attachmentId") or doc.get("id")):
+            add_unique(related_attachment_keys, f"{doc.get('messageId')}:{doc.get('attachmentId') or doc.get('id')}")
+
+        for message_id in doc.get("relatedMessageIds") or doc.get("messageIds") or []:
+            add_unique(related_message_ids, message_id)
+        add_unique(related_message_ids, doc.get("messageId"))
+
+        related = doc.get("relatedEmails") or [_related_email_for_doc(doc)]
+        for email in related:
+            email_key = str(email.get("messageId") or email)
+            if email_key and email_key not in seen_email_keys:
+                related_emails.append(email)
+                seen_email_keys.add(email_key)
+
+    normalized_filename = _normalize_filename(latest.get("normalizedFileName") or latest.get("filename") or latest.get("originalFilename"))
+    merged.update(
+        {
+            "source": "gmail",
+            "normalizedFileName": normalized_filename,
+            "originalFilename": docs[0].get("originalFilename") or docs[0].get("filename") or latest.get("filename") or "Attachment",
+            "latestSenderName": latest.get("senderName") or latest.get("latestSenderName"),
+            "latestSenderEmail": latest.get("senderEmail") or latest.get("latestSenderEmail"),
+            "latestEmailSubject": latest.get("subject") or latest.get("emailSubject") or latest.get("latestEmailSubject"),
+            "latestEmailDate": latest.get("emailDate") or latest.get("latestEmailDate"),
+            "latestEmailDateMs": _doc_email_date_ms(latest),
+            "relatedAttachmentKeys": related_attachment_keys,
+            "relatedMessageIds": related_message_ids,
+            "messageIds": related_message_ids,
+            "relatedEmails": related_emails,
+            "occurrenceCount": len(related_attachment_keys) or len(docs),
+        }
+    )
+    if now:
+        merged["updatedAt"] = now
+    return merged
+
+
+def _cleanup_user_gmail_duplicates(user_id: str):
+    docs = list(gmail_docs_collection.find({"userId": str(user_id), "source": "gmail"}).sort([("emailDateMs", -1), ("updatedAt", -1)]))
+    if not docs:
+        return 0
+
+    now = datetime.now(timezone.utc).isoformat()
+    groups: dict[str, list[dict]] = {}
+    for doc in docs:
+        normalized = _normalize_filename(doc.get("normalizedFileName") or doc.get("filename") or doc.get("originalFilename"))
+        doc["_needsNormalizedUpdate"] = doc.get("normalizedFileName") != normalized
+        doc["normalizedFileName"] = normalized
+        groups.setdefault(normalized, []).append(doc)
+
+    merged_count = 0
+    for normalized, group_docs in groups.items():
+        if len(group_docs) == 1:
+            doc = group_docs[0]
+            if doc.get("_needsNormalizedUpdate"):
+                gmail_docs_collection.update_one({"_id": doc["_id"]}, {"$set": {"normalizedFileName": normalized, "updatedAt": now}})
+            continue
+        group_docs.sort(key=lambda doc: (_doc_email_date_ms(doc), str(doc.get("updatedAt") or "")), reverse=True)
+        keeper = group_docs[0]
+        duplicate_ids = [doc["_id"] for doc in group_docs[1:]]
+        merged_doc = _merge_gmail_docs(group_docs, now)
+        if duplicate_ids:
+            gmail_docs_collection.delete_many({"_id": {"$in": duplicate_ids}})
+        gmail_docs_collection.update_one({"_id": keeper["_id"]}, {"$set": merged_doc})
+        merged_count += 1
+
+    return merged_count
+
+
+def _dedupe_docs_for_response(docs: list[dict]):
+    groups: dict[str, list[dict]] = {}
+    for doc in docs:
+        normalized = _normalize_filename(doc.get("normalizedFileName") or doc.get("filename") or doc.get("originalFilename"))
+        doc["normalizedFileName"] = normalized
+        groups.setdefault(normalized, []).append(doc)
+    return sorted((_merge_gmail_docs(group) for group in groups.values()), key=lambda doc: _doc_email_date_ms(doc), reverse=True)
+
+
 def _build_grouped_response(user_id: str, search: str | None = None, file_type: str | None = None, recent_days: int | None = None):
+    _cleanup_user_gmail_duplicates(user_id)
     query: dict = {"userId": str(user_id), "source": "gmail"}
 
     if recent_days:
@@ -267,6 +515,7 @@ def _build_grouped_response(user_id: str, search: str | None = None, file_type: 
         ]
 
     docs = list(gmail_docs_collection.find(query, {"_id": 0, "userId": 0}).sort("emailDateMs", -1).limit(GMAIL_DOCS_PER_USER_LIMIT))
+    docs = _dedupe_docs_for_response(docs)
     senders: dict[str, dict] = {}
 
     for doc in docs:
