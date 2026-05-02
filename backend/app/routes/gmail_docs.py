@@ -17,6 +17,7 @@ logger = logging.getLogger("app.routes.gmail_docs")
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 SYNC_CACHE_SECONDS = 60
+GMAIL_DOCS_PER_USER_LIMIT = 600
 
 
 class GmailSyncPayload(BaseModel):
@@ -166,7 +167,24 @@ def _store_attachments(user_id: str, attachments: list[dict]):
     if not operations:
         return 0
     result = gmail_docs_collection.bulk_write(operations, ordered=False)
+    _enforce_user_doc_limit(user_id)
     return int(result.upserted_count + result.modified_count)
+
+
+def _enforce_user_doc_limit(user_id: str):
+    docs_to_remove = list(
+        gmail_docs_collection.find(
+            {"userId": str(user_id), "source": "gmail"},
+            {"_id": 1},
+        )
+        .sort([("emailDateMs", -1), ("updatedAt", -1)])
+        .skip(GMAIL_DOCS_PER_USER_LIMIT)
+    )
+    if not docs_to_remove:
+        return 0
+
+    result = gmail_docs_collection.delete_many({"_id": {"$in": [doc["_id"] for doc in docs_to_remove]}})
+    return int(result.deleted_count)
 
 
 def _sync_page(access_token: str, user_id: str, page_size: int, page_token: str | None = None):
@@ -248,7 +266,7 @@ def _build_grouped_response(user_id: str, search: str | None = None, file_type: 
             {"filename": {"$regex": search, "$options": "i"}},
         ]
 
-    docs = list(gmail_docs_collection.find(query, {"_id": 0, "userId": 0}).sort("emailDateMs", -1).limit(1000))
+    docs = list(gmail_docs_collection.find(query, {"_id": 0, "userId": 0}).sort("emailDateMs", -1).limit(GMAIL_DOCS_PER_USER_LIMIT))
     senders: dict[str, dict] = {}
 
     for doc in docs:
