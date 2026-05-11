@@ -469,7 +469,7 @@ export default function ConnectHub({
                 {debouncedQuery
                   ? loadingResults && results.length > 0
                     ? "Showing quick matches first while the backend refreshes."
-                    : "Results are coming from the backend in real time."
+                    : ""
                   : "Start typing above to look for people in your network."}
               </p>
             </div>
