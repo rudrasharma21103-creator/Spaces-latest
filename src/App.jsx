@@ -7491,8 +7491,8 @@ export default function CollaborationApp() {
             <SmartImage src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"} alt="Spaces logo" className="h-8 w-8 rounded-xl object-contain" loading="eager" fetchPriority="high" />
             <span className="text-sm font-bold text-current">Spaces</span>
           </div>
-          <p className="text-sm">Designed to show the real product, not hide it.</p>
-          <p className="text-sm">� 2026 Spaces</p>
+          <p className="text-sm"></p>
+          <p className="text-sm"> 2026 Spaces</p>
         </div>
       </footer>
       {/* Demo Modal */}
@@ -11982,13 +11982,13 @@ export default function CollaborationApp() {
               </div>
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
-                className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-slate-800 bg-[#0f1218] shadow-2xl shadow-black/50' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30 backdrop-blur-xl'} ${
+                className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-cyan-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
                     ? "w-96 translate-x-0 opacity-100"
                       : "w-96 translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
-                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-slate-800 bg-[#111827]' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
+                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
                   <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
@@ -12026,7 +12026,7 @@ export default function CollaborationApp() {
                       <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                         Topic
                       </h4>
-                      <div className={`rounded-2xl p-5 border text-sm leading-relaxed ${isDarkMode ? 'bg-[#171c25] border-slate-700 text-slate-200 shadow-sm shadow-black/20' : 'bg-slate-50/80 border-slate-100/60 text-slate-600'}`}>
+                      <div className={`rounded-2xl p-5 border text-sm leading-relaxed ${isDarkMode ? 'bg-slate-800/50 border-slate-700 text-slate-300' : 'bg-slate-50/80 border-slate-100/60 text-slate-600'}`}>
                         Welcome to the{" "}
                         <span className={`font-bold ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`}>
                           #{getActiveViewName().replace("# ", "")}
@@ -12063,7 +12063,7 @@ export default function CollaborationApp() {
                         return (
                           <div
                             key={member.id}
-                            className={`flex items-center gap-3 p-3 rounded-2xl transition-colors cursor-default group border border-transparent ${isDarkMode ? 'hover:bg-[#171c25] hover:border-slate-700' : 'hover:bg-slate-50/80 hover:border-slate-100/60'}`}
+                            className={`flex items-center gap-3 p-3 rounded-2xl transition-colors cursor-default group border border-transparent ${isDarkMode ? 'hover:bg-slate-800 hover:border-slate-700' : 'hover:bg-slate-50/80 hover:border-slate-100/60'}`}
                           >
                             <div className="relative">
                               <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-sm border overflow-hidden ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'}`}>
