@@ -11982,13 +11982,13 @@ export default function CollaborationApp() {
               </div>
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
-                className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[var(--border-light)] bg-[var(--bg-secondary)]/95 shadow-2xl shadow-cyan-900/20' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
+                className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[#2b3038] bg-[#111315] shadow-2xl shadow-black/45' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
                   showMemberDetails
                     ? "w-96 translate-x-0 opacity-100"
                       : "w-96 translate-x-full opacity-0 pointer-events-none"
                 }`}
               >
-                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[var(--border-light)] bg-gradient-to-r from-slate-800/80 to-cyan-900/30' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
+                <div className={`h-[80px] flex items-center justify-between px-6 border-b ${isDarkMode ? 'border-[#2b3038] bg-[#15181d]' : 'border-slate-100/80 bg-gradient-to-r from-slate-50/80 to-sky-50/30'}`}>
                   <h3 className={`font-bold text-lg ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Details</h3>
                   <button
                     onClick={() => setShowMemberDetails(false)}
@@ -12026,7 +12026,7 @@ export default function CollaborationApp() {
                       <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                         Topic
                       </h4>
-                      <div className={`rounded-2xl p-5 border text-sm leading-relaxed ${isDarkMode ? 'bg-slate-800/50 border-slate-700 text-slate-300' : 'bg-slate-50/80 border-slate-100/60 text-slate-600'}`}>
+                      <div className={`rounded-2xl p-5 border text-sm leading-relaxed ${isDarkMode ? 'bg-[#181c23] border-[#303641] text-slate-200' : 'bg-slate-50/80 border-slate-100/60 text-slate-600'}`}>
                         Welcome to the{" "}
                         <span className={`font-bold ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`}>
                           #{getActiveViewName().replace("# ", "")}

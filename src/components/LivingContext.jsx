@@ -16,6 +16,7 @@ import {
   Plus,
   Play,
   Presentation,
+  Search,
   Sparkles,
   Trash2,
   Users,
@@ -59,6 +60,29 @@ function formatFileDate(timestamp) {
   } catch {
     return ""
   }
+}
+
+function normalizeFileSearchValue(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+}
+
+function getFileSearchText(file) {
+  const extension = String(file?.name || "").split(".").pop()
+
+  return normalizeFileSearchValue([
+    file?.name,
+    extension,
+    file?.author,
+    file?.messageLabel,
+    file?.sourceLabel,
+    file?.mimeType,
+    formatFileDate(file?.timestamp),
+    formatFileSize(file?.size),
+  ].filter(Boolean).join(" "))
 }
 
 function clampValue(value, min, max) {
@@ -180,17 +204,28 @@ function getPreviewConfig(kind, isDarkMode) {
   }
 }
 
-function FilePreview({ file, isDarkMode }) {
+function FilePreview({ file, isDarkMode, variant = "card" }) {
   const kind = getFileKind(file)
   const config = getPreviewConfig(kind, isDarkMode)
   const PreviewIcon = config.icon
   const fileTitle = file?.name || "Untitled file"
+  const isThumb = variant === "thumb"
 
   if (kind === "image" && file?.url) {
     return (
-      <div className={`relative overflow-hidden rounded-[1.1rem] border sm:rounded-[1.25rem] ${isDarkMode ? "border-slate-700/70" : "border-slate-200 bg-white/80"}`}>
-        <SmartImage src={file.url} alt={fileTitle} className="h-28 w-full object-cover sm:h-40" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/30 to-transparent sm:h-20" />
+      <div className={`relative shrink-0 overflow-hidden border ${isThumb ? "h-14 w-14 rounded-xl" : "h-28 w-full rounded-[1.1rem] sm:h-40 sm:rounded-[1.25rem]"} ${isDarkMode ? "border-slate-700/70 bg-slate-900" : "border-slate-200 bg-white/80"}`}>
+        <SmartImage src={file.url} alt={fileTitle} className="h-full w-full object-cover" />
+        {!isThumb && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/30 to-transparent sm:h-20" />}
+      </div>
+    )
+  }
+
+  if (isThumb) {
+    return (
+      <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border ${isDarkMode ? `border-slate-700/70 ${config.panel}` : "border-slate-200 bg-white"}`}>
+        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${config.accent}`}>
+          <PreviewIcon className="h-4 w-4" />
+        </div>
       </div>
     )
   }
@@ -1691,25 +1726,82 @@ export function FilesList({ files, isDarkMode }) {
 }
 
 export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFile, onDeleteFile }) {
-  if (!files.length) {
-    return (
-      <div className={`mx-4 sm:mx-6 rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
-        No files linked in this channel yet.
-      </div>
-    )
-  }
+  const [fileSearchQuery, setFileSearchQuery] = React.useState("")
+  const deferredFileSearchQuery = React.useDeferredValue(fileSearchQuery)
+  const normalizedSearchQuery = normalizeFileSearchValue(deferredFileSearchQuery)
+  const searchTerms = React.useMemo(
+    () => normalizedSearchQuery.split(/\s+/).filter(Boolean),
+    [normalizedSearchQuery]
+  )
+  const searchableFiles = React.useMemo(
+    () => files.map(file => ({ file, searchText: getFileSearchText(file) })),
+    [files]
+  )
+  const visibleFiles = React.useMemo(() => {
+    if (!searchTerms.length) return files
+
+    return searchableFiles
+      .filter(({ searchText }) => searchTerms.every(term => searchText.includes(term)))
+      .map(({ file }) => file)
+  }, [files, searchableFiles, searchTerms])
+  const hasSearch = fileSearchQuery.trim().length > 0
 
   return (
     <div className="mx-4 sm:mx-6 space-y-3">
       <div className={`rounded-[1.5rem] border px-4 py-3.5 ${isDarkMode ? "bg-[#16181c] border-slate-800" : "bg-white/80 border-white shadow-sm"}`}>
-        <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>Channel Files</div>
-        <div className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-          {files.length} file{files.length === 1 ? "" : "s"} shared in this channel
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className={`text-base font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>Channel Files</div>
+            <div className={`mt-1 text-sm ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              {files.length} file{files.length === 1 ? "" : "s"} shared in this channel
+              {hasSearch ? ` | ${visibleFiles.length} shown` : ""}
+            </div>
+          </div>
+          <label className={`flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border px-3 transition focus-within:ring-2 sm:w-72 ${
+            isDarkMode
+              ? "border-slate-700 bg-[#0f1115] text-slate-200 focus-within:ring-sky-500/30"
+              : "border-slate-200 bg-slate-50 text-slate-700 focus-within:ring-sky-500/20"
+          }`}>
+            <Search className={`h-4 w-4 shrink-0 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`} />
+            <input
+              type="search"
+              value={fileSearchQuery}
+              onChange={event => setFileSearchQuery(event.target.value)}
+              placeholder="Search files"
+              className={`min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:font-normal ${
+                isDarkMode ? "placeholder:text-slate-500" : "placeholder:text-slate-400"
+              }`}
+              autoComplete="off"
+              spellCheck="false"
+            />
+            {hasSearch && (
+              <button
+                type="button"
+                onClick={() => setFileSearchQuery("")}
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition ${
+                  isDarkMode ? "text-slate-400 hover:bg-white/10 hover:text-slate-200" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                }`}
+                aria-label="Clear file search"
+                title="Clear file search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </label>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-2 sm:gap-3.5 xl:grid-cols-3 2xl:grid-cols-4">
-        {files.map(file => {
+      {!files.length ? (
+        <div className={`rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+          No files linked in this channel yet.
+        </div>
+      ) : !visibleFiles.length ? (
+        <div className={`rounded-[1.75rem] border p-8 text-center ${isDarkMode ? "bg-[#16181c] border-slate-800 text-slate-400" : "bg-white/70 border-white/70 text-slate-500 shadow-sm"}`}>
+          No files match "{fileSearchQuery.trim()}".
+        </div>
+      ) : (
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3.5 xl:grid-cols-3 2xl:grid-cols-4">
+        {visibleFiles.map(file => {
           const kind = getFileKind(file)
           const kindConfig = getPreviewConfig(kind, isDarkMode)
           const HeaderIcon = kind === "image" ? FileImage : kindConfig.icon
@@ -1728,26 +1820,26 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                   onOpenFile?.(file)
                 }
               }}
-              className={`min-w-0 transition-all duration-200 hover:-translate-y-0.5 ${
+              className={`min-w-0 overflow-hidden rounded-[1rem] border p-2.5 transition-all duration-200 hover:-translate-y-0.5 sm:rounded-[1.5rem] sm:p-3 ${
                 isDarkMode
-                  ? "sm:overflow-hidden sm:rounded-[1.5rem] sm:border sm:bg-[#16181c] sm:p-3 sm:border-slate-800 sm:hover:border-slate-700"
-                  : "sm:overflow-hidden sm:rounded-[1.5rem] sm:border sm:bg-slate-100 sm:p-3 sm:border-slate-200 sm:hover:border-slate-300"
+                  ? "border-slate-800 bg-[#16181c] hover:border-slate-700"
+                  : "border-slate-200 bg-white/90 shadow-sm hover:border-slate-300 sm:bg-slate-100"
               }`}
             >
-              <div className="sm:hidden">
-                <FilePreview file={file} isDarkMode={isDarkMode} />
-                <div className="mt-2 flex items-start gap-2">
-                  <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm ${kind === "image" ? "bg-sky-500 text-white" : kindConfig.accent}`}>
-                    <HeaderIcon className="h-3 w-3" />
+              <div className="flex min-w-0 items-center gap-3 sm:hidden">
+                <FilePreview file={file} isDarkMode={isDarkMode} variant="thumb" />
+                <div className="min-w-0 flex-1">
+                  <div className={`line-clamp-2 break-words text-sm font-semibold leading-tight ${isDarkMode ? "text-white" : "text-slate-800"}`}>
+                    {file.name}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className={`line-clamp-2 break-words text-[0.72rem] font-medium leading-[1.05rem] ${isDarkMode ? "text-white" : "text-slate-800"}`}>
-                      {file.name}
-                    </div>
-                    <div className={`mt-1 truncate text-[0.65rem] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
-                      {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ")}
-                    </div>
+                  <div className={`mt-1 truncate text-[0.72rem] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                    {[compactDate && `Opened ${compactDate}`, compactSize].filter(Boolean).join(" | ") || file.sourceLabel}
                   </div>
+                  <div className={`mt-1 line-clamp-1 text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                    {file.messageLabel}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
                   {file.canDelete && (
                     <button
                       type="button"
@@ -1755,10 +1847,10 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                         event.stopPropagation()
                         onDeleteFile?.(file)
                       }}
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors ${
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
                         isDarkMode
                           ? "bg-rose-500/15 text-rose-200 hover:bg-rose-500/25"
-                          : "bg-white text-rose-600 hover:bg-rose-50"
+                          : "bg-rose-50 text-rose-600 hover:bg-rose-100"
                       }`}
                       title={`Delete ${file.name}`}
                       aria-label={`Delete ${file.name}`}
@@ -1766,6 +1858,22 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation()
+                      onAttachFile?.(file)
+                    }}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+                      isDarkMode
+                        ? "bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
+                        : "bg-sky-50 text-sky-700 hover:bg-sky-100"
+                    }`}
+                    title={`Attach ${file.name} to message`}
+                    aria-label={`Attach ${file.name} to message`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
 
@@ -1842,6 +1950,7 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
           )
         })}
       </div>
+      )}
     </div>
   )
 }
