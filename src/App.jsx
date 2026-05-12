@@ -149,6 +149,8 @@ try {
   // keep default
 }
 
+const CONTEXT_ROUTE_STATE_KEY = "spacexyz_context_route_state"
+
 function getAttachmentCacheKey(att) {
   if (!att) return null
 
@@ -299,6 +301,23 @@ export default function CollaborationApp() {
     }
   }
 
+  const readContextRouteState = React.useCallback(() => {
+    if (typeof window === "undefined") return null
+    try {
+      const stored = window.sessionStorage.getItem(CONTEXT_ROUTE_STATE_KEY)
+      return stored ? JSON.parse(stored) : null
+    } catch (error) {
+      return null
+    }
+  }, [])
+
+  const writeContextRouteState = React.useCallback(state => {
+    if (typeof window === "undefined") return
+    try {
+      window.sessionStorage.setItem(CONTEXT_ROUTE_STATE_KEY, JSON.stringify(state))
+    } catch (error) {}
+  }, [])
+
   const restoreFromDedicatedPage = React.useCallback(({ allowDedicated = true } = {}) => {
     if (dedicatedPageReturn?.view === "channel" || dedicatedPageReturn?.view === "dm") {
       setOpenContextId(null)
@@ -358,11 +377,17 @@ export default function CollaborationApp() {
       })
     }
     setContextsSourceView(sourceView)
+    writeContextRouteState({
+      sourceView,
+      activeDMUser,
+      activeChannel,
+      activeSpace,
+    })
     setActiveChannelTab("messages")
     setOpenContextId(contextId)
     setActiveView("contexts")
     pushAppRoute(targetPath)
-  }, [activeChannelTab, activeView, contextsSourceView, homeSection, openContextId])
+  }, [activeChannel, activeChannelTab, activeDMUser, activeSpace, activeView, contextsSourceView, homeSection, openContextId, writeContextRouteState])
 
   useEffect(() => {
     if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return undefined
@@ -378,7 +403,18 @@ export default function CollaborationApp() {
 
       if (pathname === "/contexts" || pathname.startsWith("/contexts/")) {
         const contextId = pathname.startsWith("/contexts/") ? decodeURIComponent(pathname.slice("/contexts/".length)) : null
-        setContextsSourceView(prev => prev || (activeDMUser ? "dm" : activeChannel ? "channel" : prev))
+        const routeState = readContextRouteState()
+        if (routeState?.activeDMUser) {
+          setActiveDMUser(routeState.activeDMUser)
+          setHomeActiveDMUser(routeState.activeDMUser)
+        }
+        if (routeState?.activeChannel) {
+          setActiveChannel(routeState.activeChannel)
+        }
+        if (routeState?.activeSpace) {
+          setActiveSpace(routeState.activeSpace)
+        }
+        setContextsSourceView(prev => prev || routeState?.sourceView || (activeDMUser ? "dm" : activeChannel ? "channel" : prev))
         setActiveChannelTab("messages")
         setOpenContextId(contextId || null)
         setActiveView("contexts")
@@ -396,7 +432,7 @@ export default function CollaborationApp() {
     }
     window.addEventListener("popstate", applyRoute)
     return () => window.removeEventListener("popstate", applyRoute)
-  }, [activeChannel, activeDMUser, activeView, restoreFromDedicatedPage])
+  }, [activeChannel, activeDMUser, activeView, readContextRouteState, restoreFromDedicatedPage])
 
   useEffect(() => {
     if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return
@@ -1348,8 +1384,7 @@ export default function CollaborationApp() {
         }
 
         // 2. Message Match
-        const ids = [currentUser.id, friend.id].sort((a, b) => a - b)
-        const chatId = `dm_${ids[0]}_${ids[1]}`
+        const chatId = getDMChatId(friend.id)
         try {
           const msgs = await Storage.getMessages(chatId)
           for (const msg of msgs || []) {
@@ -2051,19 +2086,14 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     if (!isAuthenticated) return
-    
-    let chatId = null
-    if (activeView === "channel" && activeChannel) {
-      chatId = Number(activeChannel)
-    } else if (activeView === "dm" && activeDMUser && currentUser) {
-      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
-      chatId = `dm_${ids[0]}_${ids[1]}`
-    }
+
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    const chatId = getActiveChatId()
     
     if (!chatId) return
     
     // Don't try to load messages if spaces haven't been loaded yet
-    if (activeView === "channel" && spaces.length === 0) return
+    if (resolvedView === "channel" && spaces.length === 0) return
     
     const cachedMessages = Storage.peekMessages(chatId)
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
@@ -2111,20 +2141,14 @@ export default function CollaborationApp() {
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
     const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
-  }, [isAuthenticated, activeChannel, activeView, activeDMUser, currentUser, spaces.length])
+  }, [isAuthenticated, activeChannel, activeView, activeDMUser, contextsSourceView, currentUser, spaces.length])
 
 
   // Chat websocket connection for real-time message delivery
   useEffect(() => {
     if (!isAuthenticated) return
 
-    let chatId = null
-    if (activeView === "channel" && activeChannel) {
-      chatId = Number(activeChannel)
-    } else if (activeView === "dm" && activeDMUser && currentUser) {
-      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
-      chatId = `dm_${ids[0]}_${ids[1]}`
-    }
+    const chatId = getActiveChatId()
 
     if (!chatId) return
 
@@ -2262,7 +2286,7 @@ export default function CollaborationApp() {
       } catch (e) {}
       chatSocketRef.current = null
     }
-  }, [isAuthenticated, activeView, activeChannel, activeDMUser, currentUser?.id])
+  }, [isAuthenticated, activeView, activeChannel, activeDMUser, contextsSourceView, currentUser?.id])
 
   // --- Scroll to Message Logic ---
   useEffect(() => {
@@ -4648,20 +4672,14 @@ export default function CollaborationApp() {
   const getActiveChatId = () => {
     const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
     if (resolvedView === "channel") return Number(activeChannel)
-    if (resolvedView === "dm" && activeDMUser && currentUser) {
-      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
-      return `dm_${ids[0]}_${ids[1]}`
-    }
+    if (resolvedView === "dm" && activeDMUser && currentUser) return getDMChatId(activeDMUser)
     return null
   }
 
   const activeChatId = useMemo(() => {
     const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
     if (resolvedView === "channel") return Number(activeChannel)
-    if (resolvedView === "dm" && activeDMUser && currentUser) {
-      const ids = [currentUser.id, activeDMUser].sort((a, b) => a - b)
-      return `dm_${ids[0]}_${ids[1]}`
-    }
+    if (resolvedView === "dm" && activeDMUser && currentUser) return getDMChatId(activeDMUser)
     return null
   }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser])
 
@@ -5101,9 +5119,17 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     const chatId = getActiveChatId()
-    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return undefined
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    if (!chatId || (resolvedView !== "channel" && resolvedView !== "dm")) return undefined
 
     const normalizedChatId = String(chatId)
+    if (
+      activeContextStateRef.current.chatId === normalizedChatId &&
+      activeContextStateRef.current.loaded
+    ) {
+      return undefined
+    }
+
     activeContextStateRef.current = { chatId: normalizedChatId, loaded: false }
 
     let cancelled = false
@@ -5112,27 +5138,51 @@ export default function CollaborationApp() {
         const state = await Storage.getContextState(normalizedChatId)
         if (cancelled) return
 
-        setContextItems(prev => [
-          ...prev.filter(context => String(context.channelId) !== normalizedChatId),
-          ...(state.contexts || []).map(context => ({
+        setContextItems(prev => {
+          const remoteContexts = (state.contexts || []).map(context => ({
             ...context,
             channelId: context.channelId || normalizedChatId,
-          })),
-        ])
-        setContextDecisions(prev => [
-          ...prev.filter(item => String(item.channelId) !== normalizedChatId),
-          ...(state.decisions || []).map(item => ({
+          }))
+          const remoteIds = new Set(remoteContexts.map(context => String(context.id)))
+          const localOnly = prev.filter(context =>
+            String(context.channelId) === normalizedChatId && !remoteIds.has(String(context.id))
+          )
+          return [
+            ...prev.filter(context => String(context.channelId) !== normalizedChatId),
+            ...remoteContexts,
+            ...localOnly,
+          ]
+        })
+        setContextDecisions(prev => {
+          const remoteDecisions = (state.decisions || []).map(item => ({
             ...item,
             channelId: item.channelId || normalizedChatId,
-          })),
-        ])
-        setContextTasks(prev => [
-          ...prev.filter(item => String(item.channelId) !== normalizedChatId),
-          ...(state.tasks || []).map(item => ({
+          }))
+          const remoteIds = new Set(remoteDecisions.map(item => String(item.id)))
+          const localOnly = prev.filter(item =>
+            String(item.channelId) === normalizedChatId && !remoteIds.has(String(item.id))
+          )
+          return [
+            ...prev.filter(item => String(item.channelId) !== normalizedChatId),
+            ...remoteDecisions,
+            ...localOnly,
+          ]
+        })
+        setContextTasks(prev => {
+          const remoteTasks = (state.tasks || []).map(item => ({
             ...item,
             channelId: item.channelId || normalizedChatId,
-          })),
-        ])
+          }))
+          const remoteIds = new Set(remoteTasks.map(item => String(item.id)))
+          const localOnly = prev.filter(item =>
+            String(item.channelId) === normalizedChatId && !remoteIds.has(String(item.id))
+          )
+          return [
+            ...prev.filter(item => String(item.channelId) !== normalizedChatId),
+            ...remoteTasks,
+            ...localOnly,
+          ]
+        })
       } catch (e) {
         console.error("Failed to load context state", e)
         if (cancelled) return
@@ -5149,11 +5199,12 @@ export default function CollaborationApp() {
     return () => {
       cancelled = true
     }
-  }, [activeView, activeChannel, activeDMUser, currentUser])
+  }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser])
 
   useEffect(() => {
     const chatId = getActiveChatId()
-    if (!chatId || (activeView !== "channel" && activeView !== "dm")) return undefined
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    if (!chatId || (resolvedView !== "channel" && resolvedView !== "dm")) return undefined
 
     const normalizedChatId = String(chatId)
     if (
@@ -5171,6 +5222,8 @@ export default function CollaborationApp() {
       clearTimeout(contextSaveTimeoutRef.current)
     }
 
+    Storage.cacheContextState(normalizedChatId, { contexts, decisions, tasks })
+
     contextSaveTimeoutRef.current = setTimeout(() => {
       Storage.saveContextState(normalizedChatId, { contexts, decisions, tasks }).catch(error => {
         console.error("Failed to save context state", error)
@@ -5183,7 +5236,7 @@ export default function CollaborationApp() {
         contextSaveTimeoutRef.current = null
       }
     }
-  }, [activeView, activeChannel, activeDMUser, currentUser, contextItems, contextDecisions, contextTasks])
+  }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser, contextItems, contextDecisions, contextTasks])
 
   useEffect(() => {
     setSelectedMessageIds([])
@@ -5224,7 +5277,7 @@ export default function CollaborationApp() {
     const chatId = getActiveChatId()
     if (!chatId || !["channel", "dm", "contexts"].includes(activeView)) return []
     return contextItems.filter(context => String(context.channelId) === String(chatId))
-  }, [activeView, activeChannel, activeDMUser, currentUser, contextItems])
+  }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser, contextItems])
 
   const contextsById = useMemo(
     () => Object.fromEntries(contextItems.map(context => [String(context.id), context])),

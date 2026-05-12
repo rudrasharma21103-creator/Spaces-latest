@@ -954,9 +954,8 @@ export const getContextState = async chatId => {
   return request
 }
 
-export const saveContextState = async (chatId, payload) => {
+export const cacheContextState = (chatId, payload) => {
   if (!chatId) return null
-  const { data: previousCache } = readContextCache(chatId)
   const optimistic = {
     chatId,
     contexts: Array.isArray(payload?.contexts) ? payload.contexts : [],
@@ -965,6 +964,13 @@ export const saveContextState = async (chatId, payload) => {
     updatedAt: new Date().toISOString(),
   }
   writeContextCache(chatId, optimistic)
+  return optimistic
+}
+
+export const saveContextState = async (chatId, payload) => {
+  if (!chatId) return null
+  const { data: previousCache } = readContextCache(chatId)
+  const optimistic = cacheContextState(chatId, payload)
   const res = await authFetch(`${API_BASE}/contexts/${chatId}`, {
     method: "PUT",
     body: JSON.stringify({
