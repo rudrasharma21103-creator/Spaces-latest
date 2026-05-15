@@ -10,7 +10,6 @@ import {
   Moon,
   Network,
   Play,
-  Sparkles,
   Sun,
   X,
 } from "lucide-react"
@@ -33,6 +32,9 @@ const media = {
   network: asset("Screenshot 2026-05-14 160554.png"),
   demo: asset("Video Project 14.mp4"),
 }
+
+const WAITLIST_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLSfGVyOa8nXf5Vrm8OPJsmd8-x87hJWE4xXcvqbr5NgNwCkI1g/viewform?usp=header"
 
 const story = [
   ["Message", "The work starts in the conversation."],
@@ -177,6 +179,20 @@ export default function ProductLandingPage({ isDarkMode, setIsDarkMode, onLogin,
           </div>
         )}
 
+        <a
+          className="launch-waitlist-link"
+          href={WAITLIST_FORM_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Waitlist is live. Open the waitlist form"
+        >
+          <span className="launch-waitlist-copy">
+            <span>Waitlist Is Live</span>
+            <span>Join the early access form</span>
+          </span>
+          <ArrowRight aria-hidden="true" />
+        </a>
+
         <div className="launch-hero-inner">
           <Reveal className="launch-hero-copy">
             <p className="launch-pill">Context-first collaboration</p>
@@ -304,5 +320,3 @@ export default function ProductLandingPage({ isDarkMode, setIsDarkMode, onLogin,
     </main>
   )
 }
-
-
