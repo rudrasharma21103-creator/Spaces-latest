@@ -73,6 +73,7 @@ import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
 import SmartImage from "./components/SmartImage"
 import HomeHub from "./components/HomeHub"
+import ProductLandingPage from "./components/ProductLandingPage"
 import TasksHub from "./components/TasksHub"
 import ContextsHub from "./components/ContextsHub"
 import DocumentsHub from "./components/DocumentsHub"
@@ -7647,7 +7648,20 @@ export default function CollaborationApp() {
 
   // Show landing page for unauthenticated users who haven't clicked sign in/up
   if (!isAuthenticated && showLandingPage) {
-    return <LandingPage />
+    return (
+      <ProductLandingPage
+        isDarkMode={isDarkMode}
+        setIsDarkMode={setIsDarkMode}
+        onLogin={() => {
+          setShowLandingPage(false)
+          setAuthMode('login')
+        }}
+        onSignup={() => {
+          setShowLandingPage(false)
+          setAuthMode('signup')
+        }}
+      />
+    )
   }
 
   if (!isAuthenticated) {
