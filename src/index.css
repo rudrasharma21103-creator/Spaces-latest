@@ -9361,6 +9361,7 @@ html:not(.dark) .launch-final {
 }
 
 .launch-waitlist-link {
+  --launch-waitlist-angle: 30deg;
   position: absolute;
   top: clamp(108px, 12svh, 146px);
   left: clamp(390px, 33vw, 620px);
@@ -9369,23 +9370,38 @@ html:not(.dark) .launch-final {
   display: inline-flex;
   align-items: center;
   gap: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  isolation: isolate;
+  border: 1px solid transparent;
   border-radius: 12px;
   padding: 9px 12px 9px 16px;
   color: #ffffff;
-  background: rgba(11, 92, 255, 0.72);
-  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(8, 28, 82, 0.88), rgba(11, 92, 255, 0.78)) padding-box,
+    conic-gradient(from var(--launch-waitlist-angle), #4285f4, #34a853, #fbbc05, #ea4335, #a142f4, #4285f4) border-box;
+  box-shadow:
+    0 16px 38px rgba(15, 23, 42, 0.2),
+    0 0 12px rgba(66, 133, 244, 0.42),
+    0 0 16px rgba(52, 168, 83, 0.2),
+    0 0 18px rgba(251, 188, 5, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
   text-decoration: none;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   transform: translateZ(0);
+  animation: launch-waitlist-border-spin 4s linear infinite;
   transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
 .launch-waitlist-link:hover {
-  border-color: rgba(255, 255, 255, 0.62);
-  background: rgba(11, 92, 255, 0.88);
-  box-shadow: 0 20px 46px rgba(15, 23, 42, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  background:
+    linear-gradient(135deg, rgba(8, 28, 82, 0.92), rgba(11, 92, 255, 0.86)) padding-box,
+    conic-gradient(from var(--launch-waitlist-angle), #4285f4, #34a853, #fbbc05, #ea4335, #a142f4, #4285f4) border-box;
+  box-shadow:
+    0 20px 46px rgba(15, 23, 42, 0.24),
+    0 0 16px rgba(66, 133, 244, 0.5),
+    0 0 20px rgba(52, 168, 83, 0.26),
+    0 0 22px rgba(234, 67, 53, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
   transform: translateY(-3px);
 }
 
@@ -9416,6 +9432,18 @@ html:not(.dark) .launch-final {
   color: rgba(226, 232, 240, 0.82);
   font-size: 12px;
   font-weight: 700;
+}
+
+@property --launch-waitlist-angle {
+  syntax: "<angle>";
+  initial-value: 30deg;
+  inherits: false;
+}
+
+@keyframes launch-waitlist-border-spin {
+  to {
+    --launch-waitlist-angle: 390deg;
+  }
 }
 
 .launch-hero {
@@ -10298,6 +10326,7 @@ html:not(.dark) .launch-final {
   .launch-primary,
   .launch-secondary,
   .launch-waitlist-link {
+    animation: none !important;
     transition: none !important;
   }
 }
