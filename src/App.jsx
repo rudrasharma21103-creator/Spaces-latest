@@ -12292,7 +12292,7 @@ export default function CollaborationApp() {
             </button>
           )}
           {!friendsSidebarCollapsed && (
-            <h3 className={`font-extrabold text-lg bg-gradient-to-r ${isDarkMode ? 'from-white to-cyan-300' : 'from-slate-700 to-sky-700'} bg-clip-text text-transparent animate-fade-in`}>Friends</h3>
+            <h3 className={`font-extrabold text-lg bg-gradient-to-r ${isDarkMode ? 'from-white to-cyan-300' : 'from-slate-700 to-sky-700'} bg-clip-text text-transparent animate-fade-in`}>Connections</h3>
           )}
           <div className="flex gap-2 ml-auto">
             {!friendsSidebarCollapsed && !isMobile && (
@@ -12336,7 +12336,7 @@ export default function CollaborationApp() {
               <Search className={`absolute left-4 top-3.5 w-4 h-4 transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-cyan-400' : 'text-slate-400 group-focus-within:text-sky-500'}`} />
               <input
                 type="text"
-                placeholder="Filter friends..."
+                placeholder="Filter connections..."
                 value={dmSearchQuery}
                 onChange={e => setDmSearchQuery(e.target.value)}
                 className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
