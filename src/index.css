@@ -10330,3 +10330,458 @@ html:not(.dark) .launch-final {
     transition: none !important;
   }
 }
+
+/* ============================================
+   WORKSPACE PARTITION SOFTENING
+   Premium quiet separators for the app shell
+   ============================================ */
+
+:root {
+  --workspace-edge: rgba(148, 163, 184, 0.20);
+  --workspace-edge-soft: rgba(148, 163, 184, 0.12);
+  --workspace-edge-faint: rgba(148, 163, 184, 0.08);
+  --workspace-surface-soft: rgba(255, 255, 255, 0.72);
+  --workspace-surface-hover: rgba(248, 250, 252, 0.68);
+  --workspace-shadow-soft: 0 18px 46px rgba(15, 23, 42, 0.055);
+  --workspace-shadow-popover: 0 22px 60px rgba(15, 23, 42, 0.12);
+  --workspace-inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+html.dark,
+body.dark {
+  --workspace-edge: rgba(203, 213, 225, 0.14);
+  --workspace-edge-soft: rgba(203, 213, 225, 0.09);
+  --workspace-edge-faint: rgba(203, 213, 225, 0.055);
+  --workspace-surface-soft: rgba(15, 23, 42, 0.54);
+  --workspace-surface-hover: rgba(255, 255, 255, 0.055);
+  --workspace-shadow-soft: 0 18px 50px rgba(0, 0, 0, 0.26);
+  --workspace-shadow-popover: 0 24px 64px rgba(0, 0, 0, 0.34);
+  --workspace-inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+body:has(.liquid-glass-navbar) [class*="border-slate-100"],
+body:has(.liquid-glass-navbar) [class*="border-slate-200"],
+body:has(.liquid-glass-navbar) [class*="border-slate-300"],
+body:has(.liquid-glass-navbar) [class*="border-[#d7e0eb]"] {
+  border-color: var(--workspace-edge-soft) !important;
+}
+
+body.dark:has(.liquid-glass-navbar) [class*="border-slate-600"],
+body.dark:has(.liquid-glass-navbar) [class*="border-slate-700"],
+body.dark:has(.liquid-glass-navbar) [class*="border-slate-800"],
+body.dark:has(.liquid-glass-navbar) [class*="border-[#2b3038]"],
+body.dark:has(.liquid-glass-navbar) [class*="border-[#303641]"],
+html.dark:has(.liquid-glass-navbar) [class*="border-slate-600"],
+html.dark:has(.liquid-glass-navbar) [class*="border-slate-700"],
+html.dark:has(.liquid-glass-navbar) [class*="border-slate-800"],
+html.dark:has(.liquid-glass-navbar) [class*="border-[#2b3038]"],
+html.dark:has(.liquid-glass-navbar) [class*="border-[#303641]"] {
+  border-color: var(--workspace-edge-soft) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="divide-slate"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--workspace-edge-faint) !important;
+}
+
+.liquid-glass-sidebar,
+.liquid-glass-sidebar-right {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.90), rgba(248, 250, 252, 0.82)) !important;
+  border-color: transparent !important;
+  box-shadow: var(--workspace-shadow-soft), var(--workspace-inner-highlight) !important;
+}
+
+.liquid-glass-sidebar {
+  border-right-color: var(--workspace-edge-soft) !important;
+}
+
+.liquid-glass-sidebar-right {
+  border-left-color: var(--workspace-edge-soft) !important;
+}
+
+.liquid-glass-sidebar:hover,
+.liquid-glass-sidebar-right:hover {
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.07), var(--workspace-inner-highlight) !important;
+}
+
+.liquid-glass-sidebar::after,
+.liquid-glass-sidebar-right::before {
+  opacity: 0.22 !important;
+}
+
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(8, 13, 24, 0.76)) !important;
+  border-color: transparent !important;
+  box-shadow: var(--workspace-shadow-soft), var(--workspace-inner-highlight) !important;
+}
+
+html.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar {
+  border-right-color: var(--workspace-edge-soft) !important;
+}
+
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar-right {
+  border-left-color: var(--workspace-edge-soft) !important;
+}
+
+.liquid-glass-navbar {
+  box-shadow: inset 0 -1px 0 var(--workspace-edge-faint) !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item,
+.liquid-glass-navbar .liquid-glass-button,
+.liquid-glass-navbar .liquid-glass-header {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item:hover,
+.liquid-glass-navbar .liquid-glass-button:hover,
+.liquid-glass-navbar .liquid-glass-header:hover {
+  background: var(--workspace-surface-hover) !important;
+  border-color: var(--workspace-edge-faint) !important;
+  box-shadow: var(--workspace-inner-highlight) !important;
+  transform: none !important;
+}
+
+.liquid-glass-navbar .h-px,
+.liquid-glass-navbar [class*="w-px"] {
+  background: linear-gradient(to bottom, transparent, var(--workspace-edge-soft), transparent) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="shadow-sm"],
+body:has(.liquid-glass-navbar) [class*="shadow-md"],
+body:has(.liquid-glass-navbar) [class*="shadow-lg"],
+body:has(.liquid-glass-navbar) [class*="shadow-xl"],
+body:has(.liquid-glass-navbar) [class*="shadow-2xl"] {
+  --tw-shadow-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="hover:shadow-md"]:hover,
+body:has(.liquid-glass-navbar) [class*="hover:shadow-lg"]:hover,
+body:has(.liquid-glass-navbar) [class*="hover:shadow-xl"]:hover {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.075), var(--workspace-inner-highlight) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="hover:border-slate"]:hover,
+body:has(.liquid-glass-navbar) [class*="hover:border-sky"]:hover {
+  border-color: var(--workspace-edge) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="hover:bg-slate-50"]:hover,
+body:has(.liquid-glass-navbar) [class*="hover:bg-slate-100"]:hover,
+body:has(.liquid-glass-navbar) [class*="hover:bg-[#f4f7fb]"]:hover {
+  background-color: var(--workspace-surface-hover) !important;
+}
+
+body.dark:has(.liquid-glass-navbar) [class*="hover:bg-slate-700"]:hover,
+body.dark:has(.liquid-glass-navbar) [class*="hover:bg-slate-800"]:hover,
+body.dark:has(.liquid-glass-navbar) [class*="hover:bg-[#2C2C2C]"]:hover,
+html.dark:has(.liquid-glass-navbar) [class*="hover:bg-slate-700"]:hover,
+html.dark:has(.liquid-glass-navbar) [class*="hover:bg-slate-800"]:hover,
+html.dark:has(.liquid-glass-navbar) [class*="hover:bg-[#2C2C2C]"]:hover {
+  background-color: var(--workspace-surface-hover) !important;
+}
+
+.liquid-glass-chat-area [class*="border-b"],
+.liquid-glass-chat-area [class*="border-t"],
+.liquid-glass-chat-area [class*="border-l"],
+.liquid-glass-chat-area [class*="border-r"] {
+  border-color: var(--workspace-edge-faint) !important;
+}
+
+.liquid-glass-chat-area [class*="justify-center"] > .h-px {
+  background: linear-gradient(to right, transparent, var(--workspace-edge-soft), transparent) !important;
+}
+
+.liquid-glass-chat-area [class*="justify-center"] > span.border {
+  border-color: var(--workspace-edge-soft) !important;
+  background: var(--workspace-surface-soft) !important;
+  box-shadow: var(--workspace-inner-highlight) !important;
+}
+
+.liquid-glass-chat-area [id^="msg-"]:hover {
+  background-color: rgba(148, 163, 184, 0.075) !important;
+}
+
+html.dark .liquid-glass-chat-area [id^="msg-"]:hover,
+body.dark .liquid-glass-chat-area [id^="msg-"]:hover {
+  background-color: rgba(255, 255, 255, 0.035) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="bg-[#e9eef6]"] {
+  background-color: rgba(226, 232, 240, 0.62) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 12px 34px rgba(15, 23, 42, 0.055) !important;
+}
+
+body.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"],
+html.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"] {
+  background-color: rgba(17, 24, 39, 0.68) !important;
+  border-color: var(--workspace-edge-soft) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.065), 0 16px 38px rgba(0, 0, 0, 0.22) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="bg-white/95"],
+body:has(.liquid-glass-navbar) [class*="bg-white/90"],
+body:has(.liquid-glass-navbar) [class*="bg-white/80"],
+body:has(.liquid-glass-navbar) [class*="bg-white/75"],
+body:has(.liquid-glass-navbar) [class*="bg-white/70"] {
+  background-color: var(--workspace-surface-soft) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="rounded-3xl"][class*="shadow-2xl"],
+body:has(.liquid-glass-navbar) [class*="rounded-2xl"][class*="shadow-xl"],
+.collapsed-space-popover,
+.liquid-glass-navbar [class*="top-full"][class*="shadow-2xl"],
+.liquid-glass-chat-area [class*="bottom-[calc(100%+0.5rem)]"],
+.liquid-glass-modal {
+  border-color: var(--workspace-edge-soft) !important;
+  box-shadow: var(--workspace-shadow-popover), var(--workspace-inner-highlight) !important;
+}
+
+.liquid-glass-modal {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.74)) !important;
+}
+
+html.dark .liquid-glass-modal,
+body.dark .liquid-glass-modal {
+  background: linear-gradient(145deg, rgba(17, 24, 39, 0.88), rgba(15, 23, 42, 0.78)) !important;
+}
+
+.liquid-glass-modal::after {
+  opacity: 0.28 !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
+  border-left-color: var(--workspace-edge-soft) !important;
+  box-shadow: -18px 0 50px rgba(15, 23, 42, 0.06), var(--workspace-inner-highlight) !important;
+}
+
+html.dark:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"],
+body.dark:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
+  box-shadow: -18px 0 54px rgba(0, 0, 0, 0.24), var(--workspace-inner-highlight) !important;
+}
+
+/* Workspace border language: match the soft homepage shell exactly. */
+:root {
+  --workspace-home-border: rgba(226, 232, 240, 0.45);
+  --workspace-home-border-faint: rgba(226, 232, 240, 0.30);
+  --workspace-home-border-hairline: rgba(226, 232, 240, 0.22);
+  --workspace-home-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+html.dark,
+body.dark {
+  --workspace-home-border: rgba(255, 255, 255, 0.06);
+  --workspace-home-border-faint: rgba(255, 255, 255, 0.045);
+  --workspace-home-border-hairline: rgba(255, 255, 255, 0.035);
+  --workspace-home-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.liquid-glass-sidebar {
+  border: 0 !important;
+  border-right: 1px solid var(--workspace-home-border) !important;
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.54),
+    var(--workspace-home-shadow) !important;
+}
+
+.liquid-glass-sidebar-right {
+  border: 0 !important;
+  border-left: 1px solid var(--workspace-home-border) !important;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.50),
+    var(--workspace-home-shadow) !important;
+}
+
+html.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar {
+  border-right-color: var(--workspace-home-border) !important;
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.035),
+    var(--workspace-home-shadow) !important;
+}
+
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar-right {
+  border-left-color: var(--workspace-home-border) !important;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.035),
+    var(--workspace-home-shadow) !important;
+}
+
+.liquid-glass-sidebar:hover,
+.liquid-glass-sidebar-right:hover,
+html.dark .liquid-glass-sidebar:hover,
+html.dark .liquid-glass-sidebar-right:hover,
+body.dark .liquid-glass-sidebar:hover,
+body.dark .liquid-glass-sidebar-right:hover {
+  box-shadow: var(--workspace-home-shadow) !important;
+}
+
+.liquid-glass-sidebar::before,
+.liquid-glass-sidebar::after,
+.liquid-glass-sidebar-right::before,
+.liquid-glass-sidebar-right::after {
+  opacity: 0 !important;
+}
+
+.liquid-glass-sidebar [class*="border-b"],
+.liquid-glass-sidebar-right [class*="border-b"],
+.liquid-glass-sidebar [class*="border-t"],
+.liquid-glass-sidebar-right [class*="border-t"],
+.liquid-glass-sidebar [class*="border-l"],
+.liquid-glass-sidebar-right [class*="border-l"],
+.liquid-glass-sidebar [class*="border-r"],
+.liquid-glass-sidebar-right [class*="border-r"] {
+  border-color: var(--workspace-home-border-faint) !important;
+}
+
+.liquid-glass-sidebar .border-l-2,
+.liquid-glass-sidebar-right .border-l-2 {
+  border-left-width: 1px !important;
+  border-left-color: var(--workspace-home-border-faint) !important;
+}
+
+.liquid-glass-sidebar [class*="border-slate"],
+.liquid-glass-sidebar-right [class*="border-slate"],
+.liquid-glass-sidebar [class*="border-[var(--border-light)]"],
+.liquid-glass-sidebar-right [class*="border-[var(--border-light)]"] {
+  border-color: var(--workspace-home-border-faint) !important;
+}
+
+.liquid-glass-navbar {
+  border: 0 !important;
+  box-shadow: inset 0 -1px 0 var(--workspace-home-border) !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item,
+.liquid-glass-navbar .liquid-glass-button,
+.liquid-glass-navbar .liquid-glass-header,
+.liquid-glass-navbar [class*="border"] {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.liquid-glass-navbar .liquid-glass-nav-item:hover,
+.liquid-glass-navbar .liquid-glass-button:hover,
+.liquid-glass-navbar .liquid-glass-header:hover {
+  border-color: var(--workspace-home-border-hairline) !important;
+  box-shadow: var(--workspace-home-shadow) !important;
+}
+
+.liquid-glass-navbar [class*="w-px"],
+.liquid-glass-navbar .h-px {
+  background: var(--workspace-home-border-faint) !important;
+  opacity: 0.75 !important;
+}
+
+.liquid-glass-chat-area {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.liquid-glass-chat-area [class*="border-b"],
+.liquid-glass-chat-area [class*="border-t"],
+.liquid-glass-chat-area [class*="border-l"],
+.liquid-glass-chat-area [class*="border-r"],
+.liquid-glass-chat-area [class*="border-slate"],
+.liquid-glass-chat-area [class*="border-[#"] {
+  border-color: var(--workspace-home-border-faint) !important;
+}
+
+.liquid-glass-chat-area [class*="overflow-x-auto"][class*="border-b"] {
+  border-bottom-color: var(--workspace-home-border) !important;
+}
+
+.liquid-glass-chat-area [class*="justify-center"] > .h-px {
+  background: linear-gradient(to right, transparent, var(--workspace-home-border-faint), transparent) !important;
+  opacity: 0.8 !important;
+}
+
+.liquid-glass-chat-area [class*="justify-center"] > span.border {
+  border-color: var(--workspace-home-border) !important;
+  box-shadow: var(--workspace-home-shadow) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
+  border-left-color: var(--workspace-home-border) !important;
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.50), var(--workspace-home-shadow) !important;
+}
+
+html.dark:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"],
+body.dark:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
+  border-left-color: var(--workspace-home-border) !important;
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.035), var(--workspace-home-shadow) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="bg-[#e9eef6]"] {
+  box-shadow:
+    inset 0 0 0 1px var(--workspace-home-border-faint),
+    var(--workspace-home-shadow) !important;
+}
+
+body.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"],
+html.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"] {
+  border-color: var(--workspace-home-border) !important;
+  box-shadow:
+    inset 0 0 0 1px var(--workspace-home-border-hairline),
+    var(--workspace-home-shadow) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="rounded-2xl"][class*="border"],
+body:has(.liquid-glass-navbar) [class*="rounded-3xl"][class*="border"],
+.collapsed-space-popover,
+.liquid-glass-navbar [class*="top-full"],
+.liquid-glass-chat-area [class*="bottom-[calc(100%+0.5rem)]"],
+.liquid-glass-modal {
+  border-color: var(--workspace-home-border) !important;
+  box-shadow: var(--workspace-home-shadow) !important;
+}
+
+body:has(.liquid-glass-navbar) [class*="shadow-lg"],
+body:has(.liquid-glass-navbar) [class*="shadow-xl"],
+body:has(.liquid-glass-navbar) [class*="shadow-2xl"] {
+  --tw-shadow: var(--workspace-home-shadow) !important;
+  --tw-shadow-colored: var(--workspace-home-shadow) !important;
+}
+
+body:has(.liquid-glass-navbar) {
+  scrollbar-color: rgba(148, 163, 184, 0.26) transparent !important;
+}
+
+html.dark body:has(.liquid-glass-navbar),
+body.dark:has(.liquid-glass-navbar) {
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent !important;
+}
+
+body:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.26) !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
+}
+
+body:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.36) !important;
+}
+
+html.dark body:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb,
+body.dark:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.dark body:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb:hover,
+body.dark:has(.liquid-glass-navbar) ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: #111111 !important;
+}
