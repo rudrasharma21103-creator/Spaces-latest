@@ -3,7 +3,6 @@ import { motion } from "framer-motion"
 import {
   ArrowRight,
   Check,
-  ChevronDown,
   FileText,
   Menu,
   MessageSquare,
@@ -129,16 +128,10 @@ export default function ProductLandingPage({ isDarkMode, setIsDarkMode, onLogin,
           </button>
 
           <div className="launch-nav-links">
-            <button onClick={() => scrollTo("product")}>
-              Product
-              <ChevronDown aria-hidden="true" />
-            </button>
+            <button onClick={() => scrollTo("product")}>Product</button>
             <button onClick={() => scrollTo("story")}>How it works</button>
             <button onClick={() => scrollTo("different")}>Why different</button>
-            <button onClick={() => scrollTo("demo")}>
-              Resources
-              <ChevronDown aria-hidden="true" />
-            </button>
+            <button onClick={() => scrollTo("demo")}>Watch Video</button>
             <button onClick={() => scrollTo("pricing")}>Pricing</button>
           </div>
 
@@ -173,7 +166,7 @@ export default function ProductLandingPage({ isDarkMode, setIsDarkMode, onLogin,
             <button onClick={() => scrollTo("product")}>Product</button>
             <button onClick={() => scrollTo("story")}>How it works</button>
             <button onClick={() => scrollTo("different")}>Why different</button>
-            <button onClick={() => scrollTo("demo")}>Resources</button>
+            <button onClick={() => scrollTo("demo")}>Watch Video</button>
             <button onClick={onLogin}>Log in</button>
             <button onClick={onSignup}>Start free</button>
           </div>
