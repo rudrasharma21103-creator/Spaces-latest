@@ -317,6 +317,7 @@ export default function CollaborationApp() {
   const [authBootError, setAuthBootError] = useState("")
   const [appDataReady, setAppDataReady] = useState(false)
   const [routeReady, setRouteReady] = useState(false)
+  const [restoreSplashVisible, setRestoreSplashVisible] = useState(true)
   const [authPending, setAuthPending] = useState(false)
   const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
@@ -343,10 +344,32 @@ export default function CollaborationApp() {
   const authResolvedAtRef = useRef(0)
   const authLookupCacheRef = useRef(new Map())
   const googleAuthInFlightRef = useRef(false)
+  const restoreSplashStartedAtRef = useRef(0)
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
+
+  const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
+  const restoreSplashActive = authInitializing || protectedAppBooting
+
+  useEffect(() => {
+    let hideTimer = null
+
+    if (restoreSplashActive) {
+      restoreSplashStartedAtRef.current = Date.now()
+      setRestoreSplashVisible(true)
+      hideTimer = window.setTimeout(() => setRestoreSplashVisible(false), 3500)
+    } else if (restoreSplashVisible) {
+      const elapsed = Date.now() - restoreSplashStartedAtRef.current
+      const remaining = Math.max(0, 3000 - elapsed)
+      hideTimer = window.setTimeout(() => setRestoreSplashVisible(false), remaining)
+    }
+
+    return () => {
+      if (hideTimer) window.clearTimeout(hideTimer)
+    }
+  }, [restoreSplashActive])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -8153,30 +8176,65 @@ export default function CollaborationApp() {
     </div>
   )
 
-  const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
+  const workspaceRestoreAnimations = [
+    "/sunday-gif-1.gif",
+    "/monday-gif-1.gif",
+    "/monday-gif-%202.gif",
+    "/tuesday-gif-1.gif",
+    "/tuesday-gif-2.gif",
+    "/wednesday-gif-1.gif",
+    "/thursday-gif-1.gif",
+    "/thursday-gif-2.gif",
+    "/friday-gif-1.gif",
+    "/saturday-gif-1.gif",
+  ]
+  const workspaceRestoreAnimationsByDay = {
+    0: ["/sunday-gif-1.gif"],
+    1: ["/monday-gif-1.gif", "/monday-gif-%202.gif"],
+    2: ["/tuesday-gif-1.gif", "/tuesday-gif-2.gif"],
+    3: ["/wednesday-gif-1.gif"],
+    4: ["/thursday-gif-1.gif", "/thursday-gif-2.gif"],
+    5: ["/friday-gif-1.gif"],
+    6: ["/saturday-gif-1.gif"],
+  }
+  const restoreDate = new Date()
+  const currentRestoreAnimations = workspaceRestoreAnimationsByDay[restoreDate.getDay()] || workspaceRestoreAnimations
+  const workspaceRestoreAnimationSrc =
+    currentRestoreAnimations[restoreDate.getDate() % currentRestoreAnimations.length] || "/monday-gif-1.gif"
 
-  if (!authBootError && (authInitializing || protectedAppBooting)) {
+  if (!authBootError && restoreSplashVisible) {
     return (
       <div className={`min-h-screen flex items-center justify-center font-sans ${
         isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
       }`}>
-        <div className="flex flex-col items-center gap-4">
-          <div className={`h-14 w-14 rounded-2xl flex items-center justify-center shadow-lg ${
-            isDarkMode ? "bg-white/10 text-cyan-200" : "bg-white text-cyan-700"
-          }`}>
-            <Loader2 className="h-7 w-7 animate-spin" />
-          </div>
-          <div className="text-center">
-            <p className={`text-sm font-bold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-              Restoring your workspace
-            </p>
-            <p className={`text-xs mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              {authInitializing
-                ? "Checking your secure session..."
-                : !appDataReady
-                  ? "Loading your profile and spaces..."
-                  : "Restoring your route..."}
-            </p>
+        <div className="flex flex-col items-center gap-6">
+          <img
+            src={workspaceRestoreAnimationSrc}
+            alt=""
+            aria-hidden="true"
+            className="h-52 w-72 object-contain sm:h-60 sm:w-80"
+            draggable="false"
+            onError={(event) => {
+              event.currentTarget.src = "/monday-gif-1.gif"
+            }}
+          />
+          <div className="flex items-center justify-center gap-4">
+            <div
+              className="h-12 w-12 shrink-0 rounded-full border-[5px] border-red-500 border-t-transparent animate-spin"
+              aria-hidden="true"
+            />
+            <div className="text-left">
+              <p className={`text-base font-bold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+                Restoring your workspace
+              </p>
+              <p className={`text-sm mt-1.5 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                {authInitializing
+                  ? "Checking your secure session..."
+                  : !appDataReady
+                    ? "Loading your profile and spaces..."
+                    : "Restoring your route..."}
+              </p>
+            </div>
           </div>
         </div>
       </div>
