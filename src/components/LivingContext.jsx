@@ -263,8 +263,8 @@ function FilePreview({ file, isDarkMode, variant = "card" }) {
 
 export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
   return (
-    <div className="mx-4 mb-0.5 px-0 sm:mx-6">
-      <div className={`flex items-center gap-0.5 overflow-x-auto border-b pb-1.5 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/90"}`}>
+    <div className="workspace-channel-tabs mx-4 mb-0.5 px-0 sm:mx-6">
+      <div className={`workspace-channel-tabs-row flex items-center gap-0.5 overflow-x-auto border-b pb-1.5 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/90"}`}>
         {tabs.map(tab => {
           const active = activeTab === tab
           return (

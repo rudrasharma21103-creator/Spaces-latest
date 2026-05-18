@@ -11639,7 +11639,7 @@ export default function CollaborationApp() {
                 <div
                   ref={messagesContainerRef}
                   onScroll={handleMessagesScroll}
-                  className={`flex-1 overflow-y-auto scrollbar-thin relative ${
+                  className={`workspace-message-scroll flex-1 overflow-y-auto scrollbar-thin relative ${
                     isChannelFeed
                       ? "px-0 py-3 sm:py-4 space-y-0"
                       : "p-4 sm:p-8 space-y-8"
@@ -11774,7 +11774,7 @@ export default function CollaborationApp() {
                         return (
                           <React.Fragment key={`${msg.id || "message"}-${idx}`}>
                             {showDateSeparator && (
-                              <div className={`w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
+                              <div className={`workspace-date-separator w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
                                 {isChannelFeed && (
                                   <div className={`h-px flex-1 ${isDarkMode ? "bg-white/10" : "bg-slate-200/80"}`} />
                                 )}
@@ -11803,7 +11803,7 @@ export default function CollaborationApp() {
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`relative flex ${
+                              className={`workspace-message-row ${isChannelFeed ? "workspace-channel-message-row" : "workspace-bubble-message-row"} relative flex ${
                                 isChannelFeed
                                   ? `gap-3 px-5 py-1.5 transition-colors ${isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-slate-100/80"} ${isSequence ? "mt-0" : "mt-1"}`
                                   : `gap-4 ${isMe ? "flex-row-reverse" : ""} ${isSequence ? "mt-1" : "mt-6"}`
@@ -12130,7 +12130,7 @@ export default function CollaborationApp() {
                                         key={att.id}
                                         onClick={() => openAttachment(att)}
                                         style={{ cursor: "pointer" }}
-                                        className={`relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
+                                        className={`workspace-attachment-card relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
                                           att.source === 'gmail'
                                             ? "bg-red-50 border border-red-100"
                                             : ((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)
@@ -12303,10 +12303,10 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}>
+                <div ref={messageInputRef} className={`workspace-composer-wrap ${isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
+                    className={`workspace-composer ${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
                       isDarkMode
                         ? 'bg-[#191b1f] border border-slate-700/50'
                         : 'bg-[#e9eef6]'
