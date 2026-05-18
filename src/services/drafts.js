@@ -48,6 +48,8 @@ const writeLocalDrafts = drafts => {
   } catch {}
 }
 
+export const peekDrafts = () => readLocalDrafts()
+
 const mergeDraftLists = (...lists) => {
   const merged = new Map()
   lists.flat().forEach(item => {

@@ -1,4 +1,4 @@
-import { getToken } from './auth'
+import { getStoredUser, getToken } from './auth'
 
 const resolveApiBase = () => {
   let apiBase = "http://localhost:8000"
@@ -37,6 +37,41 @@ const resolveApiBase = () => {
 
 const API_BASE = resolveApiBase()
 
+const getTasksCacheKey = () => {
+  const stored = getStoredUser()
+  const uid = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
+  return `spaces_tasks_${uid ? String(uid) : "guest"}`
+}
+
+const readCachedTasks = () => {
+  try {
+    const raw = localStorage.getItem(getTasksCacheKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const writeCachedTasks = tasks => {
+  try {
+    localStorage.setItem(getTasksCacheKey(), JSON.stringify(Array.isArray(tasks) ? tasks : []))
+  } catch {
+    // Cache writes are best effort only.
+  }
+}
+
+const mergeTaskLists = (...lists) => {
+  const merged = new Map()
+  lists.flat().forEach(task => {
+    if (!task || task.id === undefined || task.id === null) return
+    merged.set(String(task.id), task)
+  })
+  return Array.from(merged.values())
+}
+
+export const peekTasksForUser = () => readCachedTasks()
+
 export const createTask = async (task) => {
   const url = `${API_BASE}/tasks`
   const token = getToken()
@@ -51,18 +86,29 @@ export const createTask = async (task) => {
     body: JSON.stringify(task)
   })
   if (!res.ok) throw new Error('Failed to create task')
-  return await res.json()
+  const savedTask = await res.json()
+  writeCachedTasks(mergeTaskLists([savedTask], readCachedTasks()))
+  return savedTask
 }
 
 export const getTasksForUser = async () => {
+  const cachedTasks = readCachedTasks()
   const token = getToken()
   const url = `${API_BASE}/tasks`
   const headers = {
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
-  const res = await fetch(url, { headers, credentials: 'include' })
-  if (!res.ok) throw new Error('Failed to fetch tasks')
-  return await res.json()
+  try {
+    const res = await fetch(url, { headers, credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to fetch tasks')
+    const tasks = await res.json()
+    const safeTasks = Array.isArray(tasks) ? tasks : []
+    writeCachedTasks(safeTasks)
+    return safeTasks
+  } catch (error) {
+    if (cachedTasks.length > 0) return cachedTasks
+    throw error
+  }
 }
 
 export const updateTask = async (taskId, patch) => {
@@ -79,5 +125,7 @@ export const updateTask = async (taskId, patch) => {
     body: JSON.stringify(patch)
   })
   if (!res.ok) throw new Error('Failed to update task')
-  return await res.json()
+  const task = await res.json()
+  writeCachedTasks(mergeTaskLists([task], readCachedTasks()))
+  return task
 }

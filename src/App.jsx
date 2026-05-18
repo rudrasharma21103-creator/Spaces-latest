@@ -186,15 +186,56 @@ const isProtectedAppPath = pathname => {
 }
 
 const getInitialAuthBootState = () => {
-  const hasStoredAuth = Boolean(getToken() || getStoredUser()?.id)
+  const storedUser = getStoredUser()
+  const hasStoredAuth = Boolean(getToken() || storedUser?.id)
   const isProtectedPath = typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)
+  let cachedSpaces = []
+  let cachedFriends = []
+  let cachedDrafts = []
+  let cachedTasks = []
+
+  if (storedUser?.id) {
+    try {
+      cachedSpaces = Storage.peekSpacesForUser?.(storedUser.spaces || []) || []
+    } catch {
+      cachedSpaces = []
+    }
+    try {
+      const friendIds = Array.isArray(storedUser.friends) ? storedUser.friends.map(id => String(id)) : []
+      const usersById = new Map((Storage.peekUsers?.() || []).map(user => [String(user?.id), user]))
+      cachedFriends = friendIds.map(id => usersById.get(id)).filter(Boolean)
+    } catch {
+      cachedFriends = []
+    }
+    try {
+      cachedDrafts = DraftsService.peekDrafts?.() || []
+    } catch {
+      cachedDrafts = []
+    }
+    try {
+      cachedTasks = TasksService.peekTasksForUser?.() || []
+    } catch {
+      cachedTasks = []
+    }
+  }
 
   return {
+    storedUser,
+    cachedSpaces,
+    cachedFriends,
+    cachedDrafts,
+    cachedTasks,
     hasStoredAuth,
     isProtectedPath,
     shouldVerifySession: hasStoredAuth,
-    showRestoreSplash: hasStoredAuth,
+    showRestoreSplash: false,
   }
+}
+
+const createSpaceIconElement = iconType => {
+  if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
+  if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
+  return <UserIcon className="w-5 h-5" />
 }
 
 const PUBLIC_EMAIL_DOMAINS = new Set([
@@ -314,9 +355,9 @@ export default function CollaborationApp() {
   }, [isDarkMode])
 
   const [initialAuthBoot] = useState(getInitialAuthBootState)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authInitializing, setAuthInitializing] = useState(initialAuthBoot.shouldVerifySession)
-  const [currentUser, setCurrentUser] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(initialAuthBoot.storedUser?.id))
+  const [authInitializing, setAuthInitializing] = useState(false)
+  const [currentUser, setCurrentUser] = useState(() => initialAuthBoot.storedUser || null)
   const [showLandingPage, setShowLandingPage] = useState(
     () => !initialAuthBoot.hasStoredAuth && !initialAuthBoot.isProtectedPath
   ) // Landing page state
@@ -330,7 +371,15 @@ export default function CollaborationApp() {
   const [authError, setAuthError] = useState("")
   const [authSuccess, setAuthSuccess] = useState("")
   const [authBootError, setAuthBootError] = useState("")
-  const [appDataReady, setAppDataReady] = useState(false)
+  const [appDataReady, setAppDataReady] = useState(
+    () =>
+      Boolean(initialAuthBoot.storedUser?.id) &&
+      (
+        (Array.isArray(initialAuthBoot.cachedSpaces) && initialAuthBoot.cachedSpaces.length > 0) ||
+        !Array.isArray(initialAuthBoot.storedUser?.spaces) ||
+        initialAuthBoot.storedUser.spaces.length === 0
+      )
+  )
   const [routeReady, setRouteReady] = useState(false)
   const [restoreSplashVisible, setRestoreSplashVisible] = useState(initialAuthBoot.showRestoreSplash)
   const [restoreSplashEnabled, setRestoreSplashEnabled] = useState(initialAuthBoot.showRestoreSplash)
@@ -338,9 +387,14 @@ export default function CollaborationApp() {
   const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
   // Main Data State
-  const [spaces, setSpaces] = useState([])
+  const [spaces, setSpaces] = useState(() =>
+    (Array.isArray(initialAuthBoot.cachedSpaces) ? initialAuthBoot.cachedSpaces : []).map(space => ({
+      ...space,
+      icon: createSpaceIconElement(space.iconType),
+    }))
+  )
   const [users, setUsers] = useState([])
-  const [friends, setFriends] = useState([])
+  const [friends, setFriends] = useState(() => initialAuthBoot.cachedFriends || [])
   const [events, setEvents] = useState([])
 
   // UI State
@@ -355,7 +409,7 @@ export default function CollaborationApp() {
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
   const [homeDMSending, setHomeDMSending] = useState(false)
-  const [drafts, setDrafts] = useState([])
+  const [drafts, setDrafts] = useState(() => initialAuthBoot.cachedDrafts || [])
   const [activeDraftId, setActiveDraftId] = useState(null)
   const authResolvedAtRef = useRef(0)
   const authLookupCacheRef = useRef(new Map())
@@ -368,7 +422,7 @@ export default function CollaborationApp() {
 
   const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
   const restoreSplashActive = restoreSplashEnabled && (authInitializing || authPending || protectedAppBooting)
-  const cachedBootUserRef = useRef(initialAuthBoot.hasStoredAuth ? getStoredUser() : null)
+  const cachedBootUserRef = useRef(initialAuthBoot.storedUser || null)
 
   useEffect(() => {
     let hideTimer = null
@@ -820,7 +874,7 @@ export default function CollaborationApp() {
   const [showNewEventForm, setShowNewEventForm] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
-  const [tasksList, setTasksList] = useState([])
+  const [tasksList, setTasksList] = useState(() => initialAuthBoot.cachedTasks || [])
   const [completingTaskId, setCompletingTaskId] = useState(null)
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -1040,10 +1094,20 @@ export default function CollaborationApp() {
       }
     }
 
-    setAuthInitializing(true)
-    setAppDataReady(false)
-    setRouteReady(false)
-    setRestoreSplashEnabled(initialAuthBoot.showRestoreSplash)
+    const hasCachedWorkspace =
+      Array.isArray(initialAuthBoot.cachedSpaces) &&
+      (
+        initialAuthBoot.cachedSpaces.length > 0 ||
+        !Array.isArray(initialAuthBoot.storedUser?.spaces) ||
+        initialAuthBoot.storedUser.spaces.length === 0
+      )
+    setAuthInitializing(false)
+    if (!hasCachedWorkspace) {
+      setAppDataReady(false)
+      setRouteReady(false)
+    }
+    setRestoreSplashEnabled(false)
+    setRestoreSplashVisible(false)
     setAuthBootError("")
 
     if (cachedBootUserRef.current?.id) {
@@ -1056,6 +1120,7 @@ export default function CollaborationApp() {
       if (cachedSpaces.length > 0 || !Array.isArray(safeCachedUser.spaces) || safeCachedUser.spaces.length === 0) {
         setAppDataReady(true)
       }
+      setAuthInitializing(false)
     }
 
     ;(async () => {
@@ -1130,6 +1195,11 @@ export default function CollaborationApp() {
     if (!isAuthenticated || !currentUser) {
       setDrafts([])
       return
+    }
+
+    const cachedDrafts = DraftsService.peekDrafts?.() || []
+    if (cachedDrafts.length > 0) {
+      setDrafts(cachedDrafts)
     }
 
     DraftsService.getDrafts()
@@ -2052,6 +2122,24 @@ export default function CollaborationApp() {
     let cancelled = false
 
     if (isAuthenticated && currentUser) {
+      const cachedFriends = (() => {
+        try {
+          const friendIds = Array.isArray(currentUser.friends) ? currentUser.friends.map(id => String(id)) : []
+          const usersById = new Map((Storage.peekUsers?.() || []).map(user => [String(user?.id), user]))
+          return friendIds.map(id => usersById.get(id)).filter(Boolean)
+        } catch {
+          return []
+        }
+      })()
+      if (cachedFriends.length > 0 && friends.length === 0) {
+        setFriends(cachedFriends)
+      }
+
+      const cachedTasks = TasksService.peekTasksForUser?.() || []
+      if (cachedTasks.length > 0 && tasksList.length === 0) {
+        setTasksList(cachedTasks)
+      }
+
       const hasPaintableWorkspace =
         spaces.length > 0 ||
         !Array.isArray(currentUser?.spaces) ||
@@ -2062,10 +2150,20 @@ export default function CollaborationApp() {
       }
       const loadInitialData = async () => {
         const currentUserSpaceIds = Array.isArray(currentUser?.spaces) ? currentUser.spaces : []
+        const bootstrapPromise = Storage.getBootstrap()
         const eagerSpacesPromise = currentUserSpaceIds.length > 0
           ? Storage.getSpacesForUser(currentUserSpaceIds)
           : Promise.resolve([])
-        const bootstrap = await Storage.getBootstrap()
+
+        if (!appDataReady && currentUserSpaceIds.length > 0) {
+          const quickSpaces = await eagerSpacesPromise.catch(() => [])
+          if (!cancelled && Array.isArray(quickSpaces) && quickSpaces.length > 0) {
+            setSpaces(enrichSpacesForUi(quickSpaces))
+            setAppDataReady(true)
+          }
+        }
+
+        const bootstrap = await bootstrapPromise
         const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
@@ -2888,9 +2986,7 @@ export default function CollaborationApp() {
   ])
 
   const getSpaceIconElement = React.useCallback(iconType => {
-    if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
-    if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
-    return <UserIcon className="w-5 h-5" />
+    return createSpaceIconElement(iconType)
   }, [])
 
   const enrichSpacesForUi = React.useCallback(
@@ -8265,36 +8361,71 @@ export default function CollaborationApp() {
 
   if (!authBootError && restoreSplashEnabled && restoreSplashVisible) {
     return (
-      <div className={`min-h-screen flex items-center justify-center font-sans ${
-        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
+      <div className={`relative min-h-screen overflow-hidden flex items-center justify-center font-sans px-6 ${
+        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#f4f7fb] text-slate-950"
       }`}>
-        <div className="flex flex-col items-center gap-6">
-          <img
-            src={workspaceRestoreAnimationSrc}
-            alt=""
-            aria-hidden="true"
-            className="h-52 w-72 object-contain sm:h-60 sm:w-80"
-            draggable="false"
-            onError={(event) => {
-              event.currentTarget.src = "/monday-gif-1.gif"
-            }}
-          />
-          <div className="flex items-center justify-center gap-4">
-            <div
-              className="h-12 w-12 shrink-0 rounded-full border-[5px] border-red-500 border-t-transparent animate-spin"
-              aria-hidden="true"
-            />
-            <div className="text-left">
-              <p className={`text-base font-bold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-                Restoring your workspace
-              </p>
-              <p className={`text-sm mt-1.5 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                {authInitializing
-                  ? "Checking your secure session..."
-                  : !appDataReady
-                    ? "Loading your profile and spaces..."
-                    : "Restoring your route..."}
-              </p>
+        <div className="relative w-full max-w-md">
+          <div className="flex flex-col items-center text-center">
+            <div className={`mb-7 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-lg ${
+              isDarkMode
+                ? "border-white/10 bg-white/[0.08] shadow-black/20"
+                : "border-slate-200 bg-white/90 shadow-slate-200/70"
+            }`}>
+              <img
+                src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"}
+                alt="Spacess"
+                className="h-10 w-10 rounded-xl object-contain"
+                draggable="false"
+              />
+              <div className="text-left">
+                <p className={`text-lg font-black leading-tight ${isDarkMode ? "text-white" : "text-slate-950"}`}>
+                  Spacess
+                </p>
+                <p className={`text-[11px] font-bold uppercase tracking-[0.2em] ${isDarkMode ? "text-cyan-200/80" : "text-cyan-700"}`}>
+                  Workspace platform
+                </p>
+              </div>
+            </div>
+
+            <div className={`relative mb-7 h-56 w-72 overflow-hidden rounded-[1.75rem] border ${
+              isDarkMode
+                ? "border-white/10 bg-white/5"
+                : "border-slate-200 bg-white"
+            }`}>
+              <img
+                src={workspaceRestoreAnimationSrc}
+                alt=""
+                aria-hidden="true"
+                className="h-full w-full object-contain p-4"
+                draggable="false"
+                onError={(event) => {
+                  event.currentTarget.src = "/monday-gif-1.gif"
+                }}
+              />
+            </div>
+
+            <div className="w-full">
+              <div className="mb-4 flex items-center justify-center gap-3">
+                <div
+                  className="h-9 w-9 shrink-0 rounded-full border-[4px] border-cyan-500 border-t-transparent animate-spin"
+                  aria-hidden="true"
+                />
+                <div className="text-left">
+                  <p className={`text-base font-black ${isDarkMode ? "text-slate-50" : "text-slate-900"}`}>
+                    Preparing your Spacess workspace
+                  </p>
+                  <p className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                    {authInitializing
+                      ? "Checking your secure session..."
+                      : !appDataReady
+                        ? "Loading your profile and spaces..."
+                        : "Opening your workspace..."}
+                  </p>
+                </div>
+              </div>
+              <div className={`h-2 w-full overflow-hidden rounded-full ${isDarkMode ? "bg-white/10" : "bg-slate-200"}`}>
+                <div className="h-full w-2/5 rounded-full bg-cyan-500 animate-[pulse_1s_ease-in-out_infinite]" />
+              </div>
             </div>
           </div>
         </div>
