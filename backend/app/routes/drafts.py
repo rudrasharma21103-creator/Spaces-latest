@@ -30,7 +30,7 @@ def _sanitize_draft(doc: dict):
 def get_drafts(request: Request):
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     docs = drafts_collection.find({"userId": str(user_id)}, {"_id": 0}).sort("updatedAt", -1)
     return [_sanitize_draft(doc) for doc in docs]
@@ -40,7 +40,7 @@ def get_drafts(request: Request):
 def save_draft(request: Request, payload: dict):
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     text = (payload.get("text") or "").strip()
     if not text:
@@ -79,7 +79,7 @@ def save_draft(request: Request, payload: dict):
 def delete_draft(request: Request, draft_id: str):
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     result = drafts_collection.delete_one({"userId": str(user_id), "id": str(draft_id)})
     if result.deleted_count == 0:

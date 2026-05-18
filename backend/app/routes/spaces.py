@@ -7,8 +7,23 @@ from app.ws_manager import manager
 router = APIRouter(prefix="/spaces")
 
 @router.get("/")
-def get_spaces():
-    spaces = list(spaces_collection.find({}, {"_id": 0}))
+def get_spaces(request: Request):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    spaces = list(spaces_collection.find(
+        {
+            "$or": [
+                {"ownerId": user_id},
+                {"ownerId": str(user_id)},
+                {"createdBy": user_id},
+                {"createdBy": str(user_id)},
+                {"members": {"$in": [user_id, str(user_id)]}},
+                {"channels.members": {"$in": [user_id, str(user_id)]}},
+            ]
+        },
+        {"_id": 0},
+    ))
 
     # Normalize legacy records in-memory for reads; avoid writes on hot read paths.
     for space in spaces:
@@ -43,7 +58,7 @@ def set_channel_role(request: Request, payload: dict):
     """Set a user's role in a channel. Only space Owner can promote/demote to Owner/Admin."""
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     space_id = payload.get('space_id')
     channel_id = payload.get('channel_id')
@@ -89,7 +104,7 @@ def modify_channel_member(request: Request, payload: dict):
     """Add or remove a member from a channel. Owner/Admin allowed (Owner required for owner role changes)."""
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     action = payload.get('action')  # 'add' or 'remove'
     space_id = payload.get('space_id')
@@ -171,9 +186,21 @@ def modify_channel_member(request: Request, payload: dict):
     return {'status': 'ok', 'members': members, 'roles': roles_map}
 
 @router.post("/")
-def save_space(space: dict):
+def save_space(request: Request, space: dict):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
     # Ensure creator is in members array
-    creator_id = space.get("createdBy") or space.get("ownerId")
+    existing = spaces_collection.find_one({"id": space.get("id")})
+    if existing:
+        existing_owner = existing.get("ownerId") or existing.get("createdBy")
+        if str(existing_owner) != str(user_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this space")
+
+    creator_id = user_id
+    space["createdBy"] = existing.get("createdBy") if existing and existing.get("createdBy") else user_id
+    space["ownerId"] = existing.get("ownerId") if existing and existing.get("ownerId") else user_id
     if creator_id:
         if "members" not in space:
             space["members"] = []
@@ -231,10 +258,23 @@ def save_space(space: dict):
     return space
 
 @router.post("/by-ids")
-def get_spaces_for_user(space_ids: list[int]):
+def get_spaces_for_user(request: Request, space_ids: list[int]):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     spaces = list(
         spaces_collection.find(
-            {"id": {"$in": space_ids}},
+            {
+                "id": {"$in": space_ids},
+                "$or": [
+                    {"ownerId": user_id},
+                    {"ownerId": str(user_id)},
+                    {"createdBy": user_id},
+                    {"createdBy": str(user_id)},
+                    {"members": {"$in": [user_id, str(user_id)]}},
+                    {"channels.members": {"$in": [user_id, str(user_id)]}},
+                ],
+            },
             {"_id": 0}
         )
     )

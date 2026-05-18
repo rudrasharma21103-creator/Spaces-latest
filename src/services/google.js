@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getStoredUser, getToken } from './auth'
+import { getToken } from './auth'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY
@@ -29,16 +29,14 @@ try {
 
 const getAppAuthHeaders = () => {
   const token = getToken()
-  const storedUser = getStoredUser()
-  const userId = storedUser
-    ? (storedUser.id || storedUser._id || (storedUser._id && storedUser._id.$oid) || storedUser.userId)
-    : null
 
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userId ? { 'X-User-Id': String(userId) } : {})
   }
 }
+
+let googleAccessTokenMemory = null
+let googleCalendarTokenMemory = null
 
 const ensureGooglePreconnect = () => {
   if (typeof document === 'undefined') return
@@ -506,7 +504,7 @@ export const groupGmailAttachmentsBySender = (attachments = []) => {
 }
 
 export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
-  if (!accessToken || !getToken()) return null
+  if (!accessToken) return null
 
   const response = await axios.post(
     `${API_BASE}/gmail-docs/sync`,
@@ -519,7 +517,8 @@ export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
       headers: {
         'Content-Type': 'application/json',
         ...getAppAuthHeaders()
-      }
+      },
+      withCredentials: true
     }
   )
 
@@ -540,11 +539,10 @@ export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
 }
 
 export const fetchGroupedGmailDocs = async (params = {}) => {
-  if (!getToken()) return null
-
   const response = await axios.get(`${API_BASE}/gmail-docs/grouped`, {
     params,
-    headers: getAppAuthHeaders()
+    headers: getAppAuthHeaders(),
+    withCredentials: true
   })
   const attachments = Array.isArray(response.data?.attachments)
     ? dedupeGmailAttachmentsByFilename(response.data.attachments)
@@ -964,15 +962,24 @@ const parseJwt = (token) => {
 
 // Store Google Access Token
 export const setGoogleAccessToken = (token) => {
-  localStorage.setItem('google_access_token', token)
+  googleAccessTokenMemory = token || null
+  try {
+    localStorage.removeItem('google_access_token')
+  } catch {}
 }
 
 export const getGoogleAccessToken = () => {
-  return localStorage.getItem('google_access_token')
+  try {
+    localStorage.removeItem('google_access_token')
+  } catch {}
+  return googleAccessTokenMemory
 }
 
 export const removeGoogleAccessToken = () => {
-  localStorage.removeItem('google_access_token')
+  googleAccessTokenMemory = null
+  try {
+    localStorage.removeItem('google_access_token')
+  } catch {}
 }
 
 export const isGoogleConnected = () => {
@@ -981,15 +988,24 @@ export const isGoogleConnected = () => {
 
 // Store Google Calendar Access Token
 export const setGoogleCalendarToken = (token) => {
-  localStorage.setItem('google_calendar_token', token)
+  googleCalendarTokenMemory = token || null
+  try {
+    localStorage.removeItem('google_calendar_token')
+  } catch {}
 }
 
 export const getGoogleCalendarToken = () => {
-  return localStorage.getItem('google_calendar_token')
+  try {
+    localStorage.removeItem('google_calendar_token')
+  } catch {}
+  return googleCalendarTokenMemory
 }
 
 export const removeGoogleCalendarToken = () => {
-  localStorage.removeItem('google_calendar_token')
+  googleCalendarTokenMemory = null
+  try {
+    localStorage.removeItem('google_calendar_token')
+  } catch {}
 }
 
 // Request Google Calendar Access

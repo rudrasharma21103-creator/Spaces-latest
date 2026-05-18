@@ -1,4 +1,4 @@
-import { getToken, getStoredUser } from './auth'
+import { getToken } from './auth'
 
 const resolveApiBase = () => {
   let apiBase = "http://localhost:8000"
@@ -37,51 +37,30 @@ const resolveApiBase = () => {
 
 const API_BASE = resolveApiBase()
 
-const getEntityId = value => {
-  if (value === undefined || value === null) return ""
-  if (typeof value === "string" || typeof value === "number") return String(value)
-  if (typeof value === "object") {
-    if (value.$oid) return String(value.$oid)
-    if (value.id !== undefined && value.id !== null) return String(value.id)
-    if (value.userId !== undefined && value.userId !== null) return String(value.userId)
-    if (value._id !== undefined && value._id !== null) return getEntityId(value._id)
-  }
-  return String(value)
-}
-
-const getCurrentUserId = () => {
-  const stored = getStoredUser()
-  return getEntityId(stored?.id || stored?._id || stored?.userId)
-}
-
 export const createTask = async (task) => {
   const url = `${API_BASE}/tasks`
   const token = getToken()
-  const uid = getCurrentUserId()
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(uid ? { 'X-User-Id': String(uid) } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
   const res = await fetch(url, {
     method: 'POST',
     headers,
+    credentials: 'include',
     body: JSON.stringify(task)
   })
   if (!res.ok) throw new Error('Failed to create task')
   return await res.json()
 }
 
-export const getTasksForUser = async (userId) => {
+export const getTasksForUser = async () => {
   const token = getToken()
-  const uid = getCurrentUserId()
-  const resolvedUserId = getEntityId(userId) || uid
-  const url = `${API_BASE}/tasks?userId=${encodeURIComponent(resolvedUserId)}`
+  const url = `${API_BASE}/tasks`
   const headers = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(uid ? { 'X-User-Id': String(uid) } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
-  const res = await fetch(url, { headers })
+  const res = await fetch(url, { headers, credentials: 'include' })
   if (!res.ok) throw new Error('Failed to fetch tasks')
   return await res.json()
 }
@@ -89,15 +68,14 @@ export const getTasksForUser = async (userId) => {
 export const updateTask = async (taskId, patch) => {
   const url = `${API_BASE}/tasks/${encodeURIComponent(taskId)}`
   const token = getToken()
-  const uid = getCurrentUserId()
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(uid ? { 'X-User-Id': String(uid) } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
   const res = await fetch(url, {
     method: 'PATCH',
     headers,
+    credentials: 'include',
     body: JSON.stringify(patch)
   })
   if (!res.ok) throw new Error('Failed to update task')

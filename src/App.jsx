@@ -67,7 +67,7 @@ import {
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
-import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
+import { getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
@@ -151,6 +151,90 @@ try {
 }
 
 const CONTEXT_ROUTE_STATE_KEY = "spacexyz_context_route_state"
+const NAVIGATION_STATE_KEY = "spacexyz_navigation_state"
+
+const slugifyRoutePart = value => {
+  const text = String(value ?? "").trim()
+  if (!text) return ""
+  return text
+    .toLowerCase()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+const routePartMatches = (routePart, ...values) => {
+  if (routePart === undefined || routePart === null) return false
+  const decoded = decodeURIComponent(String(routePart)).trim()
+  const decodedLower = decoded.toLowerCase()
+  return values.some(value => {
+    if (value === undefined || value === null || value === "") return false
+    const raw = String(value).trim()
+    return decodedLower === raw.toLowerCase() || decodedLower === slugifyRoutePart(raw)
+  })
+}
+
+const isProtectedAppPath = pathname => {
+  const normalized = String(pathname || "/").replace(/\/+$/, "") || "/"
+  return (
+    normalized === "/tasks" ||
+    normalized === "/contexts" ||
+    normalized.startsWith("/contexts/") ||
+    normalized.startsWith("/space/") ||
+    normalized.startsWith("/dm/")
+  )
+}
+
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "yahoo.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+])
+
+const createClientId = prefix => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const dedupeMessagesById = messages => {
+  if (!Array.isArray(messages) || messages.length < 2) return Array.isArray(messages) ? messages : []
+
+  const byId = new Map()
+  const withoutIds = []
+  messages.forEach(message => {
+    if (!message?.id) {
+      withoutIds.push(message)
+      return
+    }
+
+    const key = String(message.id)
+    const existing = byId.get(key)
+    if (!existing) {
+      byId.set(key, message)
+      return
+    }
+
+    byId.set(key, {
+      ...existing,
+      ...message,
+      attachments: Array.isArray(message.attachments) ? message.attachments : existing.attachments,
+      status: message.status || existing.status,
+      optimistic: Boolean(existing.optimistic && message.optimistic),
+    })
+  })
+
+  return [...byId.values(), ...withoutIds]
+}
 
 function getAttachmentCacheKey(att) {
   if (!att) return null
@@ -218,6 +302,7 @@ export default function CollaborationApp() {
   }, [isDarkMode])
 
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [authInitializing, setAuthInitializing] = useState(true)
   const [currentUser, setCurrentUser] = useState(null)
   const [showLandingPage, setShowLandingPage] = useState(true) // Landing page state
   const [authMode, setAuthMode] = useState("login")
@@ -229,6 +314,9 @@ export default function CollaborationApp() {
   })
   const [authError, setAuthError] = useState("")
   const [authSuccess, setAuthSuccess] = useState("")
+  const [authBootError, setAuthBootError] = useState("")
+  const [appDataReady, setAppDataReady] = useState(false)
+  const [routeReady, setRouteReady] = useState(false)
   const [authPending, setAuthPending] = useState(false)
   const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
@@ -319,6 +407,28 @@ export default function CollaborationApp() {
     } catch (error) {}
   }, [])
 
+  const readNavigationState = React.useCallback(() => {
+    if (typeof window === "undefined") return null
+    for (const storage of [window.sessionStorage, window.localStorage]) {
+      try {
+        const stored = storage.getItem(NAVIGATION_STATE_KEY)
+        if (stored) return JSON.parse(stored)
+      } catch (error) {}
+    }
+    return null
+  }, [])
+
+  const writeNavigationState = React.useCallback(state => {
+    if (typeof window === "undefined") return
+    const payload = JSON.stringify({ ...state, updatedAt: Date.now() })
+    try {
+      window.sessionStorage.setItem(NAVIGATION_STATE_KEY, payload)
+    } catch (error) {}
+    try {
+      window.localStorage.setItem(NAVIGATION_STATE_KEY, payload)
+    } catch (error) {}
+  }, [])
+
   const restoreFromDedicatedPage = React.useCallback(({ allowDedicated = true } = {}) => {
     if (dedicatedPageReturn?.view === "channel" || dedicatedPageReturn?.view === "dm") {
       setOpenContextId(null)
@@ -391,52 +501,199 @@ export default function CollaborationApp() {
   }, [activeChannel, activeChannelTab, activeDMUser, activeSpace, activeView, contextsSourceView, homeSection, openContextId, writeContextRouteState])
 
   useEffect(() => {
-    if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return undefined
+    if (
+      typeof window === "undefined" ||
+      window.location.pathname.startsWith("/admin") ||
+      authInitializing ||
+      !appDataReady ||
+      !isAuthenticated
+    ) return undefined
 
-    const applyRoute = () => {
+    const applySavedNavigation = savedState => {
+      if (!savedState) return
+      if (savedState.activeSpace !== undefined) setActiveSpace(savedState.activeSpace)
+      if (savedState.activeChannel !== undefined) setActiveChannel(savedState.activeChannel)
+      if (savedState.activeDMUser !== undefined) {
+        setActiveDMUser(savedState.activeDMUser)
+        setHomeActiveDMUser(savedState.activeDMUser)
+      }
+      if (savedState.activeChannelTab) setActiveChannelTab(savedState.activeChannelTab)
+      if (savedState.homeSection) setHomeSection(savedState.homeSection)
+      if (savedState.contextsSourceView) setContextsSourceView(savedState.contextsSourceView)
+      if (savedState.openContextId !== undefined) setOpenContextId(savedState.openContextId)
+      if (["home", "channel", "dm", "tasks", "contexts"].includes(savedState.activeView)) {
+        setActiveView(savedState.activeView)
+      }
+    }
+
+    const applyRoute = ({ fromPopState = false } = {}) => {
       const pathname = window.location.pathname.replace(/\/+$/, "") || "/"
+      const savedState = readNavigationState()
+
+      if (!fromPopState && initialRouteAppliedRef.current && lastAppliedRoutePathRef.current === pathname) {
+        return true
+      }
+
+      if (!fromPopState && initialRouteAppliedRef.current && pathname === "/") {
+        return true
+      }
 
       if (pathname === "/tasks") {
+        applySavedNavigation(savedState)
         setOpenContextId(null)
         setActiveView("tasks")
-        return
+        return true
       }
 
       if (pathname === "/contexts" || pathname.startsWith("/contexts/")) {
         const contextId = pathname.startsWith("/contexts/") ? decodeURIComponent(pathname.slice("/contexts/".length)) : null
-        const routeState = readContextRouteState()
+        const routeState = readContextRouteState() || savedState
         if (routeState?.activeDMUser) {
           setActiveDMUser(routeState.activeDMUser)
           setHomeActiveDMUser(routeState.activeDMUser)
         }
-        if (routeState?.activeChannel) {
-          setActiveChannel(routeState.activeChannel)
-        }
-        if (routeState?.activeSpace) {
-          setActiveSpace(routeState.activeSpace)
-        }
-        setContextsSourceView(prev => prev || routeState?.sourceView || (activeDMUser ? "dm" : activeChannel ? "channel" : prev))
-        setActiveChannelTab("messages")
+        if (routeState?.activeChannel) setActiveChannel(routeState.activeChannel)
+        if (routeState?.activeSpace) setActiveSpace(routeState.activeSpace)
+        setContextsSourceView(prev => prev || routeState?.sourceView || routeState?.contextsSourceView || (activeDMUser ? "dm" : activeChannel ? "channel" : prev))
+        setActiveChannelTab(routeState?.activeChannelTab || "messages")
         setOpenContextId(contextId || null)
         setActiveView("contexts")
-        return
+        return true
+      }
+
+      if (pathname.startsWith("/dm/")) {
+        const dmPart = pathname.slice("/dm/".length).split("/")[0]
+        const matchedFriend =
+          friends.find(friend => routePartMatches(dmPart, friend.id, friend.name, friend.email)) ||
+          (savedState?.activeDMUser && routePartMatches(dmPart, savedState.activeDMUser) ? { id: savedState.activeDMUser } : null)
+        const targetUserId = matchedFriend?.id || decodeURIComponent(dmPart)
+        if (targetUserId) {
+          setActiveDMUser(targetUserId)
+          setHomeActiveDMUser(targetUserId)
+          setActiveChannelTab(savedState?.activeChannelTab || "messages")
+          setActiveView("dm")
+          return true
+        }
+      }
+
+      if (pathname.startsWith("/space/")) {
+        const [spacePart, channelPart] = pathname.slice("/space/".length).split("/")
+        if (!spacePart || spaces.length === 0) return false
+
+        const savedSpaceMatches = savedState?.activeSpace && routePartMatches(spacePart, savedState.activeSpace)
+        const targetSpace =
+          spaces.find(space => routePartMatches(spacePart, space.id, space.name)) ||
+          (savedSpaceMatches ? spaces.find(space => String(space.id) === String(savedState.activeSpace)) : null)
+
+        if (!targetSpace) return false
+
+        const accessible = (targetSpace.channels || []).filter(channel => {
+          const userId = currentUser?.id
+          if (!userId) return true
+          return (
+            String(targetSpace.ownerId) === String(userId) ||
+            (targetSpace.members || []).some(memberId => String(memberId) === String(userId)) ||
+            (channel.members || []).some(memberId => String(memberId) === String(userId))
+          )
+        })
+        const candidateChannels = accessible.length > 0 ? accessible : (targetSpace.channels || [])
+        const savedChannelMatches = savedState?.activeChannel && channelPart && routePartMatches(channelPart, savedState.activeChannel)
+        const targetChannel =
+          (channelPart
+            ? candidateChannels.find(channel => routePartMatches(channelPart, channel.id, channel.name))
+            : null) ||
+          (savedChannelMatches
+            ? candidateChannels.find(channel => String(channel.id) === String(savedState.activeChannel))
+            : null) ||
+          candidateChannels[0] ||
+          null
+
+        setActiveSpace(targetSpace.id)
+        if (!targetChannel) {
+          setActiveChannel(null)
+          setOpenContextId(null)
+          setHomeSection("overview")
+          setActiveView("home")
+          return true
+        }
+        setActiveChannel(targetChannel.id)
+        setActiveChannelTab(savedState?.activeChannelTab || "messages")
+        setOpenContextId(null)
+        setActiveView("channel")
+        return true
+      }
+
+      if (pathname === "/") {
+        if (fromPopState) {
+          setOpenContextId(null)
+          setActiveView("home")
+          setHomeSection(savedState?.homeSection || "overview")
+        } else {
+          applySavedNavigation(savedState)
+        }
+        return true
       }
 
       if (activeView === "tasks" || activeView === "contexts") {
         restoreFromDedicatedPage({ allowDedicated: false })
       }
+      return true
     }
 
-    if (!initialRouteAppliedRef.current) {
+    const applied = applyRoute()
+    if (applied) {
       initialRouteAppliedRef.current = true
-      applyRoute()
+      lastAppliedRoutePathRef.current = window.location.pathname.replace(/\/+$/, "") || "/"
     }
-    window.addEventListener("popstate", applyRoute)
-    return () => window.removeEventListener("popstate", applyRoute)
-  }, [activeChannel, activeDMUser, activeView, readContextRouteState, restoreFromDedicatedPage])
+    setRouteReady(true)
+    const handlePopState = () => {
+      const appliedFromPopState = applyRoute({ fromPopState: true })
+      if (appliedFromPopState) {
+        lastAppliedRoutePathRef.current = window.location.pathname.replace(/\/+$/, "") || "/"
+      }
+    }
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [
+    activeChannel,
+    activeDMUser,
+    activeView,
+    appDataReady,
+    authInitializing,
+    currentUser?.id,
+    friends,
+    isAuthenticated,
+    readContextRouteState,
+    readNavigationState,
+    restoreFromDedicatedPage,
+    spaces,
+  ])
 
   useEffect(() => {
-    if (typeof window === "undefined" || window.location.pathname.startsWith("/admin")) return
+    if (
+      typeof window === "undefined" ||
+      window.location.pathname.startsWith("/admin") ||
+      authInitializing ||
+      !appDataReady ||
+      !routeReady ||
+      !isAuthenticated
+    ) return
+
+    writeNavigationState({
+      activeView,
+      activeSpace,
+      activeChannel,
+      activeDMUser,
+      activeChannelTab,
+      homeSection,
+      contextsSourceView,
+      openContextId,
+    })
+
+    const currentPathname = window.location.pathname.replace(/\/+$/, "") || "/"
+    const currentSpace = spaces.find(space => String(space.id) === String(activeSpace))
+    const currentChannel = (currentSpace?.channels || []).find(channel => String(channel.id) === String(activeChannel))
+    const dmUser = friends.find(friend => String(friend.id) === String(activeDMUser))
 
     const targetPath =
       activeView === "tasks"
@@ -445,16 +702,53 @@ export default function CollaborationApp() {
           ? openContextId
             ? `/contexts/${encodeURIComponent(String(openContextId))}`
             : "/contexts"
-          : "/"
+          : activeView === "channel" && currentSpace && currentChannel
+            ? `/space/${encodeURIComponent(slugifyRoutePart(currentSpace.name) || String(currentSpace.id))}/${encodeURIComponent(slugifyRoutePart(currentChannel.name) || String(currentChannel.id))}`
+            : activeView === "dm" && activeDMUser
+              ? `/dm/${encodeURIComponent(slugifyRoutePart(dmUser?.name) || String(activeDMUser))}`
+              : "/"
 
-    if (window.location.pathname !== targetPath) {
+    const currentIsEquivalentChannel =
+      activeView === "channel" &&
+      currentPathname.startsWith("/space/") &&
+      currentSpace &&
+      currentChannel &&
+      (() => {
+        const [spacePart, channelPart] = currentPathname.slice("/space/".length).split("/")
+        return routePartMatches(spacePart, currentSpace.id, currentSpace.name) && routePartMatches(channelPart, currentChannel.id, currentChannel.name)
+      })()
+
+    const currentIsEquivalentDM =
+      activeView === "dm" &&
+      currentPathname.startsWith("/dm/") &&
+      activeDMUser &&
+      routePartMatches(currentPathname.slice("/dm/".length).split("/")[0], activeDMUser, dmUser?.name, dmUser?.email)
+
+    if (currentPathname !== targetPath && !currentIsEquivalentChannel && !currentIsEquivalentDM) {
       try {
         window.history.replaceState({}, "", targetPath)
       } catch (error) {
         console.warn("Route replace fallback", error)
       }
     }
-  }, [activeView, openContextId])
+    lastAppliedRoutePathRef.current = window.location.pathname.replace(/\/+$/, "") || "/"
+  }, [
+    activeChannel,
+    activeChannelTab,
+    activeDMUser,
+    activeSpace,
+    activeView,
+    appDataReady,
+    authInitializing,
+    contextsSourceView,
+    friends,
+    homeSection,
+    isAuthenticated,
+    openContextId,
+    routeReady,
+    spaces,
+    writeNavigationState,
+  ])
 
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
@@ -508,7 +802,7 @@ export default function CollaborationApp() {
     }
     setSetPasswordLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/users/set-password`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: setPasswordEmail, password: setPasswordValue }) })
+      const res = await fetch(`${API_BASE}/users/set-password`, { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: setPasswordEmail, password: setPasswordValue, setupToken: orgPasswordSetupToken }) })
       const j = await res.json()
       if (!res.ok) {
         setSetPasswordError(j.detail || j.error || 'Failed to set password')
@@ -522,6 +816,8 @@ export default function CollaborationApp() {
         saveAuth(user, token)
         setCurrentUser(user)
         setIsAuthenticated(true)
+        setAuthInitializing(false)
+        setShowLandingPage(false)
         setActiveView("home")
         setHomeSection("overview")
         setShowAdminDashboard(true)
@@ -552,6 +848,7 @@ export default function CollaborationApp() {
   // Admin dashboard state
   const [orgInfo, setOrgInfo] = useState(null)
   const [orgDnsToken, setOrgDnsToken] = useState(null)
+  const [orgPasswordSetupToken, setOrgPasswordSetupToken] = useState(null)
   const [showAdminDashboard, setShowAdminDashboard] = useState(false)
   const [adminUsers, setAdminUsers] = useState([])
   const [adminSearch, setAdminSearch] = useState("")
@@ -566,6 +863,7 @@ export default function CollaborationApp() {
         const m = (currentUser.email.match(/@([A-Za-z0-9.-]+)$/) || [])
         const domain = m[1]
         if (!domain) { setOrgInfo(null); return }
+        if (PUBLIC_EMAIL_DOMAINS.has(domain.toLowerCase())) { setOrgInfo(null); return }
         const res = await fetch(`${API_BASE}/api/org/org/${encodeURIComponent(domain)}`)
         if (res.ok) {
           const j = await res.json()
@@ -616,6 +914,13 @@ export default function CollaborationApp() {
 
           // fetch users for domain and try to auto-login the org admin
           try {
+            const promptEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
+            if (promptEmail && orgPasswordSetupToken) {
+              try { setSetPasswordEmail(promptEmail) } catch (e) {}
+              try { setShowSetPasswordModal(true) } catch (e) {}
+              return
+            }
+
             const resUsers = await fetch(`${API_BASE}/users/by-domain/${encodeURIComponent(domain)}`)
             if (resUsers.ok) {
               const uj = await resUsers.json()
@@ -630,7 +935,6 @@ export default function CollaborationApp() {
               if (!adminUser && usersList.length > 0) adminUser = usersList[0]
 
               // Always prompt the admin email to create a password (use form value or org record)
-              const promptEmail = (orgForm && orgForm.adminEmail) || (oj && oj.adminEmail) || ''
               if (promptEmail) {
                 try { setSetPasswordEmail(promptEmail) } catch (e) {}
                 try { if (adminUser) setPendingAdminUserId(adminUser.id) } catch (e) {}
@@ -645,7 +949,7 @@ export default function CollaborationApp() {
         }
       })()
     }
-  }, [orgStage])
+  }, [orgStage, orgPasswordSetupToken])
   const [showAccessDeniedModal, setShowAccessDeniedModal] = useState(false)
   const [showAddFriendConfirm, setShowAddFriendConfirm] = useState(null) // ID of user to add
   const pendingFriendRequestIdsRef = useRef(new Set())
@@ -672,43 +976,82 @@ export default function CollaborationApp() {
   const [newSpaceName, setNewSpaceName] = useState("")
   const [inviteSent, setInviteSent] = useState(false)
 
-  // --- Persistent Login: restore auth state from localStorage on app load
+  // --- Persistent Login: restore trusted auth state from backend session
   useEffect(() => {
-    const stUser = getStoredUser()
-    const token = getToken()
-    if (stUser && token) {
-      authResolvedAtRef.current = Date.now()
-      setCurrentUser(stUser)
-      setIsAuthenticated(true)
-      hydrateCachedSpacesForUser(stUser)
+    let cancelled = false
+    setAuthInitializing(true)
+    setAppDataReady(false)
+    setRouteReady(false)
+    setAuthBootError("")
+    ;(async () => {
       try {
-        const cachedUsers = Storage.peekUsers()
-        if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
-          setUsers(cachedUsers)
-          const friendIds = Array.isArray(stUser.friends) ? stUser.friends.map(id => String(id)) : []
-          if (friendIds.length > 0) {
-            setFriends(cachedUsers.filter(user => friendIds.includes(String(user?.id))))
-          }
-        }
+        const user = await Storage.getCurrentUser({ forceRefresh: true })
+        if (cancelled || !user?.id) return
+        authResolvedAtRef.current = Date.now()
+        const safeUser = filterDismissedUser(user)
+        setCurrentUser(safeUser)
+        setIsAuthenticated(true)
+        setShowLandingPage(false)
+        hydrateCachedSpacesForUser(safeUser, { selectFirst: false })
       } catch (error) {
-        console.warn("Failed to hydrate cached users", error)
+        if (cancelled) return
+        setIsAuthenticated(false)
+        setCurrentUser(null)
+        setAppDataReady(false)
+        setRouteReady(false)
+        if (error?.status === 401) {
+          authLogout()
+          if (typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)) {
+            setShowLandingPage(false)
+            setAuthMode("login")
+          }
+        } else {
+          console.warn("Session verification failed without an auth rejection", error)
+          setAuthBootError("We couldn't verify your session. Check the connection and try again.")
+          setShowLandingPage(false)
+        }
+      } finally {
+        if (!cancelled) setAuthInitializing(false)
       }
-    } else if (!stUser && !token) {
-      // If no stored credentials, ensure we're logged out
-      setIsAuthenticated(false)
-      setCurrentUser(null)
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
 
-  // Sync currentUser to localStorage whenever it changes (ensures auth persistence)
+  // Keep only in-memory auth state synced; persistent identity comes from /users/me.
   useEffect(() => {
     if (currentUser && isAuthenticated) {
       const existingToken = getToken()
-      const token = existingToken || `token_${currentUser.id}_${Date.now()}`
-      saveAuth(currentUser, token)
-      console.log("Auth saved to localStorage:", currentUser.email)
+      saveAuth(currentUser, existingToken)
     }
   }, [currentUser, isAuthenticated])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined
+    const handleAuthCleared = () => {
+      setAuthBootError("")
+      setIsAuthenticated(false)
+      setCurrentUser(null)
+      setAppDataReady(false)
+      setRouteReady(false)
+      setSpaces([])
+      setFriends([])
+      setEvents([])
+      setActiveSpace(null)
+      setActiveChannel(null)
+      setActiveDMUser(null)
+      setHomeActiveDMUser(null)
+      setDrafts([])
+      setActiveDraftId(null)
+      if (isProtectedAppPath(window.location.pathname)) {
+        setShowLandingPage(false)
+        setAuthMode("login")
+      }
+    }
+    window.addEventListener("spacexyz-auth-cleared", handleAuthCleared)
+    return () => window.removeEventListener("spacexyz-auth-cleared", handleAuthCleared)
+  }, [])
 
   useEffect(() => {
     if (!isAuthenticated || !currentUser) {
@@ -809,6 +1152,7 @@ export default function CollaborationApp() {
   const messageScrollStateRef = useRef({})
   const pendingTabScrollRestoreRef = useRef(null)
   const chatSocketRef = useRef(null)
+  const chatSocketKeyRef = useRef(null)
   const fileInputRef = useRef(null)
   const messageInputRef = useRef(null)
   const composerEditorRef = useRef(null)
@@ -819,9 +1163,11 @@ export default function CollaborationApp() {
   const contextSaveTimeoutRef = useRef(null)
   const activeContextStateRef = useRef({ chatId: null, loaded: false })
   const initialRouteAppliedRef = useRef(false)
+  const lastAppliedRoutePathRef = useRef(null)
   const collapsedSpaceMenuRef = useRef(null)
   const protectedFileUrlCacheRef = useRef(new Map())
   const protectedFileInflightRef = useRef(new Map())
+  const missingAttachmentIdsRef = useRef(new Set())
   const messageActionButtonRefs = useRef({})
   const composerAttachButtonRef = useRef(null)
 
@@ -915,6 +1261,7 @@ export default function CollaborationApp() {
       }
       protectedFileUrlCacheRef.current.clear()
       protectedFileInflightRef.current.clear()
+      missingAttachmentIdsRef.current.clear()
     }
   }, [])
 
@@ -961,6 +1308,14 @@ export default function CollaborationApp() {
     const initial = (name && name[0]) ? name[0].toUpperCase() : "?"
 
     const sizeStyle = { width: size, height: size, lineHeight: `${size}px`, fontSize: Math.floor(size/2) }
+    const colors = ["#ff9a9e","#fad0c4","#f6d365","#f093fb","#a1c4fd","#c2e9fb","#d4fc79","#96fbc4"]
+    const idx = (String(user.id || user._id || name).length) % colors.length
+    const grad = `linear-gradient(135deg, ${colors[idx]} 0%, ${colors[(idx+3)%colors.length]} 100%)`
+    const initialsFallback = (
+      <div className="rounded-full flex items-center justify-center text-white font-bold" style={{ ...sizeStyle, background: grad }}>
+        {initial}
+      </div>
+    )
     const imageLoading = options.loading || (size <= 36 ? "lazy" : "eager")
     const imageFetchPriority =
       options.fetchPriority || (imageLoading === "eager" ? "high" : undefined)
@@ -985,6 +1340,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
+            fallback={initialsFallback}
+            showFallbackWhileLoading
             loading={imageLoading}
             fetchPriority={imageFetchPriority}
           />
@@ -999,6 +1356,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
+            fallback={initialsFallback}
+            showFallbackWhileLoading
             loading={imageLoading}
             fetchPriority={imageFetchPriority}
           />
@@ -1024,6 +1383,8 @@ export default function CollaborationApp() {
             cacheKey={avatarCacheKey}
             className="rounded-full object-cover"
             style={sizeStyle}
+            fallback={initialsFallback}
+            showFallbackWhileLoading
             loading={imageLoading}
             fetchPriority={imageFetchPriority}
           />
@@ -1031,9 +1392,6 @@ export default function CollaborationApp() {
       }
     }
     // fallback: emoji avatar or letter avatar with generated gradient
-    const colors = ["#ff9a9e","#fad0c4","#f6d365","#f093fb","#a1c4fd","#c2e9fb","#d4fc79","#96fbc4"]
-    const idx = (String(user.id || user._id || name).length) % colors.length
-    const grad = `linear-gradient(135deg, ${colors[idx]} 0%, ${colors[(idx+3)%colors.length]} 100%)`
     if (emojiAvatar) {
       return (
         <div className="rounded-full flex items-center justify-center font-bold" style={{ ...sizeStyle, background: grad }}>
@@ -1089,15 +1447,12 @@ export default function CollaborationApp() {
     if (!fileId) return
 
     const token = getToken()
-    const stored = getStoredUser()
-    const userId = getUserIdValue(stored)
     const headers = {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(userId ? { "X-User-Id": String(userId) } : {})
     }
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const response = await fetch(`${API_BASE}/upload/file/${fileId}`, { headers })
+      const response = await fetch(`${API_BASE}/upload/file/${fileId}`, { credentials: "include", headers })
       if (response.ok) {
         const payload = await response.json().catch(() => null)
         if (!payload || payload.status === "done" || payload.status === undefined) return
@@ -1113,14 +1468,12 @@ export default function CollaborationApp() {
     form.append("file", file)
 
     const token = getToken()
-    const stored = getStoredUser()
-    const userId = getUserIdValue(stored)
     const response = await fetch(`${API_BASE}/upload/file`, {
       method: "POST",
+      credentials: "include",
       body: form,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(userId ? { "X-User-Id": String(userId) } : {})
       }
     })
 
@@ -1623,18 +1976,21 @@ export default function CollaborationApp() {
   useEffect(() => {
     let userSocket = null
     let refreshTimeout = null
+    let cancelled = false
 
     if (isAuthenticated && currentUser) {
+      setAppDataReady(false)
+      setRouteReady(false)
       const loadInitialData = async () => {
         const currentUserSpaceIds = Array.isArray(currentUser?.spaces) ? currentUser.spaces : []
         const eagerSpacesPromise = currentUserSpaceIds.length > 0
-          ? Storage.getSpacesForUser(currentUserSpaceIds).catch(() => [])
+          ? Storage.getSpacesForUser(currentUserSpaceIds)
           : Promise.resolve([])
-        const bootstrap = await Storage.getBootstrap().catch(() => null)
+        const bootstrap = await Storage.getBootstrap()
         const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
-          : Storage.getFriends(effectiveUser.friends || []).catch(() => [])
+          : Storage.getFriends(effectiveUser.friends || [])
         const expectedSpaceIds = Array.isArray(effectiveUser.spaces) ? effectiveUser.spaces : []
         const expectedMatchesCurrent =
           expectedSpaceIds.length === currentUserSpaceIds.length &&
@@ -1643,7 +1999,7 @@ export default function CollaborationApp() {
           ? Promise.resolve(bootstrap.spaces)
           : expectedMatchesCurrent
             ? eagerSpacesPromise
-            : Storage.getSpacesForUser(expectedSpaceIds).catch(() => [])
+            : Storage.getSpacesForUser(expectedSpaceIds)
 
         setCurrentUser(prev => {
           if (!prev) return effectiveUser
@@ -1675,6 +2031,9 @@ export default function CollaborationApp() {
         const userSpaces = await spacesPromise
         
         const safeUserSpaces = Array.isArray(userSpaces) ? userSpaces : []
+        if (expectedSpaceIds.length > 0 && safeUserSpaces.length === 0) {
+          throw new Error("Workspace data was not available during boot")
+        }
         const cachedFallbackSpaces = safeUserSpaces.length > 0 ? [] : Storage.peekSpacesForUser?.(expectedSpaceIds) || []
         const spacesForPaint = safeUserSpaces.length > 0 ? safeUserSpaces : cachedFallbackSpaces
         const enrichedSpaces = enrichSpacesForUi(spacesForPaint)
@@ -1696,7 +2055,9 @@ export default function CollaborationApp() {
       }
 
       ;(async () => {
+        try {
         const enrichedSpaces = await loadInitialData()
+        if (cancelled) return
 
         if (
           enrichedSpaces.length > 0 &&
@@ -1720,10 +2081,12 @@ export default function CollaborationApp() {
             setActiveChannel("")
           }
         }
+        setAppDataReady(true)
         
         // Refresh once shortly after first paint to pick up background-cached updates.
         refreshTimeout = setTimeout(async () => {
           const refreshedSpaces = await loadInitialData()
+          if (cancelled) return
           // Update active space if we didn't have any before but now we do
           if (refreshedSpaces.length > 0 && !activeSpace) {
             const firstSpace = refreshedSpaces[0]
@@ -1737,6 +2100,15 @@ export default function CollaborationApp() {
             if (accessibleChannel) setActiveChannel(accessibleChannel.id)
           }
         }, 600)
+        } catch (error) {
+          if (cancelled) return
+          console.error("Initial app data load failed", error)
+          if (error?.status === 401) {
+            authLogout()
+          } else {
+            setAuthBootError("We couldn't load your workspace. Check the connection and try again.")
+          }
+        }
       })()
 
       // Open a background user socket to receive notifications in real-time
@@ -2047,8 +2419,13 @@ export default function CollaborationApp() {
           console.error('Failed to connect user socket', e)
         })
     }
+    if (!isAuthenticated || !currentUser) {
+      setAppDataReady(false)
+      setRouteReady(false)
+    }
 
     return () => {
+      cancelled = true
       try {
         if (userSocket) {
           userSocket.close()
@@ -2120,7 +2497,7 @@ export default function CollaborationApp() {
           const optimisticOnly = existing.filter(m => m.optimistic && !serverIds.has(m.id))
           return {
             ...prev,
-            [chatId]: [...normalized, ...optimisticOnly]
+            [chatId]: dedupeMessagesById([...normalized, ...optimisticOnly])
           }
         })
         setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
@@ -2147,21 +2524,28 @@ export default function CollaborationApp() {
 
   // Chat websocket connection for real-time message delivery
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated) {
+      try {
+        chatSocketRef.current?.close?.()
+      } catch (e) {}
+      chatSocketRef.current = null
+      chatSocketKeyRef.current = null
+      return
+    }
 
     const chatId = getActiveChatId()
 
-    if (!chatId) return
+    if (!chatId) {
+      try {
+        chatSocketRef.current?.close?.()
+      } catch (e) {}
+      chatSocketRef.current = null
+      chatSocketKeyRef.current = null
+      return
+    }
+    const chatKey = String(chatId)
 
-    // Close previous socket if any
-    try {
-      if (chatSocketRef.current) {
-        chatSocketRef.current.close()
-      }
-    } catch (e) {}
-
-    // Connect new chat socket
-    const ws = connectChatSocket(chatId, data => {
+    const handleSocketMessage = data => {
       // Expect data to be a message object; ignore presence updates
       if (!data) return
       
@@ -2218,7 +2602,7 @@ export default function CollaborationApp() {
             const filtered = normalized.id
               ? existing.filter(m => m.id !== normalized.id)
               : existing
-            return { ...prev, [key]: [...filtered, normalized] }
+            return { ...prev, [key]: dedupeMessagesById([...filtered, normalized]) }
           })
         } catch (e) { console.warn('failed to normalize task broadcast', e) }
         return
@@ -2254,7 +2638,7 @@ export default function CollaborationApp() {
         const filtered = normalized.id
           ? existing.filter(m => m.id !== normalized.id)
           : existing
-        return { ...prev, [key]: [...filtered, normalized] }
+        return { ...prev, [key]: dedupeMessagesById([...filtered, normalized]) }
       })
       // If message has attachments with file ids, fetch metadata for previews/downloads
       if (normalized.attachments && normalized.attachments.length > 0) {
@@ -2274,18 +2658,34 @@ export default function CollaborationApp() {
           }
         })
       }
-    })
+    }
+
+    if (chatSocketRef.current && chatSocketKeyRef.current === chatKey) {
+      chatSocketRef.current._wrapper?.setOnMessage?.(handleSocketMessage)
+      return
+    }
+
+    // Close the previous chat only when the actual chat target changes.
+    try {
+      chatSocketRef.current?.close?.()
+    } catch (e) {}
+
+    const ws = connectChatSocket(chatId, handleSocketMessage)
 
     chatSocketRef.current = ws
+    chatSocketKeyRef.current = chatKey
     ws.onopen = () => console.log("Chat socket connected", chatId)
     ws.onclose = () => console.log("Chat socket closed", chatId)
     ws.onerror = e => console.error("Chat socket error", e)
 
     return () => {
-      try {
-        if (chatSocketRef.current) chatSocketRef.current.close()
-      } catch (e) {}
-      chatSocketRef.current = null
+      // React can re-run this effect for handler freshness. Keep the socket
+      // alive unless a later render has already moved to another chat.
+      if (chatSocketKeyRef.current !== chatKey) {
+        try {
+          ws.close()
+        } catch (e) {}
+      }
     }
   }, [isAuthenticated, activeView, activeChannel, activeDMUser, contextsSourceView, currentUser?.id])
 
@@ -2509,7 +2909,7 @@ export default function CollaborationApp() {
   }, [])
 
   const applyAuthenticatedSession = React.useCallback((user, token, options = {}) => {
-    if (!user || !token) return
+    if (!user) return
 
     const safeUser = filterDismissedUser(user)
     const seededSpaces = options.seedSpaces ? enrichSpacesForUi(options.seedSpaces) : null
@@ -2520,6 +2920,11 @@ export default function CollaborationApp() {
     startTransition(() => {
       setCurrentUser(safeUser)
       setIsAuthenticated(true)
+      setAppDataReady(false)
+      setRouteReady(false)
+      setAuthInitializing(false)
+      setAuthBootError("")
+      setShowLandingPage(false)
       setActiveView("home")
       setHomeSection("overview")
       if (seededSpaces) setSpaces(seededSpaces)
@@ -2546,6 +2951,9 @@ export default function CollaborationApp() {
     if (authPending) return
     setAuthError("")
     setAuthSuccess("")
+    setAuthBootError("")
+    setAppDataReady(false)
+    setRouteReady(false)
     setAuthPending(true)
 
     try {
@@ -2586,8 +2994,19 @@ export default function CollaborationApp() {
         integrations: {}
       }
       const signupData = await Storage.saveUser(newUser)
-      const savedUser = signupData?.user || newUser
-      const savedToken = signupData?.token || getToken() || `token_${newUserId}_${Date.now()}`
+      setAuthInitializing(true)
+      const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
+      const savedUser = {
+        ...(verifiedUser || {}),
+        ...(signupData?.user || newUser),
+        spaces:
+          (Array.isArray(verifiedUser?.spaces) && verifiedUser.spaces.length > 0)
+            ? verifiedUser.spaces
+            : (Array.isArray(signupData?.user?.spaces) && signupData.user.spaces.length > 0)
+              ? signupData.user.spaces
+              : newUser.spaces,
+      }
+      const savedToken = signupData?.token || getToken() || null
 
       applyAuthenticatedSession(savedUser, savedToken, {
         activeSpaceId: defaultSpace.id,
@@ -2606,7 +3025,9 @@ export default function CollaborationApp() {
       try {
         const data = await Storage.login({ email: authData.email, password: authData.password })
         if (data?.user && data?.token) {
-          applyAuthenticatedSession(data.user, data.token, {
+          setAuthInitializing(true)
+          const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
+          applyAuthenticatedSession(verifiedUser || data.user, data.token, {
             successMessage: "Logged in successfully!",
             cacheLookupEmail: authData.email,
           })
@@ -2615,23 +3036,28 @@ export default function CollaborationApp() {
         }
       } catch (e) {
         console.error("Login failed", e)
+        setAuthInitializing(false)
         setAuthError("Invalid credentials")
       }
       setAuthPending(false)
     }
     } catch (e) {
       console.error("Authentication failed", e)
+      setAuthInitializing(false)
       setAuthError(authMode === "login" ? "Invalid credentials" : "Unable to complete signup right now.")
       setAuthPending(false)
     }
   }
 
   const handleLogout = () => {
-    // Clear persisted auth
+    // Clear backend HttpOnly session cookie and local in-memory auth.
+    void Storage.logoutSession()
     authLogout()
 
     setIsAuthenticated(false)
     setCurrentUser(null)
+    setAppDataReady(false)
+    setRouteReady(false)
     setSpaces([])
     setFriends([])
     setEvents([])
@@ -2645,6 +3071,7 @@ export default function CollaborationApp() {
     setAuthData({ email: "", password: "", confirmPassword: "", name: "" })
     setAuthError("")
     setAuthSuccess("")
+    setAuthBootError("")
     setAuthPending(false)
     setGoogleAuthPending(false)
     setDmSearchQuery("")
@@ -2678,10 +3105,51 @@ export default function CollaborationApp() {
             return
           }
 
+          const authResult = await Storage.loginWithGoogle(credential)
+          if (!authResult?.user) {
+            throw new Error(authResult?.error || "Google authentication failed")
+          }
+
+          setAuthInitializing(true)
+          const verifiedGoogleUser = await Storage.getCurrentUser({ forceRefresh: true })
+          let defaultSpace = null
+          const savedUser = {
+            ...(verifiedGoogleUser || {}),
+            ...authResult.user,
+            spaces:
+              (Array.isArray(verifiedGoogleUser?.spaces) && verifiedGoogleUser.spaces.length > 0)
+                ? verifiedGoogleUser.spaces
+                : (Array.isArray(authResult.user?.spaces) && authResult.user.spaces.length > 0)
+                  ? authResult.user.spaces
+                  : [],
+          }
+          const savedToken = authResult.token || getToken() || null
+          const existingSpaceIds = Array.isArray(savedUser.spaces) ? savedUser.spaces : []
+          if (authResult.isNew || existingSpaceIds.length === 0) {
+            defaultSpace = buildDefaultSpace(savedUser.id)
+            await Storage.saveSpace(defaultSpace)
+            savedUser.spaces = [defaultSpace.id]
+          }
+
+          applyAuthenticatedSession(savedUser, savedToken, {
+            activeSpaceId: defaultSpace?.id,
+            activeChannelId: defaultSpace?.channels?.[0]?.id || null,
+            seedSpaces: defaultSpace ? [defaultSpace] : null,
+            successMessage: authResult.isNew ? "Account created with Google successfully!" : "Logged in with Google successfully!",
+            cacheLookupEmail: normalizedEmail,
+          })
+
+          if (credential) {
+            GoogleService.setGoogleAccessToken(credential)
+            setGoogleAccessToken(credential)
+          }
+          try { setShowOrgModal(false); setOrgStage('form') } catch (e) {}
+          return
+
           const existingUser = await lookupUserByEmailCached(normalizedEmail)
 
           if (existingUser) {
-            const token = getToken() || `token_${existingUser.id}_${Date.now()}`
+            const token = getToken() || null
             applyAuthenticatedSession(existingUser, token, {
               successMessage: "Logged in with Google successfully!",
               cacheLookupEmail: normalizedEmail,
@@ -2715,7 +3183,7 @@ export default function CollaborationApp() {
           }
           const signupData = await Storage.saveUser(newUser)
           const savedUser = signupData?.user || newUser
-          const savedToken = signupData?.token || getToken() || `token_${newUserId}_${Date.now()}`
+          const savedToken = signupData?.token || getToken() || null
 
           applyAuthenticatedSession(savedUser, savedToken, {
             activeSpaceId: defaultSpace.id,
@@ -2734,6 +3202,7 @@ export default function CollaborationApp() {
           }
         } catch (error) {
           console.error('Google Sign-In Error:', error)
+          setAuthInitializing(false)
           setAuthError("Google sign-in temporarily unavailable. Please use email/password login.")
         } finally {
           googleAuthInFlightRef.current = false
@@ -3995,22 +4464,6 @@ export default function CollaborationApp() {
     }
   }
 
-  // Attach the signaling handler to WebSocket messages
-  useEffect(() => {
-    if (chatSocketRef.current && chatSocketRef.current._wrapper) {
-      const existingHandler = chatSocketRef.current._wrapper._handlers?.onmessage
-      chatSocketRef.current._wrapper.setOnMessage((data) => {
-        // Handle WebRTC signaling messages
-        if (data && (data.type?.startsWith('webrtc-') || data.type === 'ice-candidate')) {
-          handleWebRTCSignaling(data)
-          return
-        }
-        // Pass to existing handler for regular messages
-        if (existingHandler) existingHandler({ data: JSON.stringify(data) })
-      })
-    }
-  }, [chatSocketRef.current, currentUser?.id])
-
   // Attach remote stream to video element when it changes
   useEffect(() => {
     if (remoteStream && remoteVideoRef.current) {
@@ -4356,17 +4809,40 @@ export default function CollaborationApp() {
 
   const openWorkspaceHome = () => {
     setActiveDraftId(null)
-    const targetSpace = currentSpace || spaces[0] || null
-    if (targetSpace) {
-      const accessible = getAccessibleChannelsForSpace(targetSpace)
-      const targetChannel =
-        accessible.find(channel => String(channel.id) === String(activeChannel)) ||
-        accessible[0] ||
-        targetSpace.channels?.[0] ||
-        null
-      setActiveSpace(targetSpace.id)
-      if (targetChannel) setActiveChannel(targetChannel.id)
+    if (!appDataReady || !currentUser?.id || !Array.isArray(spaces) || spaces.length === 0) {
+      setActiveView("home")
+      setHomeSection("overview")
+      return
     }
+
+    const targetSpace =
+      currentSpace && spaces.some(space => String(space.id) === String(currentSpace.id))
+        ? currentSpace
+        : spaces[0] || null
+    if (!targetSpace) {
+      setActiveView("home")
+      setHomeSection("overview")
+      return
+    }
+
+    const accessible = getAccessibleChannelsForSpace(targetSpace)
+    const targetChannel =
+      accessible.find(channel => String(channel.id) === String(activeChannel)) ||
+      accessible[0] ||
+      null
+
+    if (!targetChannel) {
+      setActiveSpace(targetSpace.id)
+      setActiveChannel(null)
+      setActiveView("home")
+      setHomeSection("overview")
+      return
+    }
+
+    setActiveSpace(targetSpace.id)
+    setActiveChannel(targetChannel.id)
+    setActiveChannelTab("messages")
+    setOpenContextId(null)
     setActiveView("channel")
     setHomeSection("overview")
   }
@@ -4385,12 +4861,18 @@ export default function CollaborationApp() {
         const targetChannel =
           accessible.find(channel => String(channel.id) === String(activeChannel)) ||
           accessible[0] ||
-          targetSpace.channels?.[0] ||
           null
         setActiveSpace(targetSpace.id)
-        if (targetChannel) setActiveChannel(targetChannel.id)
+        if (targetChannel) {
+          setActiveChannel(targetChannel.id)
+          setActiveView("channel")
+        } else {
+          setActiveChannel(null)
+          setActiveView("home")
+        }
+      } else {
+        setActiveView("home")
       }
-      setActiveView("channel")
     }
     setHomeSection("overview")
   }
@@ -4484,7 +4966,7 @@ export default function CollaborationApp() {
     if (!text || !chatId || !currentUser || homeDMSending) return
 
     const message = {
-      id: `home-dm-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: createClientId("home-dm"),
       userId: currentUser.id,
       text,
       timestamp: new Date().toISOString(),
@@ -4496,7 +4978,7 @@ export default function CollaborationApp() {
     }
 
     setHomeDMSending(true)
-    setMessages(prev => ({ ...prev, [chatId]: [...(prev[chatId] || []), message] }))
+    setMessages(prev => ({ ...prev, [chatId]: dedupeMessagesById([...(prev[chatId] || []), message]) }))
     setHomeDMInput("")
 
     try {
@@ -4685,7 +5167,7 @@ export default function CollaborationApp() {
   }, [activeView, activeChannel, activeDMUser, contextsSourceView, currentUser])
 
   const currentMessages = useMemo(
-    () => (activeChatId ? messages[activeChatId] || [] : []),
+    () => (activeChatId ? dedupeMessagesById(messages[activeChatId] || []) : []),
     [messages, activeChatId]
   )
   const isChannelFeed = activeView === "channel"
@@ -4723,12 +5205,18 @@ export default function CollaborationApp() {
 
   const usersById = useMemo(() => {
     const lookup = {}
-    ;[...users, ...friends].forEach(user => {
+    ;[...friends, ...users].forEach(user => {
       if (!user?.id && user?.id !== 0) return
-      lookup[String(user.id)] = user
+      lookup[String(user.id)] = {
+        ...(lookup[String(user.id)] || {}),
+        ...user,
+      }
     })
     if (currentUser?.id !== undefined && currentUser?.id !== null) {
-      lookup[String(currentUser.id)] = currentUser
+      lookup[String(currentUser.id)] = {
+        ...(lookup[String(currentUser.id)] || {}),
+        ...currentUser,
+      }
     }
     return lookup
   }, [currentUser, users, friends])
@@ -4737,6 +5225,19 @@ export default function CollaborationApp() {
     if (userId === undefined || userId === null) return undefined
     return usersById[String(userId)]
   }
+
+  const homeFriends = useMemo(() => {
+    if (!Array.isArray(friends)) return []
+    return friends.map(friend => {
+      const freshUser = getUserIdValue(friend) ? usersById[String(getUserIdValue(friend))] : null
+      if (!freshUser) return friend
+      return {
+        ...friend,
+        ...freshUser,
+        status: friend.status || freshUser.status,
+      }
+    })
+  }, [friends, usersById])
 
   const activeChannelData = useMemo(
     () => currentChannels.find(c => c.id === activeChannel) || null,
@@ -4805,10 +5306,10 @@ export default function CollaborationApp() {
   // Poll backend for file metadata until it's available (url/status)
   const fetchFileMetadata = async fileId => {
     try {
+      if (missingAttachmentIdsRef.current.has(String(fileId))) return null
       const token = getToken()
-      const stored = getStoredUser()
-      const userId = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
-      const resp = await fetch(`${API_BASE}/upload/file/${fileId}`, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(userId ? { 'X-User-Id': String(userId) } : {}) } })
+      const resp = await fetch(`${API_BASE}/upload/file/${fileId}`, { credentials: "include", headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
+      if (resp.status === 404) missingAttachmentIdsRef.current.add(String(fileId))
       if (!resp.ok) return null
       const json = await resp.json()
       if (json && !json.error) return json
@@ -4822,6 +5323,7 @@ export default function CollaborationApp() {
   const fetchProtectedUrlAndCreateObjectURL = async att => {
     const cacheKey = getAttachmentCacheKey(att)
     if (att?.previewUrl?.startsWith?.("blob:")) return att.previewUrl
+    if (cacheKey && missingAttachmentIdsRef.current.has(String(cacheKey))) return null
     if (cacheKey && protectedFileUrlCacheRef.current.has(cacheKey)) {
       return protectedFileUrlCacheRef.current.get(cacheKey)
     }
@@ -4840,7 +5342,8 @@ export default function CollaborationApp() {
         if (url) {
           const token = getToken()
           const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-          const resp = await fetch(url, { headers })
+          const resp = await fetch(url, { credentials: "include", headers })
+          if (resp.status === 404 && cacheKey) missingAttachmentIdsRef.current.add(String(cacheKey))
           if (!resp.ok) return null
           const blob = await resp.blob()
           return URL.createObjectURL(blob)
@@ -4852,7 +5355,8 @@ export default function CollaborationApp() {
           if (realUrl) {
             const token = getToken()
             const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-            const resp = await fetch(realUrl, { headers })
+            const resp = await fetch(realUrl, { credentials: "include", headers })
+            if (resp.status === 404 && cacheKey) missingAttachmentIdsRef.current.add(String(cacheKey))
             if (!resp.ok) return null
             const blob = await resp.blob()
             return URL.createObjectURL(blob)
@@ -4897,6 +5401,11 @@ export default function CollaborationApp() {
     }
 
     return Boolean(att?.fileId || att?.drive_file_id)
+  }
+
+  const isMissingAttachment = att => {
+    const cacheKey = getAttachmentCacheKey(att)
+    return cacheKey ? missingAttachmentIdsRef.current.has(String(cacheKey)) : false
   }
 
   const getAttachmentPreviewKind = att => {
@@ -6042,9 +6551,7 @@ export default function CollaborationApp() {
           const form = new FormData()
           form.append('file', file)
           const token = getToken()
-          const stored = getStoredUser()
-          const userId = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
-          const resp = await fetch(`${API_BASE}/upload/file`, { method: 'POST', body: form, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(userId ? { 'X-User-Id': String(userId) } : {}) } })
+          const resp = await fetch(`${API_BASE}/upload/file`, { method: 'POST', credentials: "include", body: form, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
           if (!resp.ok) throw new Error('Upload failed')
           const data = await resp.json()
           const id = data.file_id || `tmp-${Date.now()}-${Math.floor(Math.random()*1000)}`
@@ -6516,7 +7023,7 @@ export default function CollaborationApp() {
     if (!chatId) return
 
     const attachments = selectedFiles.map(file => ({ ...file }))
-    const tempId = `tmp-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    const tempId = createClientId("tmp")
     const selectedContextIds = selectedComposerContext ? [selectedComposerContext.id] : []
     const newMsg = {
       id: tempId,
@@ -6535,7 +7042,7 @@ export default function CollaborationApp() {
 
     setMessages(prev => ({
       ...prev,
-      [chatId]: [...(prev[chatId] || []), newMsg]
+      [chatId]: dedupeMessagesById([...(prev[chatId] || []), newMsg])
     }))
     resetComposerEditor()
     setSelectedFiles([])
@@ -7646,6 +8153,60 @@ export default function CollaborationApp() {
     </div>
   )
 
+  const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
+
+  if (!authBootError && (authInitializing || protectedAppBooting)) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center font-sans ${
+        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
+      }`}>
+        <div className="flex flex-col items-center gap-4">
+          <div className={`h-14 w-14 rounded-2xl flex items-center justify-center shadow-lg ${
+            isDarkMode ? "bg-white/10 text-cyan-200" : "bg-white text-cyan-700"
+          }`}>
+            <Loader2 className="h-7 w-7 animate-spin" />
+          </div>
+          <div className="text-center">
+            <p className={`text-sm font-bold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+              Restoring your workspace
+            </p>
+            <p className={`text-xs mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              {authInitializing
+                ? "Checking your secure session..."
+                : !appDataReady
+                  ? "Loading your profile and spaces..."
+                  : "Restoring your route..."}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (authBootError) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center font-sans px-6 ${
+        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
+      }`}>
+        <div className={`w-full max-w-sm rounded-2xl border p-6 text-center shadow-xl ${
+          isDarkMode ? "bg-white/8 border-white/10" : "bg-white border-slate-200"
+        }`}>
+          <ShieldAlert className={`h-8 w-8 mx-auto mb-4 ${isDarkMode ? "text-amber-300" : "text-amber-600"}`} />
+          <p className="text-sm font-bold">Session check paused</p>
+          <p className={`text-xs mt-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+            {authBootError}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-5 w-full px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-colors"
+          >
+            Retry session check
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // Show landing page for unauthenticated users who haven't clicked sign in/up
   if (!isAuthenticated && showLandingPage) {
     return (
@@ -8143,6 +8704,7 @@ export default function CollaborationApp() {
                               const q = await fetch(`${API_BASE}/api/org/check-dns?domain=${encodeURIComponent(orgForm.domain)}`)
                               const j = await q.json()
                               if (!q.ok) { setOrgError(j.detail || 'DNS check failed'); stopPolling(); return false }
+                              if (j?.setupToken) setOrgPasswordSetupToken(j.setupToken)
 
                               const verifiedFlag = (j && (j.verified === true || String(j.verified).toLowerCase() === 'true' || j.status === 'verified' || String(j.status || '').toLowerCase() === 'verified'))
                               if (verifiedFlag) {
@@ -8985,7 +9547,7 @@ export default function CollaborationApp() {
                       if (isSavingProfile) return
                       setIsSavingProfile(true)
                       try {
-                        const stored = getStoredUser()
+                        const stored = currentUser
                         const uid = getUserIdValue(stored)
                         if (!uid) throw new Error("No user id")
 
@@ -9314,6 +9876,7 @@ export default function CollaborationApp() {
                             const j = await q.json()
                             console.log('DNS CHECK RESPONSE', j)
                             if (!q.ok) { setOrgError(j.detail || 'DNS check failed'); stopPolling(); return false }
+                            if (j?.setupToken) setOrgPasswordSetupToken(j.setupToken)
 
                             // Accept multiple response shapes: {verified: true}, {verified: 'True'}, or legacy {status: 'verified'}
                             const verifiedFlag = (j && (j.verified === true || String(j.verified).toLowerCase() === 'true' || j.status === 'verified' || String(j.status || '').toLowerCase() === 'verified'))
@@ -9440,7 +10003,7 @@ export default function CollaborationApp() {
       {activeView === "home" ? (
         <HomeHub
           currentUser={currentUser}
-          friends={friends}
+          friends={homeFriends}
           drafts={drafts}
           tasks={tasksList || []}
           files={homeFiles}
@@ -11209,7 +11772,7 @@ export default function CollaborationApp() {
                           messageActionButtonRefs.current[String(msg.id)] || null
 
                         return (
-                          <React.Fragment key={msg.id}>
+                          <React.Fragment key={`${msg.id || "message"}-${idx}`}>
                             {showDateSeparator && (
                               <div className={`w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
                                 {isChannelFeed && (
@@ -11629,7 +12192,7 @@ export default function CollaborationApp() {
                                           // Use previewUrl only as fallback for sender's local preview
                                           const srcUrl = serverUrl || att.previewUrl
                                           const mime = att.type || att.mimeType || att.mimetype || ''
-                                          if (mime && mime.startsWith && mime.startsWith('image/') && srcUrl) {
+                                          if (mime && mime.startsWith && mime.startsWith('image/') && srcUrl && !isMissingAttachment(att)) {
                                             return (
                                               <SmartImage
                                                 src={srcUrl}
@@ -11646,6 +12209,8 @@ export default function CollaborationApp() {
                                                       return blobUrl
                                                     }
                                                   } catch (err) {}
+                                                  const cacheKey = getAttachmentCacheKey(att)
+                                                  if (cacheKey) missingAttachmentIdsRef.current.add(String(cacheKey))
                                                   return ""
                                                 }}
                                               />

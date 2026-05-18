@@ -1,4 +1,4 @@
-import { getToken, getStoredUser } from "./auth"
+import { getToken } from "./auth"
 
 // Derive WebSocket base safely from backend URL
 const API_BASE = import.meta.env.VITE_API_URL || "https://spaces-wc1z.onrender.com"
@@ -34,9 +34,6 @@ const buildQuery = () => {
   const params = new URLSearchParams()
   const token = getToken()
   if (token) params.set("token", token)
-  const stored = getStoredUser()
-  const userId = stored && (stored.id || stored._id || (stored._id && stored._id.$oid))
-  if (userId) params.set("userId", String(userId))
   // Add timestamp to avoid caches and help diagnose reconnect storms
   params.set("ts", String(Date.now()))
   const qs = params.toString()

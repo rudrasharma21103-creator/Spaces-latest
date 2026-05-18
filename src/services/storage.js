@@ -57,7 +57,7 @@ const ensureArray = data => {
   return []
 }
 
-import { getStoredUser, logout as clearAuth } from "./auth"
+import { logout as clearAuth } from "./auth"
 
 const messageRequestCache = new Map()
 const messageCountRequestCache = new Map()
@@ -173,23 +173,17 @@ export const peekMessages = chatId => {
 
 const authFetch = async (url, options = {}) => {
   const token = getToken()
-  const storedUser = getStoredUser()
-  
-  // Normalize user id from possible shapes: `id`, `_id`, `_id.$oid`, or `userId`
-  const userId = storedUser
-    ? (storedUser.id || storedUser._id || (storedUser._id && storedUser._id.$oid) || storedUser.userId)
-    : null
   try {
     if (DEBUG_STORAGE) {
       console.log("authFetch ->", url, options && options.method ? options.method : "GET")
-      console.log("authFetch headers ->", { token: !!token, userId: userId, extraHeaders: options && options.headers })
+      console.log("authFetch headers ->", { token: !!token, extraHeaders: options && options.headers })
     }
     const res = await fetch(url, {
       ...options,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(userId ? { "X-User-Id": String(userId) } : {}),
         ...(options.headers || {})
       }
     })
@@ -334,16 +328,8 @@ export const peekSpacesForUser = userSpaceIds => {
 export const getCurrentUser = async (options = {}) => {
   const { forceRefresh = false, cacheTtl = 5000 } = options
   const requestKey = "me"
-  const storedUser = getStoredUser()
-  const storedUserId = normalizeUserId(storedUser?.id || storedUser?._id || storedUser?.userId)
-  const { data: cachedUsers, timestamp } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
-  const cachedUser = Array.isArray(cachedUsers)
-    ? cachedUsers.find(user => normalizeUserId(user?.id) === storedUserId)
-    : null
-
-  if (!forceRefresh) {
-    if (cachedUser && Date.now() - timestamp < cacheTtl) return cachedUser
-  }
+  void forceRefresh
+  void cacheTtl
 
   if (usersByIdsRequestCache.has(requestKey)) {
     return usersByIdsRequestCache.get(requestKey)
@@ -353,20 +339,17 @@ export const getCurrentUser = async (options = {}) => {
     const res = await authFetch(`${API_BASE}/users/me`)
     const data = await safeJson(res)
     if (!res.ok) {
-      throw new Error(data?.detail || `Failed to load current user (${res.status})`)
+      const error = new Error(data?.detail || `Failed to load current user (${res.status})`)
+      error.status = res.status
+      throw error
     }
     if (data?.id !== undefined && data?.id !== null) {
       mergeUsersIntoCache([data])
       const token = getToken()
-      if (token) saveAuth(data, token)
+      saveAuth(data, token)
     }
     return data || null
   })()
-    .catch(err => {
-      if (cachedUser) return cachedUser
-      if (storedUser && storedUserId) return storedUser
-      throw err
-    })
     .finally(() => {
       usersByIdsRequestCache.delete(requestKey)
     })
@@ -378,15 +361,12 @@ export const getCurrentUser = async (options = {}) => {
 export const getBootstrap = async (options = {}) => {
   const { forceRefresh = false, cacheTtl = 5000 } = options
   const requestKey = "bootstrap"
-  const storedUser = getStoredUser()
-  const storedUserId = normalizeUserId(storedUser?.id || storedUser?._id || storedUser?.userId)
-  const { data: cachedUsers, timestamp } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
+  const { data: cachedUsers } = readSimpleCache(USERS_CACHE_KEY, USERS_CACHE_TIME_KEY)
   const cachedById = new Map(
     (Array.isArray(cachedUsers) ? cachedUsers : [])
       .filter(user => normalizeUserId(user?.id))
       .map(user => [normalizeUserId(user.id), user])
   )
-  const cachedUser = storedUserId ? cachedById.get(storedUserId) || storedUser : null
   const { data: cachedSpaces, timestamp: spacesTimestamp } = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
   const cachedSpacesById = new Map(
     (Array.isArray(cachedSpaces) ? cachedSpaces : [])
@@ -394,20 +374,11 @@ export const getBootstrap = async (options = {}) => {
       .map(space => [String(space.id), space])
   )
 
-  if (!forceRefresh && cachedUser && Date.now() - timestamp < cacheTtl) {
-    const cachedFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
-    const cachedSpaceIds = Array.isArray(cachedUser?.spaces) ? cachedUser.spaces.map(normalizeUserId).filter(Boolean) : []
-    if (
-      cachedFriendIds.every(id => cachedById.has(id)) &&
-      (cachedSpaceIds.length === 0 || (Date.now() - spacesTimestamp < cacheTtl && cachedSpaceIds.every(id => cachedSpacesById.has(id))))
-    ) {
-      return {
-        user: cachedUser,
-        friends: cachedFriendIds.map(id => cachedById.get(id)).filter(Boolean),
-        spaces: cachedSpaceIds.map(id => cachedSpacesById.get(id)).filter(Boolean),
-      }
-    }
-  }
+  void forceRefresh
+  void cacheTtl
+  void spacesTimestamp
+  void cachedById
+  void cachedSpacesById
 
   if (bootstrapRequestCache.has(requestKey)) {
     return bootstrapRequestCache.get(requestKey)
@@ -437,7 +408,7 @@ export const getBootstrap = async (options = {}) => {
       } catch (e) {}
     }
     const token = getToken()
-    if (user?.id !== undefined && user?.id !== null && token) {
+    if (user?.id !== undefined && user?.id !== null) {
       saveAuth(user, token)
     }
 
@@ -447,18 +418,6 @@ export const getBootstrap = async (options = {}) => {
       spaces,
     }
   })()
-    .catch(err => {
-      if (cachedUser) {
-        const fallbackFriendIds = Array.isArray(cachedUser?.friends) ? cachedUser.friends.map(normalizeUserId).filter(Boolean) : []
-        const fallbackSpaceIds = Array.isArray(cachedUser?.spaces) ? cachedUser.spaces.map(normalizeUserId).filter(Boolean) : []
-        return {
-          user: cachedUser,
-          friends: fallbackFriendIds.map(id => cachedById.get(id)).filter(Boolean),
-          spaces: fallbackSpaceIds.map(id => cachedSpacesById.get(id)).filter(Boolean),
-        }
-      }
-      throw err
-    })
     .finally(() => {
       bootstrapRequestCache.delete(requestKey)
     })
@@ -569,6 +528,37 @@ export const login = async ({ email, password }) => {
   } catch (err) {
     console.error("login failed", err)
     throw err
+  }
+}
+
+export const loginWithGoogle = async accessToken => {
+  try {
+    const res = await authFetch(`${API_BASE}/users/google-auth`, {
+      method: "POST",
+      body: JSON.stringify({ accessToken })
+    })
+    const data = await safeJson(res)
+    if (data?.user && data?.token) {
+      saveAuth(data.user, data.token)
+      return data
+    }
+    return data || null
+  } catch (err) {
+    console.error("loginWithGoogle failed", err)
+    throw err
+  }
+}
+
+export const logoutSession = async () => {
+  try {
+    await fetch(`${API_BASE}/users/logout`, {
+      method: "POST",
+      credentials: "include",
+    })
+  } catch (err) {
+    console.warn("logoutSession failed to reach backend", err)
+  } finally {
+    clearAuth()
   }
 }
 
@@ -774,12 +764,11 @@ export const saveMessage = async (chatId, message) => {
   try {
     const cached = peekMessages(chatId)
     const arr = Array.isArray(cached) ? cached : []
-    // Avoid duplicates by checking if message ID already exists
-    if (!arr.some(m => m.id === message.id)) {
-      arr.push(message)
-    }
-    writeMessagesCache(chatId, arr)
-    writeMessageCountCache(chatId, arr.length)
+    const next = message?.id
+      ? [...arr.filter(m => String(m?.id) !== String(message.id)), message]
+      : [...arr, message]
+    writeMessagesCache(chatId, next)
+    writeMessageCountCache(chatId, next.length)
   } catch (e) {}
 
   const res = await authFetch(`${API_BASE}/messages/${chatId}`, {
@@ -1029,16 +1018,9 @@ export const sendFriendRequest = async (fromId, fromName, toUserId) => {
 
 /* ✅ FIXED — ONLY REQUIRED CHANGE */
 export const acceptFriendRequest = async (friendId, notificationId = null) => {
-  // Get current user from localStorage
-  const userStr = localStorage.getItem("spaces_user")
-  const user = userStr ? JSON.parse(userStr) : null
-
-  if (!user) return null
-
   const res = await authFetch(`${API_BASE}/actions/accept-friend`, {
     method: "POST",
     body: JSON.stringify({
-      userId: user.id,
       friendId: friendId,
       notificationId: notificationId
     })
@@ -1326,13 +1308,9 @@ export const deleteNotification = async (userId, notificationId) => {
 }
 
 export const rejectFriendRequest = async (friendId, notificationId) => {
-  const userStr = localStorage.getItem("spaces_user")
-  const user = userStr ? JSON.parse(userStr) : null
-  if (!user) return null
-
   const res = await authFetch(`${API_BASE}/actions/reject-friend`, {
     method: "POST",
-    body: JSON.stringify({ userId: user.id, friendId, notificationId })
+    body: JSON.stringify({ friendId, notificationId })
   })
   invalidateUsersCache()
   return safeJson(res)

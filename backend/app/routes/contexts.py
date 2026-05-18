@@ -46,7 +46,9 @@ def _normalize_channel_state(chat_id: str, payload: dict):
 @router.get("/{chat_id}")
 def get_context_state(request: Request, chat_id: str):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     try:
@@ -68,7 +70,9 @@ def get_context_state(request: Request, chat_id: str):
 @router.put("/{chat_id}")
 def save_context_state(request: Request, chat_id: str, payload: dict):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     doc = _normalize_channel_state(chat_id, payload or {})

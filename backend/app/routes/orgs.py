@@ -233,6 +233,7 @@ async def check_dns(domain: str):
 
         # ✅ Check for match
         if expected_token in txt_records:
+            password_setup_token = uuid.uuid4().hex
             organizations_collection.update_one(
                 {"_id": org["_id"]},
                 {"$set": {
@@ -240,7 +241,9 @@ async def check_dns(domain: str):
                     "dns_verified": True,
                     "verificationMethod": "dns",
                     "verifiedAt": int(time.time()),
-                    "status": "verified"
+                    "status": "verified",
+                    "passwordSetupToken": password_setup_token,
+                    "passwordSetupTokenExpiresAt": int(time.time()) + 900
                 }}
             )
             print(f"✅ Domain {domain} verified successfully")
@@ -250,7 +253,7 @@ async def check_dns(domain: str):
                 await manager.broadcast("notifications", {"type": "org_verified", "domain": domain})
             except Exception as e:
                 print("Failed to send org_verified websocket message:", e)
-            return {"verified": True, "status": "verified"}
+            return {"verified": True, "status": "verified", "setupToken": password_setup_token}
 
         print("❌ Token not found in TXT records")
         return {"verified": False, "status": "not_verified"}
@@ -271,5 +274,7 @@ def get_org(domain: str):
 
     org.pop("verificationToken", None)
     org.pop("dnsToken", None)
+    org.pop("passwordSetupToken", None)
+    org.pop("passwordSetupTokenExpiresAt", None)
 
     return org

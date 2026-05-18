@@ -1,7 +1,11 @@
+from http.cookies import SimpleCookie
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.ws_manager import manager
 from app.auth import verify_ws_token
 from app.database import organizations_collection, users_collection
+from app.deps import AUTH_COOKIE_NAME
+from app.routes.messages import _check_channel_access
 import logging
 import time
 
@@ -9,11 +13,59 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _user_id_candidates(user_id):
+    candidates = []
+    if user_id is None:
+        return candidates
+    candidates.append(user_id)
+    try:
+        string_id = str(user_id)
+        if string_id != user_id:
+            candidates.append(string_id)
+    except Exception:
+        pass
+    try:
+        int_id = int(user_id)
+        if int_id != user_id:
+            candidates.append(int_id)
+    except (TypeError, ValueError):
+        pass
+    return candidates
+
+
+def _cookie_token(websocket: WebSocket):
+    try:
+        if websocket.cookies.get(AUTH_COOKIE_NAME):
+            return websocket.cookies.get(AUTH_COOKIE_NAME)
+    except Exception:
+        pass
+
+    raw_cookie = websocket.headers.get("cookie")
+    if not raw_cookie:
+        return None
+    try:
+        cookie = SimpleCookie()
+        cookie.load(raw_cookie)
+        morsel = cookie.get(AUTH_COOKIE_NAME)
+        return morsel.value if morsel else None
+    except Exception:
+        return None
+
+
+def _resolve_ws_user(websocket: WebSocket):
+    token = websocket.query_params.get("token") or _cookie_token(websocket)
+    user_id = verify_ws_token(token) if token else None
+    if user_id is None:
+        return None
+
+    user = users_collection.find_one({"id": {"$in": _user_id_candidates(user_id)}})
+    return user
+
 @router.websocket("/ws/chat/{chat_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     chat_id: str,
-    userId: str = None  # Capture userId from query params directly
 ):
     # Log incoming connection attempt for debugging
     try:
@@ -21,25 +73,21 @@ async def websocket_endpoint(
     except Exception:
         pass
 
-    # Accept the connection first
+    user = _resolve_ws_user(websocket)
+    if not user:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
+    user_id = user.get("id")
+    if not _check_channel_access(chat_id, user_id):
+        await websocket.close(code=1008, reason="Access denied")
+        return
+
     try:
         await websocket.accept()
     except Exception as e:
         logger.error("Failed to accept websocket for chat %s: %s", chat_id, e)
         return
-
-    # Prefer token verification if provided, otherwise use the userId query param
-    token = websocket.query_params.get("token")
-    user_id = None
-    try:
-        user_id = verify_ws_token(token) if token else userId
-    except Exception as e:
-        logger.warning("Failed to verify WS token: %s", str(e))
-        # fall back to userId if present
-        user_id = userId
-
-    if not user_id:
-        logger.info("WebSocket connected without a verified user id for chat %s", chat_id)
 
     # Add to connection manager (pass user_id to track presence)
     await manager.connect(chat_id, websocket, user_id=user_id)
@@ -48,6 +96,8 @@ async def websocket_endpoint(
         while True:
             # Wait for messages
             data = await websocket.receive_json()
+            if isinstance(data, dict):
+                data["userId"] = user_id
 
             # Broadcast to all clients in this chat
             await manager.broadcast(chat_id, data)
@@ -68,55 +118,47 @@ async def websocket_notifications(websocket: WebSocket):
     except Exception:
         pass
 
-    # Notifications socket (no chat id) - accept and track by user token or userId query param
+    user = _resolve_ws_user(websocket)
+    if not user:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
     try:
         await websocket.accept()
     except Exception as e:
         logger.error("Failed to accept notifications websocket: %s", e)
         return
 
-    token = websocket.query_params.get("token")
-    userId = websocket.query_params.get("userId")
-    user_id = None
-    try:
-        user_id = verify_ws_token(token) if token else userId
-    except Exception as e:
-        logger.warning("Failed to verify WS token for notifications: %s", str(e))
-        user_id = userId
-
-    if not user_id:
-        logger.info("Notifications WebSocket connected without a verified user id")
+    user_id = user.get("id")
 
     # Determine user's domain and role (best-effort) to allow domain-scoped admin notifications
     domain = None
     role = None
-    u = None
+    u = user
     try:
-        if user_id:
-            u = users_collection.find_one({"id": user_id}) or users_collection.find_one({"id": int(user_id)})
-            if u:
-                role = u.get("role")
-                # prefer explicit organizationId -> lookup org domain
-                org_id = u.get("organizationId")
-                if org_id:
-                    try:
-                        org = organizations_collection.find_one({"_id": org_id})
-                        if org:
-                            domain = org.get("domain")
-                    except Exception:
-                        pass
-                # fallback to parsing email domain
-                if not domain:
-                    email = u.get("email", "")
-                    import re
-                    m = re.search(r"@([A-Za-z0-9.-]+)$", email)
-                    if m:
-                        domain = m.group(1).lower()
-                # mark user as online
+        if u:
+            role = u.get("role")
+            # prefer explicit organizationId -> lookup org domain
+            org_id = u.get("organizationId")
+            if org_id:
                 try:
-                    users_collection.update_one({"id": u.get("id")}, {"$set": {"isOnline": True, "lastActive": int(time.time())}})
+                    org = organizations_collection.find_one({"_id": org_id})
+                    if org:
+                        domain = org.get("domain")
                 except Exception:
                     pass
+            # fallback to parsing email domain
+            if not domain:
+                email = u.get("email", "")
+                import re
+                m = re.search(r"@([A-Za-z0-9.-]+)$", email)
+                if m:
+                    domain = m.group(1).lower()
+            # mark user as online
+            try:
+                users_collection.update_one({"id": u.get("id")}, {"$set": {"isOnline": True, "lastActive": int(time.time())}})
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -147,6 +189,8 @@ async def websocket_notifications(websocket: WebSocket):
             data = await websocket.receive_json()
             # Handle WebRTC signaling - route to target user
             msg_type = data.get('type', '')
+            if isinstance(data, dict):
+                data["userId"] = user_id
             if msg_type.startswith('webrtc-') or msg_type == 'ice-candidate':
                 target_user_id = data.get('targetUserId')
                 if target_user_id:

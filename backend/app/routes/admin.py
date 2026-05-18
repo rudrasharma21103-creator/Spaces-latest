@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import users_collection, organizations_collection, events_collection, notifications_collection
+from app.deps import require_admin_user
 import time
 import statistics
 from bson import ObjectId
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
 @router.get("/overview")
-def admin_overview(domain: str = None, adminEmail: str = None):
+def admin_overview(domain: str = None, adminEmail: str = None, admin=Depends(require_admin_user)):
     if not domain and not adminEmail:
         raise HTTPException(status_code=400, detail="domain or adminEmail required")
 
@@ -36,6 +37,13 @@ def admin_overview(domain: str = None, adminEmail: str = None):
 
     if not domain:
         raise HTTPException(status_code=400, detail="Invalid domain")
+    admin_domain = None
+    if admin.get("email"):
+        import re
+        m = re.search(r"@([A-Za-z0-9.-]+)$", admin.get("email"))
+        admin_domain = m.group(1).lower() if m else None
+    if admin.get("role") != "admin" and admin_domain != domain:
+        raise HTTPException(status_code=403, detail="Admin access required for this domain")
 
     org = organizations_collection.find_one({"domain": domain}, {"_id": 0})
     if not org:

@@ -3,33 +3,17 @@ from fastapi.concurrency import run_in_threadpool
 from starlette import status
 from app.ws_manager import manager
 from app.database import messages_collection, spaces_collection
-from app.auth import verify_ws_token
+from app.deps import get_request_user
 import time
 
 _ACCESS_CACHE_TTL_SECONDS = 2.0
 _channel_access_cache = {}
 
 def _get_user_id_from_request(request: Request):
-    # Prefer explicit X-User-Id header
-    user_header = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-    try:
-        if user_header:
-            return int(user_header)
-    except Exception:
-        pass
-
-    # Fallback: try Authorization: Bearer <token>
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth and isinstance(auth, str) and auth.lower().startswith("bearer "):
-        token = auth.split(None, 1)[1]
-        try:
-            uid = verify_ws_token(token)
-            if uid:
-                return int(uid)
-        except Exception:
-            pass
-
-    return None
+    user = get_request_user(request)
+    if not user:
+        return None
+    return user.get("id")
 
 router = APIRouter(prefix="/messages")
 
@@ -117,8 +101,8 @@ def _get_channel_role(chat_id: str, user_id: int):
     if isinstance(chat_id, str) and chat_id.startswith("dm_"):
         try:
             parts = chat_id.split("_")
-            ids = [int(parts[1]), int(parts[2])]
-            return "member" if user_id in ids else None
+            ids = {str(parts[1]), str(parts[2])}
+            return "member" if str(user_id) in ids else None
         except Exception:
             return None
 
@@ -200,8 +184,8 @@ def _check_channel_access(chat_id: str, user_id: int):
     if isinstance(chat_id, str) and chat_id.startswith("dm_"):
         try:
             parts = chat_id.split("_")
-            ids = [int(parts[1]), int(parts[2])]
-            allowed = user_id in ids
+            ids = {str(parts[1]), str(parts[2])}
+            allowed = str(user_id) in ids
             _channel_access_cache[cache_key] = (allowed, now + _ACCESS_CACHE_TTL_SECONDS)
             return allowed
         except Exception:
@@ -340,10 +324,10 @@ def _remove_message_attachment(chat_id: str, message_id: str, attachment_id: str
 @router.get("/{chat_id}")
 def get_messages(request: Request, chat_id: str):
     user_id = _get_user_id_from_request(request)
-    has_access = _check_channel_access(chat_id, user_id) if user_id else False
-
-    if user_id is None or not has_access:
-        return []
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _check_channel_access(chat_id, user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     return _fetch_messages(chat_id)
 
@@ -351,8 +335,10 @@ def get_messages(request: Request, chat_id: str):
 @router.get("/{chat_id}/count")
 def get_message_count(request: Request, chat_id: str):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
-        return {"count": 0}
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _check_channel_access(chat_id, user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     count = _count_messages(chat_id)
     return {"count": count}
@@ -362,9 +348,12 @@ def get_message_count(request: Request, chat_id: str):
 async def save_message(request: Request, chat_id: str, message: dict):
     user_id = _get_user_id_from_request(request)
     has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
-    if user_id is None or not has_access:
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
+    message["userId"] = user_id
     await run_in_threadpool(_save_message_document, chat_id, message)
 
     # Broadcast immediately to connected websocket clients in this chat
@@ -380,8 +369,17 @@ async def save_message(request: Request, chat_id: str, message: dict):
 @router.patch("/{chat_id}/{message_id}")
 def update_message(request: Request, chat_id: str, message_id: str, message: dict):
     user_id = _get_user_id_from_request(request)
-    if user_id is None or not _check_channel_access(chat_id, user_id):
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not _check_channel_access(chat_id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    existing = _fetch_message_document(chat_id, message_id)
+    if not existing or not existing.get("message"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if _message_owner_id(existing["message"]) != str(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit another user's message")
+    message["userId"] = user_id
 
     # Update the message document where message.id matches
     res = messages_collection.update_one(
@@ -399,7 +397,9 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
 async def delete_message_attachment(request: Request, chat_id: str, message_id: str, attachment_id: str):
     user_id = _get_user_id_from_request(request)
     has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
-    if user_id is None or not has_access:
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     doc = await run_in_threadpool(_fetch_message_document, chat_id, message_id)
@@ -433,7 +433,9 @@ async def delete_message_attachment(request: Request, chat_id: str, message_id: 
 async def delete_message(request: Request, chat_id: str, message_id: str):
     user_id = _get_user_id_from_request(request)
     has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
-    if user_id is None or not has_access:
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     doc = await run_in_threadpool(_fetch_message_document, chat_id, message_id)

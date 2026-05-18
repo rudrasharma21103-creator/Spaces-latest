@@ -5,6 +5,7 @@ from app.database import tasks_collection, messages_collection, spaces_collectio
 from app.ws_manager import manager
 from app.routes.messages import _get_user_id_from_request
 from datetime import datetime, timezone
+from bson import ObjectId
 
 router = APIRouter(prefix="/tasks")
 
@@ -41,6 +42,26 @@ def _insert_task_messages(space_id, created_by, message, timestamp, assigned_to,
         messages_collection.insert_one({"chatId": str(ch_id), "message": payload})
         channel_ids.append(str(ch_id))
     return channel_ids
+
+
+def _user_can_access_space(space_id, user_id):
+    if not space_id or user_id is None:
+        return False
+    space = spaces_collection.find_one(
+        {"id": space_id},
+        {"ownerId": 1, "createdBy": 1, "members": 1, "channels.members": 1},
+    )
+    if not space:
+        return False
+    if str(space.get("ownerId") or space.get("createdBy")) == str(user_id):
+        return True
+    if any(str(member) == str(user_id) for member in (space.get("members") or [])):
+        return True
+    return any(
+        str(member) == str(user_id)
+        for channel in (space.get("channels") or [])
+        for member in (channel.get("members") or [])
+    )
 
 
 def _update_task_status(task_id: str, new_status: str):
@@ -92,13 +113,15 @@ def _update_task_status(task_id: str, new_status: str):
 async def create_task(request: Request, payload: dict):
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     # Basic payload validation
-    created_by = payload.get("created_by") or user_id
+    created_by = user_id
     assigned_to = payload.get("assigned_to") or []
     message = payload.get("message") or ""
     space_id = payload.get("space_id")
+    if space_id and not _user_can_access_space(space_id, user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     status_field = payload.get("status") or "pending"
     timestamp = payload.get("timestamp")
     # Ensure timestamp exists and is an ISO string
@@ -180,12 +203,24 @@ async def create_task(request: Request, payload: dict):
 async def update_task(request: Request, task_id: str, payload: dict):
     user_id = _get_user_id_from_request(request)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authentication required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     # Allow only updates to status for simplicity
     new_status = payload.get("status")
     if not new_status:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status required")
+
+    existing = tasks_collection.find_one({"id": task_id})
+    if not existing and len(str(task_id)) == 24:
+        try:
+            existing = tasks_collection.find_one({"_id": ObjectId(task_id)})
+        except Exception:
+            existing = None
+    if existing:
+        allowed_ids = {str(existing.get("created_by"))}
+        allowed_ids.update(str(item) for item in (existing.get("assigned_to") or []))
+        if str(user_id) not in allowed_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     updated = await run_in_threadpool(_update_task_status, task_id, new_status)
 
@@ -222,17 +257,15 @@ async def update_task(request: Request, task_id: str, payload: dict):
 
 @router.get("")
 def get_tasks(request: Request, userId: str = None):
-    # Return tasks assigned to or created by the provided userId
-    if not userId:
-        # If no user supplied, try header
-        userId = _get_user_id_from_request(request)
+    # Return tasks assigned to or created by the authenticated user only.
+    userId = _get_user_id_from_request(request)
     try:
         uid = str(userId)
     except Exception:
         uid = None
 
     if not uid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="userId required")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     # Support matching user id stored as string or number in the DB
     uid_variants = [uid]

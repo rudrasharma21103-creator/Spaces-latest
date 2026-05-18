@@ -1,15 +1,12 @@
-import { getToken, getStoredUser } from './auth'
+import { getToken } from './auth'
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
 const makeHeaders = () => {
   const token = getToken()
-  const stored = getStoredUser()
-  const uid = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
   return {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(uid ? { 'X-User-Id': String(uid) } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
 }
 
@@ -18,6 +15,7 @@ export const setChannelRole = async ({ space_id, channel_id, user_id, role }) =>
   const res = await fetch(url, {
     method: 'POST',
     headers: makeHeaders(),
+    credentials: 'include',
     body: JSON.stringify({ space_id, channel_id, user_id, role })
   })
   if (!res.ok) throw new Error('Failed to set channel role')
@@ -29,6 +27,7 @@ export const modifyChannelMember = async ({ action, space_id, channel_id, user_i
   const res = await fetch(url, {
     method: 'POST',
     headers: makeHeaders(),
+    credentials: 'include',
     body: JSON.stringify({ action, space_id, channel_id, user_id })
   })
   if (!res.ok) throw new Error('Failed to modify channel member')

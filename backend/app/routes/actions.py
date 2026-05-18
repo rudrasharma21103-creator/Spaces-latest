@@ -1,7 +1,9 @@
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, status
 from app.database import users_collection, spaces_collection
+from app.deps import get_request_user
+from app.routes.messages import _check_channel_access
 from app.ws_manager import manager
 
 router = APIRouter(prefix="/actions")
@@ -23,14 +25,34 @@ def extract_email_domain(email):
     match = re.search(r"@([A-Za-z0-9.-]+)$", str(email))
     return match.group(1).lower() if match else None
 
+
+def require_actor(request: Request):
+    user = get_request_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return user
+
+
+def _space_manager_role(space, user_id, channel_id=None):
+    if not space:
+        return None
+    if str(space.get("ownerId") or space.get("createdBy")) == str(user_id):
+        return "owner"
+    for ch in space.get("channels") or []:
+        if channel_id is not None and str(ch.get("id")) != str(channel_id):
+            continue
+        role = (ch.get("roles") or {}).get(str(user_id))
+        if role in ("owner", "admin", "member"):
+            return role
+    return None
+
 @router.post("/send-friend-request")
-async def send_friend_request(payload: dict):
+async def send_friend_request(request: Request, payload: dict):
+    actor = require_actor(request)
     to_id = payload["toUserId"]
-    notification = payload["notification"]
-    # Determine sender id from notification or payload
-    from_id = notification.get("fromId") or payload.get("fromId")
-    if from_id is None:
-        raise HTTPException(status_code=400, detail="Missing sender information")
+    notification = dict(payload.get("notification") or {})
+    from_id = actor.get("id")
+    notification["fromId"] = from_id
 
     if str(from_id) == str(to_id):
         raise HTTPException(status_code=400, detail="You cannot send a connection request to yourself")
@@ -120,8 +142,9 @@ async def send_friend_request(payload: dict):
     return {"status": "sent"}
 
 @router.post("/accept-friend")
-async def accept_friend(payload: dict):
-    user_id = payload.get("userId")
+async def accept_friend(request: Request, payload: dict):
+    actor = require_actor(request)
+    user_id = actor.get("id")
     friend_id = payload.get("friendId")
     notification_id = payload.get("notificationId")
 
@@ -180,8 +203,9 @@ async def accept_friend(payload: dict):
     return {"error": "Missing user_id or friend_id"}
 
 @router.post("/reject-friend")
-async def reject_friend(payload: dict):
-    user_id = payload.get("userId")
+async def reject_friend(request: Request, payload: dict):
+    actor = require_actor(request)
+    user_id = actor.get("id")
     friend_id = payload.get("friendId")
     notification_id = payload.get("notificationId")
 
@@ -228,13 +252,20 @@ async def reject_friend(payload: dict):
         return {"status": "rejected"}
 
 @router.post("/add-member")
-async def add_member_to_space(payload: dict):
+async def add_member_to_space(request: Request, payload: dict):
+    actor = require_actor(request)
+    actor_id = actor.get("id")
     user_id_to_add = payload.get("userIdToDetail")
     space_id = payload.get("spaceId")
     channel_id = payload.get("channelId")
 
     if not user_id_to_add or not space_id:
         return {"error": "Missing userIdToDetail or spaceId"}
+
+    space = spaces_collection.find_one({"id": space_id})
+    role = _space_manager_role(space, actor_id, channel_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     # 1) Add member to the space-level members list only when no channelId provided
     if not channel_id:
@@ -244,7 +275,6 @@ async def add_member_to_space(payload: dict):
         )
 
     # 2) If a channelId is provided, add the user to that channel only
-    space = spaces_collection.find_one({"id": space_id})
     updated_channels = []
     if space and isinstance(space.get("channels"), list):
         for ch in space.get("channels", []):
@@ -324,13 +354,22 @@ async def add_member_to_space(payload: dict):
     return {"status": "member added"}
 
 @router.post("/remove-member")
-async def remove_member(payload: dict):
+async def remove_member(request: Request, payload: dict):
+    actor = require_actor(request)
+    actor_id = actor.get("id")
     user_id_to_remove = payload.get("userIdToRemove")
     space_id = payload.get("spaceId")
     channel_id = payload.get("channelId")
 
     if not user_id_to_remove or not space_id:
         return {"error": "Missing userIdToRemove or spaceId"}
+
+    space = spaces_collection.find_one({"id": space_id})
+    role = _space_manager_role(space, actor_id, channel_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if str(user_id_to_remove) == str(space.get("ownerId") or space.get("createdBy")):
+        raise HTTPException(status_code=400, detail="Cannot remove space owner")
 
     # Remove user from space-level members
     spaces_collection.update_one(
@@ -339,7 +378,6 @@ async def remove_member(payload: dict):
     )
 
     # Remove user from channel members (either specific channel or all channels)
-    space = spaces_collection.find_one({"id": space_id})
     updated_channels = []
     if space and isinstance(space.get("channels"), list):
         for ch in space.get("channels", []):
@@ -414,8 +452,9 @@ async def remove_member(payload: dict):
     return {"status": "member removed"}
 
 @router.post("/accept-invite")
-async def accept_invite(payload: dict):
-    user_id = payload.get("userId")
+async def accept_invite(request: Request, payload: dict):
+    actor = require_actor(request)
+    user_id = actor.get("id")
     notification_id = payload.get("notificationId")
     
     # Send real-time notification to refresh the user's spaces
@@ -437,7 +476,7 @@ async def accept_invite(payload: dict):
 
 
 @router.post("/send-meet-invite")
-async def send_meet_invite(payload: dict):
+async def send_meet_invite(request: Request, payload: dict):
     """Notify users about a Google Meet link or broadcast to a channel.
     Expected payload keys:
       - organizerId: id of the user creating the meeting
@@ -448,7 +487,8 @@ async def send_meet_invite(payload: dict):
       - meetingTitle: optional title
       - start, end: optional timestamps
     """
-    organizer = payload.get("organizerId")
+    actor = require_actor(request)
+    organizer = actor.get("id")
     targets = payload.get("targetUserIds") or []
     space_id = payload.get("spaceId")
     channel_id = payload.get("channelId")
@@ -476,6 +516,17 @@ async def send_meet_invite(payload: dict):
         "timestamp": __import__('time').time()
     }
 
+    if channel_id:
+        if not _check_channel_access(str(channel_id), organizer):
+            raise HTTPException(status_code=403, detail="Access denied")
+    elif space_id:
+        space = spaces_collection.find_one({"id": space_id})
+        if not space or not (
+            str(space.get("ownerId") or space.get("createdBy")) == str(organizer)
+            or any(str(member) == str(organizer) for member in (space.get("members") or []))
+        ):
+            raise HTTPException(status_code=403, detail="Access denied")
+
     # 1) If channel_id provided, broadcast to that channel group
     try:
         if channel_id:
@@ -497,8 +548,9 @@ async def send_meet_invite(payload: dict):
     return {"status": "invites_sent"}
 
 @router.post("/broadcast-avatar-update")
-async def broadcast_avatar_update(payload: dict):
-    user_id = payload.get("userId")
+async def broadcast_avatar_update(request: Request, payload: dict):
+    actor = require_actor(request)
+    user_id = actor.get("id")
     avatar_data = payload.get("avatarData")
     
     if not user_id or not avatar_data:

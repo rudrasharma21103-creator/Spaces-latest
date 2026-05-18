@@ -1,7 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from starlette import status
-from app.database import files_collection
+from app.database import files_collection, messages_collection
+from app.deps import get_request_user
+from app.routes.messages import _check_channel_access
 import tempfile
 import os
 import shutil
@@ -79,8 +81,46 @@ def _do_upload_and_update(doc_id, path, name, mime_type):
             pass
 
 
+def _owns_file(user, doc):
+    if not user or not doc:
+        return False
+    return str(doc.get("userId")) == str(user.get("id"))
+
+
+def _file_is_attached_to_accessible_chat(user, file_id: str):
+    if not user or not file_id:
+        return False
+
+    attachment_match = {
+        "$or": [
+            {"message.attachments.fileId": file_id},
+            {"message.attachments.id": file_id},
+            {"message.attachments.drive_file_id": file_id},
+            {"message.attachments.url": f"/upload/file/{file_id}/download"},
+            {"message.attachments.webViewLink": f"/upload/file/{file_id}/download"},
+            {"message.attachments.public_url": f"/upload/file/{file_id}/download"},
+        ]
+    }
+    try:
+        docs = messages_collection.find(attachment_match, {"chatId": 1}).limit(20)
+        for message_doc in docs:
+            chat_id = message_doc.get("chatId")
+            if chat_id and _check_channel_access(str(chat_id), user.get("id")):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _can_access_file(user, file_id: str, doc):
+    return _owns_file(user, doc) or _file_is_attached_to_accessible_chat(user, file_id)
+
+
 @router.post("/file")
 async def upload_file(request: Request, background: BackgroundTasks, file: UploadFile = File(...)):
+    user = get_request_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     # Accept file and schedule upload in background so chat routes are not blocked.
     if not file:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
@@ -92,6 +132,7 @@ async def upload_file(request: Request, background: BackgroundTasks, file: Uploa
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     doc = {
+        "userId": str(user.get("id")),
         "filename": file.filename,
         "mimetype": file.content_type,
         "size": size,
@@ -110,7 +151,10 @@ async def upload_file(request: Request, background: BackgroundTasks, file: Uploa
 
 
 @router.get("/file/{file_id}")
-def get_file_metadata(file_id: str):
+def get_file_metadata(request: Request, file_id: str):
+    user = get_request_user(request)
+    if not user:
+        return JSONResponse({"error": "authentication required"}, status_code=401, headers=_cors_headers())
     try:
         oid = ObjectId(file_id)
     except Exception:
@@ -126,6 +170,9 @@ def get_file_metadata(file_id: str):
         )
     if not doc:
         return JSONResponse({"error": "not found"}, headers=_cors_headers())
+    if not _can_access_file(user, file_id, doc):
+        return JSONResponse({"error": "forbidden"}, status_code=403, headers=_cors_headers())
+    doc.pop("userId", None)
     # Normalize URL fields expected by the frontend (`url` / `public_url` / `previewUrl`)
     # Support older `webViewLink` field as well.
     web_link = doc.get("webViewLink")
@@ -144,7 +191,10 @@ def get_file_metadata(file_id: str):
 
 
 @router.get("/file/{file_id}/download")
-def download_file(file_id: str):
+def download_file(request: Request, file_id: str):
+    user = get_request_user(request)
+    if not user:
+        return JSONResponse({"error": "authentication required"}, status_code=401, headers=_cors_headers())
     try:
         oid = ObjectId(file_id)
     except Exception:
@@ -153,7 +203,7 @@ def download_file(file_id: str):
     try:
         doc = files_collection.find_one(
             {"_id": oid},
-            {"filename": 1, "mimetype": 1, "data": 1},
+            {"filename": 1, "mimetype": 1, "data": 1, "userId": 1},
         )
     except PyMongoError as exc:
         logger.error("Failed to download file %s: %s", file_id, exc)
@@ -164,6 +214,8 @@ def download_file(file_id: str):
         )
     if not doc:
         return JSONResponse({"error": "not found"}, status_code=404, headers=_cors_headers())
+    if not _can_access_file(user, file_id, doc):
+        return JSONResponse({"error": "forbidden"}, status_code=403, headers=_cors_headers())
 
     data = doc.get("data")
     if not data:

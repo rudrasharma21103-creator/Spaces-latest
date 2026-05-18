@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from jose import jwt, JWTError
+from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 
 SECRET_KEY = "d9a3f0b6c82e4f1b9d7a1c4e6f3b8a7d9e2c5f8a4b6d7c9e1f2a3b4c5d6e7"
@@ -14,27 +14,19 @@ def verify_ws_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload.get("user_id")
+    except ExpiredSignatureError:
+        return None
     except JWTError:
-        # Fallback: support simple local token format `token_<userId>_<ts>` used in dev
-        try:
-            if token and isinstance(token, str) and token.startswith("token_"):
-                parts = token.split("_")
-                # token_<userId>_<ts>
-                if len(parts) >= 3:
-                    return int(parts[1])
-        except Exception:
-            pass
         return None
 
 
 def decode_token(token: str):
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except ExpiredSignatureError:
+        return None
     except JWTError:
-        user_id = verify_ws_token(token)
-        if user_id is None:
-            return None
-        return {"user_id": user_id}
+        return None
 
 
 def hash_password(password: str):

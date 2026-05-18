@@ -229,9 +229,8 @@ export default function HomeHub({
   )
   const profileStrength = [currentProfile.companyName, currentProfile.position, currentProfile.linkedInUrl].filter(Boolean).length
   const profileStrengthLabel = profileStrength === 3 ? "Complete" : profileStrength === 2 ? "Strong" : profileStrength === 1 ? "Started" : "Needs details"
-  const desktopConnectionsVisibleCount = homeSidebarCollapsed ? 10 : 8
-  const desktopConnectionItemBasis = `clamp(72px, calc((100% - ${(desktopConnectionsVisibleCount - 1) * 12}px) / ${desktopConnectionsVisibleCount}), 90px)`
-  const connectionsCardWidthClass = homeSidebarCollapsed ? "max-w-[1140px] xl:max-w-[1220px]" : "max-w-[980px] xl:max-w-[1040px]"
+  const desktopConnectionsVisibleCount = homeSidebarCollapsed ? 13 : 12
+  const desktopConnectionItemBasis = `clamp(68px, calc((100% - ${(desktopConnectionsVisibleCount - 1) * 12}px) / ${desktopConnectionsVisibleCount}), 84px)`
 
   const syncConnectionsScrollState = targetScrollLeft => {
     const container = connectionsScrollerRef.current
@@ -860,32 +859,32 @@ export default function HomeHub({
         </>
       ) : (
         <>
-      <div className="w-full min-w-0 max-w-full overflow-hidden lg:px-5">
-        <div className={cx("relative mx-auto w-full min-w-0", connectionsCardWidthClass)}>
-          <button
-            type="button"
-            onClick={event => handleConnectionsButtonClick(event, -1)}
-            aria-disabled={!connectionsScrollState.left}
-            className={cx(
-              "pointer-events-auto absolute left-3 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-              ui.iconButton,
-              !connectionsScrollState.left && "opacity-40"
-            )}
-            title="Scroll left"
-          >
-            <ChevronLeft className="h-4.5 w-4.5" />
-          </button>
+      <div className="w-full min-w-0 max-w-full overflow-hidden">
+        <div className="relative w-full min-w-0">
+          <ShellCard className={cx("w-full max-w-full overflow-hidden p-3", overviewWidgetClass)}>
+            <div className="grid min-h-[96px] w-full min-w-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-2">
+              <button
+                type="button"
+                onClick={event => handleConnectionsButtonClick(event, -1)}
+                disabled={!connectionsScrollState.left}
+                className={cx(
+                  "flex h-10 w-10 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.08)] transition disabled:cursor-default disabled:opacity-35",
+                  ui.iconButton
+                )}
+                title="Scroll left"
+              >
+                <ChevronLeft className="h-4.5 w-4.5" />
+              </button>
 
-          <ShellCard className={cx("w-full max-w-full overflow-hidden p-4", overviewWidgetClass)}>
             <div
               ref={connectionsScrollerRef}
-              className="flex w-full min-w-0 max-w-full snap-x snap-mandatory items-center gap-3 overflow-x-auto overflow-y-hidden px-10 pb-1.5 scroll-px-10 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              className="flex w-full min-w-0 max-w-full snap-x snap-mandatory items-center gap-3 overflow-x-auto overflow-y-hidden px-1 py-1 scroll-px-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
               style={{ scrollBehavior: "auto" }}
             >
               <button
                 onClick={onOpenAddConnection}
-                className="flex shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
-                style={{ flexBasis: desktopConnectionItemBasis }}
+                className="flex min-w-0 shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
+                style={{ flex: `0 0 ${desktopConnectionItemBasis}` }}
               >
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#6d2a91] text-white shadow-[0_8px_20px_rgba(109,42,145,0.22)]">
                   <Plus className="h-5 w-5" />
@@ -896,31 +895,31 @@ export default function HomeHub({
                 <button
                   key={friend.id}
                   onClick={() => onOpenDM(friend.id)}
-                  className="flex shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
-                  style={{ flexBasis: desktopConnectionItemBasis }}
+                  className="flex min-w-0 shrink-0 snap-start flex-col items-center gap-2 rounded-[20px] px-1 py-1.5"
+                  style={{ flex: `0 0 ${desktopConnectionItemBasis}` }}
                 >
                   <span className={cx("flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)]", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-[#f2d5ff] bg-white")}>
-                    {renderAvatar(friend, 48)}
+                    {renderAvatar(friend, 48, { loading: "eager", fetchPriority: "high" })}
                   </span>
                   <span className={cx("w-full truncate text-center text-sm font-medium", ui.textPrimary)}>{getShortConnectionName(friend.name)}</span>
                 </button>
               ))}
             </div>
-          </ShellCard>
 
-          <button
-            type="button"
-            onClick={event => handleConnectionsButtonClick(event, 1)}
-            aria-disabled={!connectionsScrollState.right}
-            className={cx(
-              "pointer-events-auto absolute right-3 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.10)] transition lg:flex",
-              ui.iconButton,
-              !connectionsScrollState.right && "opacity-40"
-            )}
-            title="Scroll right"
-          >
-            <ChevronRight className="h-4.5 w-4.5" />
-          </button>
+              <button
+                type="button"
+                onClick={event => handleConnectionsButtonClick(event, 1)}
+                disabled={!connectionsScrollState.right}
+                className={cx(
+                  "flex h-10 w-10 items-center justify-center rounded-full border shadow-[0_12px_24px_rgba(15,23,42,0.08)] transition disabled:cursor-default disabled:opacity-35",
+                  ui.iconButton
+                )}
+                title="Scroll right"
+              >
+                <ChevronRight className="h-4.5 w-4.5" />
+              </button>
+            </div>
+          </ShellCard>
         </div>
       </div>
 

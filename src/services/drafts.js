@@ -59,13 +59,10 @@ const mergeDraftLists = (...lists) => {
 
 const buildHeaders = (includeJson = false) => {
   const token = getToken()
-  const stored = getStoredUser()
-  const uid = stored && (stored.id || stored._id || (stored._id && stored._id.$oid) || stored.userId)
 
   return {
     ...(includeJson ? { "Content-Type": "application/json" } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(uid ? { "X-User-Id": String(uid) } : {}),
   }
 }
 
@@ -75,6 +72,7 @@ export const getDrafts = async () => {
   try {
     const res = await fetch(`${API_BASE}/drafts`, {
       headers: buildHeaders(false),
+      credentials: "include",
     })
 
     if (!res.ok) {
@@ -108,6 +106,7 @@ export const saveDraft = async draft => {
     const res = await fetch(`${API_BASE}/drafts`, {
       method: "POST",
       headers: buildHeaders(true),
+      credentials: "include",
       body: JSON.stringify(draft),
     })
 
@@ -133,6 +132,7 @@ export const deleteDraft = async draftId => {
     const res = await fetch(`${API_BASE}/drafts/${encodeURIComponent(draftId)}`, {
       method: "DELETE",
       headers: buildHeaders(false),
+      credentials: "include",
     })
 
     if (!res.ok) {

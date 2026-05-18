@@ -1,12 +1,20 @@
 import React, { useEffect, useState, useRef } from "react";
 import { connectUserSocket } from "./services/ws";
-import { getStoredUser, getToken } from "./services/auth";
+import { getToken, saveAuth } from "./services/auth";
 
-const API_BASE = import.meta.env.VITE_API_URL;
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+const authHeaders = (json = false) => {
+  const token = getToken();
+  return {
+    ...(json ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export default function AdminDashboard() {
   const [overview, setOverview] = useState(null);
+  const [currentAdmin, setCurrentAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [savingPerUser, setSavingPerUser] = useState({});
@@ -17,13 +25,24 @@ export default function AdminDashboard() {
     (async () => {
       setLoading(true);
       try {
-        const user = getStoredUser();
+        const meRes = await fetch(`${API_BASE}/users/me`, {
+          headers: authHeaders(false),
+          credentials: "include",
+        });
+        if (!meRes.ok) throw new Error("Authentication required");
+        const user = await meRes.json();
+        setCurrentAdmin(user);
+        saveAuth(user, getToken());
         let domain = null;
         if (user && user.email)
           domain = (user.email.match(/@([A-Za-z0-9.-]+)$/) || [])[1];
         if (!domain) throw new Error("Missing domain");
         const res = await fetch(
-          `${API_BASE}/api/admin/overview?domain=${encodeURIComponent(domain)}`
+          `${API_BASE}/api/admin/overview?domain=${encodeURIComponent(domain)}`,
+          {
+            headers: authHeaders(false),
+            credentials: "include",
+          }
         );
         if (!res.ok) throw new Error("Failed fetching overview");
         const j = await res.json();
@@ -90,13 +109,17 @@ export default function AdminDashboard() {
   // Change role
   const changeRole = async (email, newRole) => {
     try {
-      const res = await fetch(`${API_BASE}/users/by-email/${encodeURIComponent(email)}`);
+      const res = await fetch(`${API_BASE}/users/by-email/${encodeURIComponent(email)}`, {
+        headers: authHeaders(false),
+        credentials: "include",
+      });
       if (!res.ok) throw new Error("user lookup failed");
       const u = await res.json();
       if (!u || !u.id) throw new Error("user not found");
       await fetch(`${API_BASE}/users/${u.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
+        credentials: "include",
         body: JSON.stringify({ role: newRole }),
       });
       await refreshOverview();
@@ -109,7 +132,11 @@ export default function AdminDashboard() {
     const domain = overview?.company?.domain;
     if (domain) {
       const r2 = await fetch(
-        `${API_BASE}/api/admin/overview?domain=${encodeURIComponent(domain)}`
+        `${API_BASE}/api/admin/overview?domain=${encodeURIComponent(domain)}`,
+        {
+          headers: authHeaders(false),
+          credentials: "include",
+        }
       );
       if (r2.ok) setOverview(await r2.json());
     }
@@ -146,7 +173,10 @@ export default function AdminDashboard() {
       // Ensure we have an ID for the backend call
       let targetId = id;
       if (!targetId) {
-        const res = await fetch(`${API_BASE}/users/by-email/${encodeURIComponent(email)}`);
+        const res = await fetch(`${API_BASE}/users/by-email/${encodeURIComponent(email)}`, {
+          headers: authHeaders(false),
+          credentials: "include",
+        });
         if (!res.ok) throw new Error("user lookup failed");
         const u = await res.json();
         targetId = u.id;
@@ -154,18 +184,10 @@ export default function AdminDashboard() {
 
       if (!targetId) throw new Error("User ID missing");
 
-      // Backend update (include auth headers)
-      const token = getToken();
-      const headers = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      else {
-        const su = getStoredUser();
-        if (su && su.id) headers["X-User-Id"] = String(su.id);
-      }
-
       const resp = await fetch(`${API_BASE}/users/${targetId}`, {
         method: "PUT",
-        headers,
+        headers: authHeaders(true),
+        credentials: "include",
         body: JSON.stringify({
           invitePermissions: {
             canInviteAll: type === "all",
@@ -184,7 +206,11 @@ export default function AdminDashboard() {
 
       // Refresh only this employee's permissions from backend
       const updatedOverview = await fetch(
-        `${API_BASE}/api/admin/overview?domain=${overview?.company?.domain}`
+        `${API_BASE}/api/admin/overview?domain=${overview?.company?.domain}`,
+        {
+          headers: authHeaders(false),
+          credentials: "include",
+        }
       );
       if (updatedOverview.ok) {
         const json = await updatedOverview.json();
@@ -216,7 +242,9 @@ export default function AdminDashboard() {
   };
   // --- FIXED FUNCTION END ---
 
-  const isAdmin = overview?.company?.adminEmail === getStoredUser()?.email;
+  const isAdmin =
+    ["admin", "org_admin", "owner"].includes(currentAdmin?.role) ||
+    overview?.company?.adminEmail === currentAdmin?.email;
 
   if (loading)
     return <div className="p-8 text-slate-500">Loading admin dashboard...</div>;

@@ -1,13 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import users_collection
 from app.database import files_collection
 from bson import ObjectId
 from app.auth import verify_password, identify_hash_scheme
+from app.deps import require_admin_user
 
 router = APIRouter(prefix="/debug")
 
 @router.post("/login-check")
-def login_check(data: dict):
+def login_check(data: dict, admin=Depends(require_admin_user)):
     email = data.get("email")
     password = data.get("password")
     if not email:
@@ -38,7 +39,7 @@ def login_check(data: dict):
     }
 
 @router.post("/reset-password")
-def reset_password(data: dict):
+def reset_password(data: dict, admin=Depends(require_admin_user)):
     """Dev-only: set a user's password to a known value (returns the new hash scheme).
     Use POST {"email": "...", "password": "newpass"}
     """
@@ -61,7 +62,7 @@ def reset_password(data: dict):
 
 
 @router.get('/recent-files')
-def recent_files(limit: int = 20):
+def recent_files(limit: int = 20, admin=Depends(require_admin_user)):
     """Dev-only: return most recent file metadata documents.
     This endpoint is intended for local debugging and should not be exposed
     in production. It returns limited fields to help diagnose upload issues.

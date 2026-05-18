@@ -32,9 +32,11 @@ function SmartImageComponent({
   loading = "lazy",
   decoding = "async",
   fetchPriority,
+  showFallbackWhileLoading = false,
   className,
   style,
   onResolveError,
+  onLoad,
   onError,
   ...rest
 }) {
@@ -45,11 +47,13 @@ function SmartImageComponent({
   const imageRef = useRef(null)
   const [imgSrc, setImgSrc] = useState(resolvedSrc)
   const [hasFailed, setHasFailed] = useState(!resolvedSrc)
+  const [hasLoaded, setHasLoaded] = useState(false)
   const [isVisible, setIsVisible] = useState(loading === "eager")
 
   useEffect(() => {
     setImgSrc(resolvedSrc)
     setHasFailed(!resolvedSrc)
+    setHasLoaded(false)
     setIsVisible(loading === "eager")
   }, [loading, resolvedSrc])
 
@@ -79,22 +83,48 @@ function SmartImageComponent({
     return () => observer.disconnect()
   }, [imgSrc, loading])
 
+  useEffect(() => {
+    if (!isVisible || hasFailed || hasLoaded) return
+
+    const node = imageRef.current
+    if (!node) return
+
+    if (node.complete && node.naturalWidth > 0) {
+      setHasFailed(false)
+      setHasLoaded(true)
+    }
+  }, [hasFailed, hasLoaded, imgSrc, isVisible])
+
   if (hasFailed) return fallback
 
-  return (
+  const image = (
     <img
       {...rest}
       ref={imageRef}
       src={isVisible ? imgSrc : undefined}
       alt={alt}
       className={className}
-      style={loading === "eager" ? style : { contentVisibility: "auto", ...style }}
+      style={
+        showFallbackWhileLoading
+          ? { ...style, opacity: hasLoaded ? 1 : 0, transition: "opacity 120ms ease" }
+          : loading === "eager" ? style : { contentVisibility: "auto", ...style }
+      }
       loading={loading}
       decoding={decoding}
       fetchPriority={fetchPriority}
+      onLoad={event => {
+        setHasFailed(false)
+        setHasLoaded(true)
+        onLoad?.(event)
+      }}
       onError={async event => {
+        if (hasLoaded) {
+          return
+        }
+
         const nextSrc = onResolveError ? await onResolveError(event) : ""
         if (nextSrc && nextSrc !== imgSrc) {
+          setHasLoaded(false)
           setImgSrc(nextSrc)
           return
         }
@@ -103,6 +133,35 @@ function SmartImageComponent({
         onError?.(event)
       }}
     />
+  )
+
+  if (!showFallbackWhileLoading || !fallback) return image
+
+  return (
+    <span className={className} style={{ ...style, display: "inline-block", position: "relative", overflow: "hidden" }}>
+      <span
+        style={{
+          position: "absolute",
+          inset: 0,
+          opacity: hasLoaded ? 0 : 1,
+          transition: "opacity 120ms ease",
+        }}
+      >
+        {fallback}
+      </span>
+      {React.cloneElement(image, {
+        className,
+        style: {
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          opacity: hasLoaded ? 1 : 0,
+          transition: "opacity 120ms ease",
+        },
+      })}
+    </span>
   )
 }
 

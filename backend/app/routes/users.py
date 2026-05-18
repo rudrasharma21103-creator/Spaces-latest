@@ -1,14 +1,17 @@
 import logging
+import json
 import re
 import time
+import urllib.request
 from urllib.parse import urlparse, urlunparse
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pymongo.errors import PyMongoError
 
 from app.auth import create_access_token, hash_password, verify_password
 from app.database import organizations_collection, spaces_collection, users_collection
+from app.deps import clear_auth_cookie, get_request_user, set_auth_cookie
 from app.models import ProfessionalProfilePayload
 from app.ws_manager import manager
 
@@ -118,6 +121,35 @@ def build_user_index_fields(source):
         "email_domain": extract_email_domain(email),
         "name_search": normalize_search_name(name),
     }
+
+
+def organization_defaults_for_email(email):
+    domain = extract_email_domain(email)
+    organization = organizations_collection.find_one({"domain": domain, "verified": True}) if domain else None
+    if organization:
+        return {
+            "organizationId": organization.get("_id") or organization.get("domain"),
+            "role": "employee",
+            "invitePermissions": {"canInviteAll": False, "canInviteCompanyOnly": True},
+        }
+    return {
+        "role": "user",
+        "invitePermissions": {"canInviteAll": True, "canInviteCompanyOnly": False},
+    }
+
+
+def fetch_google_userinfo(access_token):
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google access token required")
+    request = urllib.request.Request(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
 
 
 def normalize_linkedin_url(value):
@@ -377,26 +409,7 @@ def fetch_spaces_by_ids(space_ids):
 
 
 def resolve_requester(request: Request):
-    requester = None
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth and auth.lower().startswith("bearer "):
-        token = auth.split(" ", 1)[1]
-        try:
-            from app.auth import verify_ws_token
-
-            requester_id = verify_ws_token(token)
-            if requester_id is not None:
-                requester = get_user_by_id(requester_id)
-        except Exception:
-            requester = None
-
-    if requester:
-        return requester
-
-    x_user_id = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-    if not x_user_id:
-        return None
-    return get_user_by_id(x_user_id)
+    return get_request_user(request)
 
 
 def can_requester_see_user(requester, candidate):
@@ -477,6 +490,8 @@ def build_user_search_result(candidate, requester):
 
 def search_users_core(query: str, request: Request, limit: int = 25):
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
     safe_limit = max(1, min(int(limit or 25), MAX_SEARCH_LIMIT))
     normalized_query = query.strip()
     if not normalized_query:
@@ -575,6 +590,8 @@ def search_users_core(query: str, request: Request, limit: int = 25):
 
 def discover_people_core(request: Request, limit: int = 8):
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
     safe_limit = max(1, min(int(limit or 8), 24))
 
     try:
@@ -608,6 +625,8 @@ def discover_people_core(request: Request, limit: int = 8):
 @router.get("/")
 def get_users(request: Request):
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
         users_raw = list(users_collection.find({}, USER_LIST_PROJECTION))
@@ -651,6 +670,8 @@ def get_bootstrap_data(request: Request):
 @router.post("/by-ids")
 def get_users_by_ids(user_ids: list, request: Request):
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
     requester_id = str(requester.get("id")) if requester else None
     requester_friend_ids = {str(friend_id) for friend_id in (requester.get("friends") or [])} if requester else set()
 
@@ -685,7 +706,7 @@ def get_users_by_ids(user_ids: list, request: Request):
 
 
 @router.post("/signup")
-def signup(user: dict):
+def signup(user: dict, response: Response):
     logger.info("[users.signup] received signup for: %s", user.get("email"))
     normalized_email = normalize_email(user.get("email"))
     existing = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
@@ -696,29 +717,29 @@ def signup(user: dict):
     if existing:
         return {"error": "Email already registered"}
 
+    raw_user = user
     try:
-        user["password"] = hash_password(user["password"])
+        hashed_password = hash_password(raw_user["password"])
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Password hashing failed: {exc}")
 
-    try:
-        domain = extract_email_domain(user.get("email"))
-        organization = organizations_collection.find_one({"domain": domain, "verified": True}) if domain else None
-        if organization:
-            user["organizationId"] = organization.get("_id") or organization.get("domain")
-            user["role"] = "employee"
-            user.setdefault("invitePermissions", {"canInviteAll": False, "canInviteCompanyOnly": True})
-        else:
-            user.setdefault("role", "user")
-            user.setdefault("invitePermissions", {"canInviteAll": True, "canInviteCompanyOnly": False})
-    except Exception:
-        pass
+    user = {
+        "id": int(time.time() * 1000),
+        "name": clean_optional_text(raw_user.get("name"), 120) or (normalized_email.split("@")[0] if normalized_email else "User"),
+        "email": normalized_email or clean_optional_text(raw_user.get("email"), 320),
+        "password": hashed_password,
+    }
+    for key in ("avatar_url", "avatar_preset", "avatar_version", "avatar_updated_at"):
+        if raw_user.get(key) is not None:
+            user[key] = raw_user.get(key)
 
-    user.setdefault("spaces", [])
-    user.setdefault("friends", [])
-    user.setdefault("notifications", [])
+    user.update(organization_defaults_for_email(user.get("email")))
 
-    profile = normalize_professional_profile(user, strict=True)
+    user["spaces"] = []
+    user["friends"] = []
+    user["notifications"] = []
+
+    profile = normalize_professional_profile(raw_user, strict=True)
     if profile:
         user["professionalProfile"] = profile
 
@@ -726,11 +747,12 @@ def signup(user: dict):
 
     users_collection.insert_one(user)
     token = create_access_token({"user_id": user["id"]})
+    set_auth_cookie(response, token)
     return {"user": serialize_user(user, include_notifications=True), "token": token}
 
 
 @router.post("/login")
-def login(data: dict):
+def login(data: dict, response: Response):
     logger.info("[users.login] login attempt for: %s", data.get("email"))
     normalized_email = normalize_email(data.get("email"))
     user = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
@@ -751,11 +773,77 @@ def login(data: dict):
         return {"error": "Invalid credentials"}
 
     token = create_access_token({"user_id": user["id"]})
+    set_auth_cookie(response, token)
     return {"user": serialize_user(user, include_notifications=True), "token": token}
 
 
+@router.post("/google-auth")
+def google_auth(payload: dict, response: Response):
+    google_user = fetch_google_userinfo(payload.get("accessToken"))
+    normalized_email = normalize_email(google_user.get("email"))
+    if not normalized_email:
+        raise HTTPException(status_code=401, detail="Google account did not return an email")
+    if google_user.get("email_verified") is False:
+        raise HTTPException(status_code=403, detail="Google email is not verified")
+
+    user = users_collection.find_one({"email_normalized": normalized_email})
+    if not user:
+        user = users_collection.find_one(
+            {"email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"}}
+        )
+
+    is_new = False
+    if user:
+        update_doc = {
+            "authProvider": user.get("authProvider") or "google",
+            "integrations.google.connected": True,
+            "integrations.google.email": normalized_email,
+            **build_user_index_fields({**user, "email": normalized_email}),
+        }
+        if google_user.get("picture") and not user.get("avatar_url"):
+            update_doc["avatar_url"] = google_user.get("picture")
+        users_collection.update_one({"id": user.get("id")}, {"$set": update_doc})
+        user = users_collection.find_one({"id": user.get("id")})
+    else:
+        is_new = True
+        user = {
+            "id": int(time.time() * 1000),
+            "name": clean_optional_text(google_user.get("name"), 120) or normalized_email.split("@")[0],
+            "email": normalized_email,
+            "password": None,
+            "authProvider": "google",
+            "avatar_url": google_user.get("picture"),
+            "status": "active",
+            "spaces": [],
+            "friends": [],
+            "notifications": [],
+            "integrations": {
+                "google": {
+                    "connected": True,
+                    "email": normalized_email,
+                }
+            },
+        }
+        user.update(organization_defaults_for_email(normalized_email))
+        user.update(build_user_index_fields(user))
+        users_collection.insert_one(user)
+
+    token = create_access_token({"user_id": user["id"]})
+    set_auth_cookie(response, token)
+    return {"user": serialize_user(user, include_notifications=True), "token": token, "isNew": is_new}
+
+
+@router.post("/logout")
+def logout(response: Response):
+    clear_auth_cookie(response)
+    return {"status": "logged_out"}
+
+
 @router.get("/by-email/{email}")
-def find_user_by_email(email: str):
+def find_user_by_email(email: str, request: Request):
+    requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
     try:
         normalized_email = normalize_email(email)
         user = users_collection.find_one(
@@ -789,8 +877,15 @@ def discover_people(request: Request, limit: int = Query(8, ge=1, le=24)):
 
 
 @router.get("/by-domain/{domain}")
-def users_by_domain(domain: str):
+def users_by_domain(domain: str, request: Request):
+    requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    requester_domain = extract_email_domain(requester.get("email"))
     normalized_domain = str(domain or "").strip().lower()
+    role = requester.get("role")
+    if role != "admin" and not (role == "org_admin" and requester_domain == normalized_domain):
+        raise HTTPException(status_code=403, detail="Admin access required for this domain")
     try:
         users = list(users_collection.find({"email_domain": normalized_domain}, USER_LIST_PROJECTION))
         if not users:
@@ -803,13 +898,25 @@ def users_by_domain(domain: str):
 
 
 @router.post("/set-password")
-def set_password(payload: dict):
+def set_password(payload: dict, response: Response):
     email = payload.get("email")
     password = payload.get("password")
-    if not email or not password:
-        raise HTTPException(status_code=400, detail="email and password required")
+    setup_token = clean_optional_text(payload.get("setupToken"), 200)
+    if not email or not password or not setup_token:
+        raise HTTPException(status_code=400, detail="email, password and setupToken required")
 
     normalized_email = normalize_email(email)
+    org = organizations_collection.find_one(
+        {
+            "adminEmail": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "verified": True,
+            "passwordSetupToken": setup_token,
+            "passwordSetupTokenExpiresAt": {"$gte": int(time.time())},
+        }
+    )
+    if not org:
+        raise HTTPException(status_code=403, detail="Invalid or expired password setup token")
+
     user = users_collection.find_one({"email_normalized": normalized_email}) if normalized_email else None
     if not user:
         user = users_collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
@@ -823,21 +930,35 @@ def set_password(payload: dict):
         try:
             users_collection.update_one(
                 {"id": user["id"]},
-                {"$set": {"password": hashed, **build_user_index_fields(user)}},
+                {
+                    "$set": {
+                        "password": hashed,
+                        "role": "org_admin",
+                        "organizationId": org.get("_id") or org.get("domain"),
+                        **build_user_index_fields(user),
+                    }
+                },
+            )
+            organizations_collection.update_one(
+                {"_id": org["_id"]},
+                {"$unset": {"passwordSetupToken": "", "passwordSetupTokenExpiresAt": ""}},
             )
         except Exception:
             raise HTTPException(status_code=500, detail="Failed to set password")
         updated = users_collection.find_one({"id": user["id"]}, {"_id": 0})
-        return {"user": serialize_user(updated, include_notifications=True), "token": create_access_token({"user_id": updated["id"]})}
+        token = create_access_token({"user_id": updated["id"]})
+        set_auth_cookie(response, token)
+        return {"user": serialize_user(updated, include_notifications=True), "token": token}
 
     try:
         new_id = int(time.time() * 1000)
         new_user = {
             "id": new_id,
-            "name": email.split("@")[0],
-            "email": email,
+            "name": normalized_email.split("@")[0],
+            "email": normalized_email,
             "password": hashed,
             "role": "org_admin",
+            "organizationId": org.get("_id") or org.get("domain"),
             "status": "active",
             "spaces": [],
             "friends": [],
@@ -845,10 +966,16 @@ def set_password(payload: dict):
         }
         new_user.update(build_user_index_fields(new_user))
         users_collection.insert_one(new_user)
+        organizations_collection.update_one(
+            {"_id": org["_id"]},
+            {"$unset": {"passwordSetupToken": "", "passwordSetupTokenExpiresAt": ""}},
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to create admin user")
 
-    return {"user": serialize_user(new_user, include_notifications=True), "token": create_access_token({"user_id": new_id})}
+    token = create_access_token({"user_id": new_id})
+    set_auth_cookie(response, token)
+    return {"user": serialize_user(new_user, include_notifications=True), "token": token}
 
 
 @router.get("/__ping")
@@ -863,8 +990,11 @@ async def update_professional_profile(user_id: str, payload: ProfessionalProfile
         raise HTTPException(status_code=404, detail="User not found")
 
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     actual_id = existing_user.get("id")
-    if requester and str(requester.get("id")) != str(actual_id) and requester.get("role") != "org_admin":
+    if str(requester.get("id")) != str(actual_id) and requester.get("role") not in ("admin", "org_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to update this profile")
 
     normalized_profile = normalize_professional_profile(payload.model_dump(), strict=True)
@@ -883,12 +1013,38 @@ async def update_user(user_id: str, user: dict, request: Request):
 
     actual_id = existing_user.get("id")
     requester = resolve_requester(request)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    protected_fields = {
+        "id",
+        "_id",
+        "organizationId",
+        "isAdmin",
+        "email_domain",
+        "email_normalized",
+        "name_search",
+        "spaces",
+        "friends",
+    }
+    for field in protected_fields:
+        update_doc.pop(field, None)
+
+    requested_role = update_doc.get("role")
+    if requested_role is not None:
+        if str(requester.get("id")) == str(actual_id) or requester.get("role") not in ("admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can change roles")
+
+    if str(requester.get("id")) != str(actual_id):
+        if requester.get("role") not in ("admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Not authorized to update this user")
+        requester_domain = extract_email_domain(requester.get("email"))
+        target_domain = extract_email_domain(existing_user.get("email"))
+        if requester_domain and target_domain and requester_domain != target_domain:
+            raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
 
     try:
         if "invitePermissions" in update_doc:
-            if not requester:
-                raise HTTPException(status_code=403, detail="Not authorized to change invite permissions")
-
             requester_id = requester.get("id")
             if str(requester_id) != str(actual_id):
                 if requester.get("role") != "org_admin":
