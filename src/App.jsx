@@ -67,7 +67,7 @@ import {
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
-import { getToken, logout as authLogout, saveAuth } from "./services/auth"
+import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
@@ -183,6 +183,18 @@ const isProtectedAppPath = pathname => {
     normalized.startsWith("/space/") ||
     normalized.startsWith("/dm/")
   )
+}
+
+const getInitialAuthBootState = () => {
+  const hasStoredAuth = Boolean(getToken() || getStoredUser()?.id)
+  const isProtectedPath = typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)
+
+  return {
+    hasStoredAuth,
+    isProtectedPath,
+    shouldVerifySession: hasStoredAuth,
+    showRestoreSplash: hasStoredAuth,
+  }
 }
 
 const PUBLIC_EMAIL_DOMAINS = new Set([
@@ -301,10 +313,13 @@ export default function CollaborationApp() {
     localStorage.setItem('spacexyz-dark-mode', JSON.stringify(isDarkMode))
   }, [isDarkMode])
 
+  const [initialAuthBoot] = useState(getInitialAuthBootState)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authInitializing, setAuthInitializing] = useState(true)
+  const [authInitializing, setAuthInitializing] = useState(initialAuthBoot.shouldVerifySession)
   const [currentUser, setCurrentUser] = useState(null)
-  const [showLandingPage, setShowLandingPage] = useState(true) // Landing page state
+  const [showLandingPage, setShowLandingPage] = useState(
+    () => !initialAuthBoot.hasStoredAuth && !initialAuthBoot.isProtectedPath
+  ) // Landing page state
   const [authMode, setAuthMode] = useState("login")
   const [authData, setAuthData] = useState({
     email: "",
@@ -317,7 +332,8 @@ export default function CollaborationApp() {
   const [authBootError, setAuthBootError] = useState("")
   const [appDataReady, setAppDataReady] = useState(false)
   const [routeReady, setRouteReady] = useState(false)
-  const [restoreSplashVisible, setRestoreSplashVisible] = useState(true)
+  const [restoreSplashVisible, setRestoreSplashVisible] = useState(initialAuthBoot.showRestoreSplash)
+  const [restoreSplashEnabled, setRestoreSplashEnabled] = useState(initialAuthBoot.showRestoreSplash)
   const [authPending, setAuthPending] = useState(false)
   const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
@@ -351,25 +367,37 @@ export default function CollaborationApp() {
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
 
   const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
-  const restoreSplashActive = authInitializing || protectedAppBooting
+  const restoreSplashActive = restoreSplashEnabled && (authInitializing || authPending || protectedAppBooting)
+  const cachedBootUserRef = useRef(initialAuthBoot.hasStoredAuth ? getStoredUser() : null)
 
   useEffect(() => {
     let hideTimer = null
 
+    if (!restoreSplashEnabled) {
+      setRestoreSplashVisible(false)
+      restoreSplashStartedAtRef.current = 0
+      return undefined
+    }
+
     if (restoreSplashActive) {
-      restoreSplashStartedAtRef.current = Date.now()
+      if (!restoreSplashStartedAtRef.current) {
+        restoreSplashStartedAtRef.current = Date.now()
+      }
       setRestoreSplashVisible(true)
-      hideTimer = window.setTimeout(() => setRestoreSplashVisible(false), 3500)
     } else if (restoreSplashVisible) {
       const elapsed = Date.now() - restoreSplashStartedAtRef.current
-      const remaining = Math.max(0, 3000 - elapsed)
-      hideTimer = window.setTimeout(() => setRestoreSplashVisible(false), remaining)
+      const remaining = Math.max(0, 450 - elapsed)
+      hideTimer = window.setTimeout(() => {
+        setRestoreSplashVisible(false)
+        setRestoreSplashEnabled(false)
+        restoreSplashStartedAtRef.current = 0
+      }, remaining)
     }
 
     return () => {
       if (hideTimer) window.clearTimeout(hideTimer)
     }
-  }, [restoreSplashActive])
+  }, [restoreSplashActive, restoreSplashEnabled, restoreSplashVisible])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -1002,10 +1030,34 @@ export default function CollaborationApp() {
   // --- Persistent Login: restore trusted auth state from backend session
   useEffect(() => {
     let cancelled = false
+    if (!initialAuthBoot.shouldVerifySession) {
+      setAuthInitializing(false)
+      setAppDataReady(false)
+      setRouteReady(false)
+      setRestoreSplashEnabled(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
     setAuthInitializing(true)
     setAppDataReady(false)
     setRouteReady(false)
+    setRestoreSplashEnabled(initialAuthBoot.showRestoreSplash)
     setAuthBootError("")
+
+    if (cachedBootUserRef.current?.id) {
+      const safeCachedUser = filterDismissedUser(cachedBootUserRef.current)
+      authResolvedAtRef.current = Date.now()
+      const cachedSpaces = hydrateCachedSpacesForUser(safeCachedUser, { selectFirst: false })
+      setCurrentUser(safeCachedUser)
+      setIsAuthenticated(true)
+      setShowLandingPage(false)
+      if (cachedSpaces.length > 0 || !Array.isArray(safeCachedUser.spaces) || safeCachedUser.spaces.length === 0) {
+        setAppDataReady(true)
+      }
+    }
+
     ;(async () => {
       try {
         const user = await Storage.getCurrentUser({ forceRefresh: true })
@@ -1024,10 +1076,8 @@ export default function CollaborationApp() {
         setRouteReady(false)
         if (error?.status === 401) {
           authLogout()
-          if (typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)) {
-            setShowLandingPage(false)
-            setAuthMode("login")
-          }
+          setShowLandingPage(true)
+          setAuthMode("login")
         } else {
           console.warn("Session verification failed without an auth rejection", error)
           setAuthBootError("We couldn't verify your session. Check the connection and try again.")
@@ -1067,10 +1117,10 @@ export default function CollaborationApp() {
       setHomeActiveDMUser(null)
       setDrafts([])
       setActiveDraftId(null)
-      if (isProtectedAppPath(window.location.pathname)) {
-        setShowLandingPage(false)
-        setAuthMode("login")
-      }
+      setRestoreSplashEnabled(false)
+      setRestoreSplashVisible(false)
+      setShowLandingPage(true)
+      setAuthMode("login")
     }
     window.addEventListener("spacexyz-auth-cleared", handleAuthCleared)
     return () => window.removeEventListener("spacexyz-auth-cleared", handleAuthCleared)
@@ -2002,8 +2052,14 @@ export default function CollaborationApp() {
     let cancelled = false
 
     if (isAuthenticated && currentUser) {
-      setAppDataReady(false)
-      setRouteReady(false)
+      const hasPaintableWorkspace =
+        spaces.length > 0 ||
+        !Array.isArray(currentUser?.spaces) ||
+        currentUser.spaces.length === 0
+      if (!hasPaintableWorkspace) {
+        setAppDataReady(false)
+        setRouteReady(false)
+      }
       const loadInitialData = async () => {
         const currentUserSpaceIds = Array.isArray(currentUser?.spaces) ? currentUser.spaces : []
         const eagerSpacesPromise = currentUserSpaceIds.length > 0
@@ -2950,8 +3006,17 @@ export default function CollaborationApp() {
       setShowLandingPage(false)
       setActiveView("home")
       setHomeSection("overview")
-      if (seededSpaces) setSpaces(seededSpaces)
-      else hydrateCachedSpacesForUser(safeUser)
+      if (seededSpaces) {
+        setSpaces(seededSpaces)
+        if (seededSpaces.length > 0 || !Array.isArray(safeUser.spaces) || safeUser.spaces.length === 0) {
+          setAppDataReady(true)
+        }
+      } else {
+        const hydratedSpaces = hydrateCachedSpacesForUser(safeUser)
+        if (hydratedSpaces.length > 0 || !Array.isArray(safeUser.spaces) || safeUser.spaces.length === 0) {
+          setAppDataReady(true)
+        }
+      }
       if (options.activeSpaceId !== undefined) setActiveSpace(options.activeSpaceId)
       if (options.activeChannelId !== undefined) setActiveChannel(options.activeChannelId)
       setAuthSuccess(options.successMessage || "")
@@ -2977,6 +3042,8 @@ export default function CollaborationApp() {
     setAuthBootError("")
     setAppDataReady(false)
     setRouteReady(false)
+    setRestoreSplashEnabled(false)
+    setRestoreSplashVisible(false)
     setAuthPending(true)
 
     try {
@@ -3017,17 +3084,12 @@ export default function CollaborationApp() {
         integrations: {}
       }
       const signupData = await Storage.saveUser(newUser)
-      setAuthInitializing(true)
-      const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
       const savedUser = {
-        ...(verifiedUser || {}),
         ...(signupData?.user || newUser),
         spaces:
-          (Array.isArray(verifiedUser?.spaces) && verifiedUser.spaces.length > 0)
-            ? verifiedUser.spaces
-            : (Array.isArray(signupData?.user?.spaces) && signupData.user.spaces.length > 0)
-              ? signupData.user.spaces
-              : newUser.spaces,
+          (Array.isArray(signupData?.user?.spaces) && signupData.user.spaces.length > 0)
+            ? signupData.user.spaces
+            : newUser.spaces,
       }
       const savedToken = signupData?.token || getToken() || null
 
@@ -3045,12 +3107,13 @@ export default function CollaborationApp() {
         setAuthPending(false)
         return
       }
+      setRestoreSplashEnabled(true)
+      setRestoreSplashVisible(true)
+      restoreSplashStartedAtRef.current = Date.now()
       try {
         const data = await Storage.login({ email: authData.email, password: authData.password })
         if (data?.user && data?.token) {
-          setAuthInitializing(true)
-          const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
-          applyAuthenticatedSession(verifiedUser || data.user, data.token, {
+          applyAuthenticatedSession(data.user, data.token, {
             successMessage: "Logged in successfully!",
             cacheLookupEmail: authData.email,
           })
@@ -3114,6 +3177,9 @@ export default function CollaborationApp() {
     googleAuthInFlightRef.current = true
     setGoogleAuthPending(true)
     setAuthPending(true)
+    setRestoreSplashEnabled(true)
+    setRestoreSplashVisible(true)
+    restoreSplashStartedAtRef.current = Date.now()
     setAuthError("")
     setAuthSuccess("")
 
@@ -3133,18 +3199,13 @@ export default function CollaborationApp() {
             throw new Error(authResult?.error || "Google authentication failed")
           }
 
-          setAuthInitializing(true)
-          const verifiedGoogleUser = await Storage.getCurrentUser({ forceRefresh: true })
           let defaultSpace = null
           const savedUser = {
-            ...(verifiedGoogleUser || {}),
             ...authResult.user,
             spaces:
-              (Array.isArray(verifiedGoogleUser?.spaces) && verifiedGoogleUser.spaces.length > 0)
-                ? verifiedGoogleUser.spaces
-                : (Array.isArray(authResult.user?.spaces) && authResult.user.spaces.length > 0)
-                  ? authResult.user.spaces
-                  : [],
+              (Array.isArray(authResult.user?.spaces) && authResult.user.spaces.length > 0)
+                ? authResult.user.spaces
+                : [],
           }
           const savedToken = authResult.token || getToken() || null
           const existingSpaceIds = Array.isArray(savedUser.spaces) ? savedUser.spaces : []
@@ -8202,7 +8263,7 @@ export default function CollaborationApp() {
   const workspaceRestoreAnimationSrc =
     currentRestoreAnimations[restoreDate.getDate() % currentRestoreAnimations.length] || "/monday-gif-1.gif"
 
-  if (!authBootError && restoreSplashVisible) {
+  if (!authBootError && restoreSplashEnabled && restoreSplashVisible) {
     return (
       <div className={`min-h-screen flex items-center justify-center font-sans ${
         isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
