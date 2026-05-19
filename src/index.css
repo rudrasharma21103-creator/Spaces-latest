@@ -10785,3 +10785,30 @@ body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
 }
+
+/* Borderless workspace shell + requested light sidebar color. */
+body:has(.liquid-glass-navbar) .liquid-glass-sidebar,
+body:has(.liquid-glass-navbar) .liquid-glass-sidebar-right {
+  background: #F8FAFD !important;
+  border-color: transparent !important;
+  border-left-color: transparent !important;
+  border-right-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-sidebar,
+html.dark .liquid-glass-sidebar-right,
+body.dark .liquid-glass-sidebar,
+body.dark .liquid-glass-sidebar-right {
+  background: #111111 !important;
+  border-color: transparent !important;
+  border-left-color: transparent !important;
+  border-right-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.liquid-glass-chat-area,
+.liquid-glass-navbar {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
