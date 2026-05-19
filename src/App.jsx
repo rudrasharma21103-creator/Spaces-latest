@@ -67,7 +67,7 @@ import {
 } from "lucide-react"
 import { createPortal } from "react-dom"
 import * as Storage from "./services/storage"
-import { getToken, logout as authLogout, saveAuth } from "./services/auth"
+import { getStoredUser, getToken, logout as authLogout, saveAuth } from "./services/auth"
 import * as GoogleService from "./services/google"
 import { connectChatSocket, connectUserSocket } from "./services/ws"
 import TaskModal from "./components/TaskModal"
@@ -183,6 +183,59 @@ const isProtectedAppPath = pathname => {
     normalized.startsWith("/space/") ||
     normalized.startsWith("/dm/")
   )
+}
+
+const getInitialAuthBootState = () => {
+  const storedUser = getStoredUser()
+  const hasStoredAuth = Boolean(getToken() || storedUser?.id)
+  const isProtectedPath = typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)
+  let cachedSpaces = []
+  let cachedFriends = []
+  let cachedDrafts = []
+  let cachedTasks = []
+
+  if (storedUser?.id) {
+    try {
+      cachedSpaces = Storage.peekSpacesForUser?.(storedUser.spaces || []) || []
+    } catch {
+      cachedSpaces = []
+    }
+    try {
+      const friendIds = Array.isArray(storedUser.friends) ? storedUser.friends.map(id => String(id)) : []
+      const usersById = new Map((Storage.peekUsers?.() || []).map(user => [String(user?.id), user]))
+      cachedFriends = friendIds.map(id => usersById.get(id)).filter(Boolean)
+    } catch {
+      cachedFriends = []
+    }
+    try {
+      cachedDrafts = DraftsService.peekDrafts?.() || []
+    } catch {
+      cachedDrafts = []
+    }
+    try {
+      cachedTasks = TasksService.peekTasksForUser?.() || []
+    } catch {
+      cachedTasks = []
+    }
+  }
+
+  return {
+    storedUser,
+    cachedSpaces,
+    cachedFriends,
+    cachedDrafts,
+    cachedTasks,
+    hasStoredAuth,
+    isProtectedPath,
+    shouldVerifySession: hasStoredAuth,
+    showRestoreSplash: false,
+  }
+}
+
+const createSpaceIconElement = iconType => {
+  if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
+  if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
+  return <UserIcon className="w-5 h-5" />
 }
 
 const PUBLIC_EMAIL_DOMAINS = new Set([
@@ -301,10 +354,13 @@ export default function CollaborationApp() {
     localStorage.setItem('spacexyz-dark-mode', JSON.stringify(isDarkMode))
   }, [isDarkMode])
 
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authInitializing, setAuthInitializing] = useState(true)
-  const [currentUser, setCurrentUser] = useState(null)
-  const [showLandingPage, setShowLandingPage] = useState(true) // Landing page state
+  const [initialAuthBoot] = useState(getInitialAuthBootState)
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(initialAuthBoot.storedUser?.id))
+  const [authInitializing, setAuthInitializing] = useState(false)
+  const [currentUser, setCurrentUser] = useState(() => initialAuthBoot.storedUser || null)
+  const [showLandingPage, setShowLandingPage] = useState(
+    () => !initialAuthBoot.hasStoredAuth && !initialAuthBoot.isProtectedPath
+  ) // Landing page state
   const [authMode, setAuthMode] = useState("login")
   const [authData, setAuthData] = useState({
     email: "",
@@ -315,15 +371,30 @@ export default function CollaborationApp() {
   const [authError, setAuthError] = useState("")
   const [authSuccess, setAuthSuccess] = useState("")
   const [authBootError, setAuthBootError] = useState("")
-  const [appDataReady, setAppDataReady] = useState(false)
+  const [appDataReady, setAppDataReady] = useState(
+    () =>
+      Boolean(initialAuthBoot.storedUser?.id) &&
+      (
+        (Array.isArray(initialAuthBoot.cachedSpaces) && initialAuthBoot.cachedSpaces.length > 0) ||
+        !Array.isArray(initialAuthBoot.storedUser?.spaces) ||
+        initialAuthBoot.storedUser.spaces.length === 0
+      )
+  )
   const [routeReady, setRouteReady] = useState(false)
+  const [restoreSplashVisible, setRestoreSplashVisible] = useState(initialAuthBoot.showRestoreSplash)
+  const [restoreSplashEnabled, setRestoreSplashEnabled] = useState(initialAuthBoot.showRestoreSplash)
   const [authPending, setAuthPending] = useState(false)
   const [googleAuthPending, setGoogleAuthPending] = useState(false)
 
   // Main Data State
-  const [spaces, setSpaces] = useState([])
+  const [spaces, setSpaces] = useState(() =>
+    (Array.isArray(initialAuthBoot.cachedSpaces) ? initialAuthBoot.cachedSpaces : []).map(space => ({
+      ...space,
+      icon: createSpaceIconElement(space.iconType),
+    }))
+  )
   const [users, setUsers] = useState([])
-  const [friends, setFriends] = useState([])
+  const [friends, setFriends] = useState(() => initialAuthBoot.cachedFriends || [])
   const [events, setEvents] = useState([])
 
   // UI State
@@ -338,15 +409,49 @@ export default function CollaborationApp() {
   const [homeActiveDMUser, setHomeActiveDMUser] = useState(null)
   const [homeDMInput, setHomeDMInput] = useState("")
   const [homeDMSending, setHomeDMSending] = useState(false)
-  const [drafts, setDrafts] = useState([])
+  const [drafts, setDrafts] = useState(() => initialAuthBoot.cachedDrafts || [])
   const [activeDraftId, setActiveDraftId] = useState(null)
   const authResolvedAtRef = useRef(0)
   const authLookupCacheRef = useRef(new Map())
   const googleAuthInFlightRef = useRef(false)
+  const restoreSplashStartedAtRef = useRef(0)
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
   const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
+
+  const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
+  const restoreSplashActive = restoreSplashEnabled && (authInitializing || authPending || protectedAppBooting)
+  const cachedBootUserRef = useRef(initialAuthBoot.storedUser || null)
+
+  useEffect(() => {
+    let hideTimer = null
+
+    if (!restoreSplashEnabled) {
+      setRestoreSplashVisible(false)
+      restoreSplashStartedAtRef.current = 0
+      return undefined
+    }
+
+    if (restoreSplashActive) {
+      if (!restoreSplashStartedAtRef.current) {
+        restoreSplashStartedAtRef.current = Date.now()
+      }
+      setRestoreSplashVisible(true)
+    } else if (restoreSplashVisible) {
+      const elapsed = Date.now() - restoreSplashStartedAtRef.current
+      const remaining = Math.max(0, 450 - elapsed)
+      hideTimer = window.setTimeout(() => {
+        setRestoreSplashVisible(false)
+        setRestoreSplashEnabled(false)
+        restoreSplashStartedAtRef.current = 0
+      }, remaining)
+    }
+
+    return () => {
+      if (hideTimer) window.clearTimeout(hideTimer)
+    }
+  }, [restoreSplashActive, restoreSplashEnabled, restoreSplashVisible])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -769,7 +874,7 @@ export default function CollaborationApp() {
   const [showNewEventForm, setShowNewEventForm] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showDemoModal, setShowDemoModal] = useState(false) // Demo video modal for landing page
-  const [tasksList, setTasksList] = useState([])
+  const [tasksList, setTasksList] = useState(() => initialAuthBoot.cachedTasks || [])
   const [completingTaskId, setCompletingTaskId] = useState(null)
   const alertedScheduledRef = useRef(new Set())
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -979,10 +1084,45 @@ export default function CollaborationApp() {
   // --- Persistent Login: restore trusted auth state from backend session
   useEffect(() => {
     let cancelled = false
-    setAuthInitializing(true)
-    setAppDataReady(false)
-    setRouteReady(false)
+    if (!initialAuthBoot.shouldVerifySession) {
+      setAuthInitializing(false)
+      setAppDataReady(false)
+      setRouteReady(false)
+      setRestoreSplashEnabled(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const hasCachedWorkspace =
+      Array.isArray(initialAuthBoot.cachedSpaces) &&
+      (
+        initialAuthBoot.cachedSpaces.length > 0 ||
+        !Array.isArray(initialAuthBoot.storedUser?.spaces) ||
+        initialAuthBoot.storedUser.spaces.length === 0
+      )
+    setAuthInitializing(false)
+    if (!hasCachedWorkspace) {
+      setAppDataReady(false)
+      setRouteReady(false)
+    }
+    setRestoreSplashEnabled(false)
+    setRestoreSplashVisible(false)
     setAuthBootError("")
+
+    if (cachedBootUserRef.current?.id) {
+      const safeCachedUser = filterDismissedUser(cachedBootUserRef.current)
+      authResolvedAtRef.current = Date.now()
+      const cachedSpaces = hydrateCachedSpacesForUser(safeCachedUser, { selectFirst: false })
+      setCurrentUser(safeCachedUser)
+      setIsAuthenticated(true)
+      setShowLandingPage(false)
+      if (cachedSpaces.length > 0 || !Array.isArray(safeCachedUser.spaces) || safeCachedUser.spaces.length === 0) {
+        setAppDataReady(true)
+      }
+      setAuthInitializing(false)
+    }
+
     ;(async () => {
       try {
         const user = await Storage.getCurrentUser({ forceRefresh: true })
@@ -1001,10 +1141,8 @@ export default function CollaborationApp() {
         setRouteReady(false)
         if (error?.status === 401) {
           authLogout()
-          if (typeof window !== "undefined" && isProtectedAppPath(window.location.pathname)) {
-            setShowLandingPage(false)
-            setAuthMode("login")
-          }
+          setShowLandingPage(true)
+          setAuthMode("login")
         } else {
           console.warn("Session verification failed without an auth rejection", error)
           setAuthBootError("We couldn't verify your session. Check the connection and try again.")
@@ -1044,10 +1182,10 @@ export default function CollaborationApp() {
       setHomeActiveDMUser(null)
       setDrafts([])
       setActiveDraftId(null)
-      if (isProtectedAppPath(window.location.pathname)) {
-        setShowLandingPage(false)
-        setAuthMode("login")
-      }
+      setRestoreSplashEnabled(false)
+      setRestoreSplashVisible(false)
+      setShowLandingPage(true)
+      setAuthMode("login")
     }
     window.addEventListener("spacexyz-auth-cleared", handleAuthCleared)
     return () => window.removeEventListener("spacexyz-auth-cleared", handleAuthCleared)
@@ -1057,6 +1195,11 @@ export default function CollaborationApp() {
     if (!isAuthenticated || !currentUser) {
       setDrafts([])
       return
+    }
+
+    const cachedDrafts = DraftsService.peekDrafts?.() || []
+    if (cachedDrafts.length > 0) {
+      setDrafts(cachedDrafts)
     }
 
     DraftsService.getDrafts()
@@ -1979,14 +2122,48 @@ export default function CollaborationApp() {
     let cancelled = false
 
     if (isAuthenticated && currentUser) {
-      setAppDataReady(false)
-      setRouteReady(false)
+      const cachedFriends = (() => {
+        try {
+          const friendIds = Array.isArray(currentUser.friends) ? currentUser.friends.map(id => String(id)) : []
+          const usersById = new Map((Storage.peekUsers?.() || []).map(user => [String(user?.id), user]))
+          return friendIds.map(id => usersById.get(id)).filter(Boolean)
+        } catch {
+          return []
+        }
+      })()
+      if (cachedFriends.length > 0 && friends.length === 0) {
+        setFriends(cachedFriends)
+      }
+
+      const cachedTasks = TasksService.peekTasksForUser?.() || []
+      if (cachedTasks.length > 0 && tasksList.length === 0) {
+        setTasksList(cachedTasks)
+      }
+
+      const hasPaintableWorkspace =
+        spaces.length > 0 ||
+        !Array.isArray(currentUser?.spaces) ||
+        currentUser.spaces.length === 0
+      if (!hasPaintableWorkspace) {
+        setAppDataReady(false)
+        setRouteReady(false)
+      }
       const loadInitialData = async () => {
         const currentUserSpaceIds = Array.isArray(currentUser?.spaces) ? currentUser.spaces : []
+        const bootstrapPromise = Storage.getBootstrap()
         const eagerSpacesPromise = currentUserSpaceIds.length > 0
           ? Storage.getSpacesForUser(currentUserSpaceIds)
           : Promise.resolve([])
-        const bootstrap = await Storage.getBootstrap()
+
+        if (!appDataReady && currentUserSpaceIds.length > 0) {
+          const quickSpaces = await eagerSpacesPromise.catch(() => [])
+          if (!cancelled && Array.isArray(quickSpaces) && quickSpaces.length > 0) {
+            setSpaces(enrichSpacesForUi(quickSpaces))
+            setAppDataReady(true)
+          }
+        }
+
+        const bootstrap = await bootstrapPromise
         const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
@@ -2809,9 +2986,7 @@ export default function CollaborationApp() {
   ])
 
   const getSpaceIconElement = React.useCallback(iconType => {
-    if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
-    if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
-    return <UserIcon className="w-5 h-5" />
+    return createSpaceIconElement(iconType)
   }, [])
 
   const enrichSpacesForUi = React.useCallback(
@@ -2927,8 +3102,17 @@ export default function CollaborationApp() {
       setShowLandingPage(false)
       setActiveView("home")
       setHomeSection("overview")
-      if (seededSpaces) setSpaces(seededSpaces)
-      else hydrateCachedSpacesForUser(safeUser)
+      if (seededSpaces) {
+        setSpaces(seededSpaces)
+        if (seededSpaces.length > 0 || !Array.isArray(safeUser.spaces) || safeUser.spaces.length === 0) {
+          setAppDataReady(true)
+        }
+      } else {
+        const hydratedSpaces = hydrateCachedSpacesForUser(safeUser)
+        if (hydratedSpaces.length > 0 || !Array.isArray(safeUser.spaces) || safeUser.spaces.length === 0) {
+          setAppDataReady(true)
+        }
+      }
       if (options.activeSpaceId !== undefined) setActiveSpace(options.activeSpaceId)
       if (options.activeChannelId !== undefined) setActiveChannel(options.activeChannelId)
       setAuthSuccess(options.successMessage || "")
@@ -2954,6 +3138,8 @@ export default function CollaborationApp() {
     setAuthBootError("")
     setAppDataReady(false)
     setRouteReady(false)
+    setRestoreSplashEnabled(false)
+    setRestoreSplashVisible(false)
     setAuthPending(true)
 
     try {
@@ -2994,17 +3180,12 @@ export default function CollaborationApp() {
         integrations: {}
       }
       const signupData = await Storage.saveUser(newUser)
-      setAuthInitializing(true)
-      const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
       const savedUser = {
-        ...(verifiedUser || {}),
         ...(signupData?.user || newUser),
         spaces:
-          (Array.isArray(verifiedUser?.spaces) && verifiedUser.spaces.length > 0)
-            ? verifiedUser.spaces
-            : (Array.isArray(signupData?.user?.spaces) && signupData.user.spaces.length > 0)
-              ? signupData.user.spaces
-              : newUser.spaces,
+          (Array.isArray(signupData?.user?.spaces) && signupData.user.spaces.length > 0)
+            ? signupData.user.spaces
+            : newUser.spaces,
       }
       const savedToken = signupData?.token || getToken() || null
 
@@ -3022,12 +3203,13 @@ export default function CollaborationApp() {
         setAuthPending(false)
         return
       }
+      setRestoreSplashEnabled(true)
+      setRestoreSplashVisible(true)
+      restoreSplashStartedAtRef.current = Date.now()
       try {
         const data = await Storage.login({ email: authData.email, password: authData.password })
         if (data?.user && data?.token) {
-          setAuthInitializing(true)
-          const verifiedUser = await Storage.getCurrentUser({ forceRefresh: true })
-          applyAuthenticatedSession(verifiedUser || data.user, data.token, {
+          applyAuthenticatedSession(data.user, data.token, {
             successMessage: "Logged in successfully!",
             cacheLookupEmail: authData.email,
           })
@@ -3091,6 +3273,9 @@ export default function CollaborationApp() {
     googleAuthInFlightRef.current = true
     setGoogleAuthPending(true)
     setAuthPending(true)
+    setRestoreSplashEnabled(true)
+    setRestoreSplashVisible(true)
+    restoreSplashStartedAtRef.current = Date.now()
     setAuthError("")
     setAuthSuccess("")
 
@@ -3110,18 +3295,13 @@ export default function CollaborationApp() {
             throw new Error(authResult?.error || "Google authentication failed")
           }
 
-          setAuthInitializing(true)
-          const verifiedGoogleUser = await Storage.getCurrentUser({ forceRefresh: true })
           let defaultSpace = null
           const savedUser = {
-            ...(verifiedGoogleUser || {}),
             ...authResult.user,
             spaces:
-              (Array.isArray(verifiedGoogleUser?.spaces) && verifiedGoogleUser.spaces.length > 0)
-                ? verifiedGoogleUser.spaces
-                : (Array.isArray(authResult.user?.spaces) && authResult.user.spaces.length > 0)
-                  ? authResult.user.spaces
-                  : [],
+              (Array.isArray(authResult.user?.spaces) && authResult.user.spaces.length > 0)
+                ? authResult.user.spaces
+                : [],
           }
           const savedToken = authResult.token || getToken() || null
           const existingSpaceIds = Array.isArray(savedUser.spaces) ? savedUser.spaces : []
@@ -8153,30 +8333,100 @@ export default function CollaborationApp() {
     </div>
   )
 
-  const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
+  const workspaceRestoreAnimations = [
+    "/sunday-gif-1.gif",
+    "/monday-gif-1.gif",
+    "/monday-gif-%202.gif",
+    "/tuesday-gif-1.gif",
+    "/tuesday-gif-2.gif",
+    "/wednesday-gif-1.gif",
+    "/thursday-gif-1.gif",
+    "/thursday-gif-2.gif",
+    "/friday-gif-1.gif",
+    "/saturday-gif-1.gif",
+  ]
+  const workspaceRestoreAnimationsByDay = {
+    0: ["/sunday-gif-1.gif"],
+    1: ["/monday-gif-1.gif", "/monday-gif-%202.gif"],
+    2: ["/tuesday-gif-1.gif", "/tuesday-gif-2.gif"],
+    3: ["/wednesday-gif-1.gif"],
+    4: ["/thursday-gif-1.gif", "/thursday-gif-2.gif"],
+    5: ["/friday-gif-1.gif"],
+    6: ["/saturday-gif-1.gif"],
+  }
+  const restoreDate = new Date()
+  const currentRestoreAnimations = workspaceRestoreAnimationsByDay[restoreDate.getDay()] || workspaceRestoreAnimations
+  const workspaceRestoreAnimationSrc =
+    currentRestoreAnimations[restoreDate.getDate() % currentRestoreAnimations.length] || "/monday-gif-1.gif"
 
-  if (!authBootError && (authInitializing || protectedAppBooting)) {
+  if (!authBootError && restoreSplashEnabled && restoreSplashVisible) {
     return (
-      <div className={`min-h-screen flex items-center justify-center font-sans ${
-        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#eef3fb] text-slate-900"
+      <div className={`relative min-h-screen overflow-hidden flex items-center justify-center font-sans px-6 ${
+        isDarkMode ? "bg-[#06131d] text-white" : "bg-[#f4f7fb] text-slate-950"
       }`}>
-        <div className="flex flex-col items-center gap-4">
-          <div className={`h-14 w-14 rounded-2xl flex items-center justify-center shadow-lg ${
-            isDarkMode ? "bg-white/10 text-cyan-200" : "bg-white text-cyan-700"
-          }`}>
-            <Loader2 className="h-7 w-7 animate-spin" />
-          </div>
-          <div className="text-center">
-            <p className={`text-sm font-bold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-              Restoring your workspace
-            </p>
-            <p className={`text-xs mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              {authInitializing
-                ? "Checking your secure session..."
-                : !appDataReady
-                  ? "Loading your profile and spaces..."
-                  : "Restoring your route..."}
-            </p>
+        <div className="relative w-full max-w-md">
+          <div className="flex flex-col items-center text-center">
+            <div className={`mb-7 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-lg ${
+              isDarkMode
+                ? "border-white/10 bg-white/[0.08] shadow-black/20"
+                : "border-slate-200 bg-white/90 shadow-slate-200/70"
+            }`}>
+              <img
+                src={isDarkMode ? "/logo%20SD.png" : "/logo%20SL.png"}
+                alt="Spacess"
+                className="h-10 w-10 rounded-xl object-contain"
+                draggable="false"
+              />
+              <div className="text-left">
+                <p className={`text-lg font-black leading-tight ${isDarkMode ? "text-white" : "text-slate-950"}`}>
+                  Spacess
+                </p>
+                <p className={`text-[11px] font-bold uppercase tracking-[0.2em] ${isDarkMode ? "text-cyan-200/80" : "text-cyan-700"}`}>
+                  Workspace platform
+                </p>
+              </div>
+            </div>
+
+            <div className={`relative mb-7 h-56 w-72 overflow-hidden rounded-[1.75rem] border ${
+              isDarkMode
+                ? "border-white/10 bg-white/5"
+                : "border-slate-200 bg-white"
+            }`}>
+              <img
+                src={workspaceRestoreAnimationSrc}
+                alt=""
+                aria-hidden="true"
+                className="h-full w-full object-contain p-4"
+                draggable="false"
+                onError={(event) => {
+                  event.currentTarget.src = "/monday-gif-1.gif"
+                }}
+              />
+            </div>
+
+            <div className="w-full">
+              <div className="mb-4 flex items-center justify-center gap-3">
+                <div
+                  className="h-9 w-9 shrink-0 rounded-full border-[4px] border-cyan-500 border-t-transparent animate-spin"
+                  aria-hidden="true"
+                />
+                <div className="text-left">
+                  <p className={`text-base font-black ${isDarkMode ? "text-slate-50" : "text-slate-900"}`}>
+                    Preparing your Spacess workspace
+                  </p>
+                  <p className={`text-sm mt-1 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                    {authInitializing
+                      ? "Checking your secure session..."
+                      : !appDataReady
+                        ? "Loading your profile and spaces..."
+                        : "Opening your workspace..."}
+                  </p>
+                </div>
+              </div>
+              <div className={`h-2 w-full overflow-hidden rounded-full ${isDarkMode ? "bg-white/10" : "bg-slate-200"}`}>
+                <div className="h-full w-2/5 rounded-full bg-cyan-500 animate-[pulse_1s_ease-in-out_infinite]" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -11639,7 +11889,7 @@ export default function CollaborationApp() {
                 <div
                   ref={messagesContainerRef}
                   onScroll={handleMessagesScroll}
-                  className={`flex-1 overflow-y-auto scrollbar-thin relative ${
+                  className={`workspace-message-scroll flex-1 overflow-y-auto scrollbar-thin relative ${
                     isChannelFeed
                       ? "px-0 py-3 sm:py-4 space-y-0"
                       : "p-4 sm:p-8 space-y-8"
@@ -11774,7 +12024,7 @@ export default function CollaborationApp() {
                         return (
                           <React.Fragment key={`${msg.id || "message"}-${idx}`}>
                             {showDateSeparator && (
-                              <div className={`w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
+                              <div className={`workspace-date-separator w-full flex items-center justify-center ${isChannelFeed ? "my-3 px-5" : "mb-4"}`}>
                                 {isChannelFeed && (
                                   <div className={`h-px flex-1 ${isDarkMode ? "bg-white/10" : "bg-slate-200/80"}`} />
                                 )}
@@ -11803,7 +12053,7 @@ export default function CollaborationApp() {
                             <div
                               id={`msg-${msg.id}`}
                               data-timestamp={msg.timestamp || ''}
-                              className={`relative flex ${
+                              className={`workspace-message-row ${isChannelFeed ? "workspace-channel-message-row" : "workspace-bubble-message-row"} relative flex ${
                                 isChannelFeed
                                   ? `gap-3 px-5 py-1.5 transition-colors ${isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-slate-100/80"} ${isSequence ? "mt-0" : "mt-1"}`
                                   : `gap-4 ${isMe ? "flex-row-reverse" : ""} ${isSequence ? "mt-1" : "mt-6"}`
@@ -12130,7 +12380,7 @@ export default function CollaborationApp() {
                                         key={att.id}
                                         onClick={() => openAttachment(att)}
                                         style={{ cursor: "pointer" }}
-                                        className={`relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
+                                        className={`workspace-attachment-card relative rounded-xl overflow-hidden transition-transform hover:scale-[1.02] ${
                                           att.source === 'gmail'
                                             ? "bg-red-50 border border-red-100"
                                             : ((att.url && String(att.url).includes('drive.google.com')) || att.drive_file_id)
@@ -12303,10 +12553,10 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Message Input */}
-                <div ref={messageInputRef} className={isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}>
+                <div ref={messageInputRef} className={`workspace-composer-wrap ${isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
+                    className={`workspace-composer ${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
                       isDarkMode
                         ? 'bg-[#191b1f] border border-slate-700/50'
                         : 'bg-[#e9eef6]'
