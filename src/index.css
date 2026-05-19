@@ -8655,75 +8655,6 @@ body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
 }
 
-.spacess-boot-progress {
-  width: 40%;
-  animation: spacess-boot-progress 1.8s ease-in-out infinite;
-}
-
-@keyframes spacess-boot-progress {
-  0% {
-    width: 28%;
-  }
-  50% {
-    width: 58%;
-  }
-  100% {
-    width: 40%;
-  }
-}
-
-/* Borderless main workspace: keep surfaces distinct with spacing and color, not heavy edges. */
-body:has(.liquid-glass-navbar) .liquid-glass-sidebar,
-body:has(.liquid-glass-navbar) .liquid-glass-sidebar-right,
-html.dark body:has(.liquid-glass-navbar) .liquid-glass-sidebar,
-html.dark body:has(.liquid-glass-navbar) .liquid-glass-sidebar-right,
-body.dark:has(.liquid-glass-navbar) .liquid-glass-sidebar,
-body.dark:has(.liquid-glass-navbar) .liquid-glass-sidebar-right {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-body:has(.liquid-glass-navbar) .liquid-glass-sidebar {
-  border-right: 0 !important;
-}
-
-body:has(.liquid-glass-navbar) .liquid-glass-sidebar-right {
-  border-left: 0 !important;
-}
-
-body:has(.liquid-glass-navbar) .liquid-glass-navbar {
-  box-shadow: none !important;
-}
-
-body:has(.liquid-glass-navbar) .liquid-glass-chat-area,
-body:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-body:has(.liquid-glass-navbar) [class*="absolute right-0 top-0 bottom-0 border-l"] {
-  border-left-color: transparent !important;
-}
-
-body:has(.liquid-glass-navbar) [class*="bg-[#e9eef6]"],
-body.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"],
-html.dark:has(.liquid-glass-navbar) [class*="bg-[#191b1f]"] {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-body:has(.liquid-glass-navbar),
-body:has(.liquid-glass-navbar) * {
-  scrollbar-color: rgba(100, 116, 139, 0.22) transparent !important;
-}
-
-html.dark body:has(.liquid-glass-navbar),
-html.dark body:has(.liquid-glass-navbar) *,
-body.dark:has(.liquid-glass-navbar),
-body.dark:has(.liquid-glass-navbar) * {
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent !important;
-}
-
 /* ============================================
    FINAL PERFORMANCE MOTION PASS
    Fast, smooth interaction timing across the platform
@@ -10853,9 +10784,4 @@ html.dark .liquid-glass-sidebar-right,
 body.dark .liquid-glass-sidebar,
 body.dark .liquid-glass-sidebar-right {
   background: #111111 !important;
-}
-
-html:not(.dark) .liquid-glass-sidebar,
-html:not(.dark) .liquid-glass-sidebar-right {
-  background: #F8FAFD !important;
 }
