@@ -10812,3 +10812,221 @@ body.dark .liquid-glass-sidebar-right {
   border-color: transparent !important;
   box-shadow: none !important;
 }
+
+/* Gmail-like workspace split: chrome navbar above, chat panel below. */
+.workspace-topbar {
+  width: calc(100% - 24px) !important;
+  margin: 0 12px !important;
+  background: #ffffff !important;
+  border: 0 !important;
+  border-bottom: 0 !important;
+  border-color: transparent !important;
+  border-radius: 18px 18px 0 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  isolation: auto !important;
+  overflow: visible !important;
+}
+
+.workspace-topbar::before,
+.workspace-topbar::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+}
+
+body:has(.workspace-topbar) .flex-1.flex.flex-col.min-w-0.min-h-0.relative {
+  background: #f3f7fc !important;
+}
+
+body:has(.workspace-topbar) .workspace-topbar,
+body:has(.workspace-topbar) .workspace-topbar > * {
+  box-shadow: none !important;
+}
+
+body:has(.workspace-topbar) .liquid-glass-sidebar {
+  background: #F8FAFD !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-left-color: transparent !important;
+  border-right-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body:has(.workspace-topbar) .liquid-glass-sidebar::before,
+body:has(.workspace-topbar) .liquid-glass-sidebar::after {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+body:has(.workspace-topbar) .workspace-chat-panel {
+  background: #ffffff !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 12px 10px !important;
+}
+
+.workspace-topbar .liquid-glass-header {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.workspace-topbar .liquid-glass-header:hover {
+  background: rgba(248, 250, 252, 0.9) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.workspace-channel-summary {
+  min-width: 245px;
+  max-width: 360px;
+}
+
+.workspace-topbar-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs-row {
+  gap: 2px !important;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: #e9eef6 !important;
+  padding: 3px !important;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs-row button {
+  height: 30px;
+  border-radius: 8px !important;
+  padding: 0 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-900"],
+.workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-800"] {
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08) !important;
+}
+
+.workspace-navbar-actions {
+  flex-shrink: 0;
+}
+
+.workspace-navbar-actions > .relative,
+.workspace-navbar-actions > button {
+  flex-shrink: 0;
+}
+
+.workspace-navbar-actions .liquid-glass-nav-item {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+}
+
+.workspace-navbar-actions .liquid-glass-nav-item:hover {
+  background: #f1f5f9 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.workspace-topbar .theme-toggle-nav-button {
+  margin-left: 2px;
+}
+
+html.dark .workspace-topbar,
+body.dark .workspace-topbar {
+  background: #0d0001 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .workspace-topbar::before,
+html.dark .workspace-topbar::after,
+body.dark .workspace-topbar::before,
+body.dark .workspace-topbar::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+}
+
+html.dark body:has(.workspace-topbar) .flex-1.flex.flex-col.min-w-0.min-h-0.relative,
+body.dark:has(.workspace-topbar) .flex-1.flex.flex-col.min-w-0.min-h-0.relative {
+  background: #080d16 !important;
+}
+
+html.dark body:has(.workspace-topbar) .liquid-glass-sidebar,
+body.dark:has(.workspace-topbar) .liquid-glass-sidebar {
+  background: #111111 !important;
+}
+
+html.dark body:has(.workspace-topbar) .workspace-chat-panel,
+body.dark:has(.workspace-topbar) .workspace-chat-panel {
+  background: #0d0001 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark .workspace-topbar .liquid-glass-header:hover,
+body.dark .workspace-topbar .liquid-glass-header:hover {
+  background: #0D0001 !important;
+}
+
+html.dark .workspace-topbar-tabs .workspace-channel-tabs-row,
+body.dark .workspace-topbar-tabs .workspace-channel-tabs-row {
+  background: #0D0001 !important;
+}
+
+html.dark .workspace-topbar .liquid-glass-header,
+body.dark .workspace-topbar .liquid-glass-header {
+  background: #0D0001 !important;
+}
+
+html.dark .workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-900"],
+html.dark .workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-800"],
+body.dark .workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-900"],
+body.dark .workspace-topbar-tabs .workspace-channel-tabs-row button[class*="bg-slate-800"] {
+  background: rgba(255, 255, 255, 0.13) !important;
+  color: #f8fafc !important;
+}
+
+html.dark .workspace-navbar-actions .liquid-glass-nav-item,
+body.dark .workspace-navbar-actions .liquid-glass-nav-item {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html.dark .workspace-navbar-actions .liquid-glass-nav-item:hover,
+body.dark .workspace-navbar-actions .liquid-glass-nav-item:hover {
+  background: #2C2C2C !important;
+}

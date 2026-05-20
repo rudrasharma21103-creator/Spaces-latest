@@ -11241,11 +11241,11 @@ export default function CollaborationApp() {
           /* VIEW: CHANNEL / DM */
           <>
             {/* Header - Desktop with Liquid Glass */}
-            <div className={`liquid-glass-navbar h-[62px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 mx-0 w-full mt-1.5`}>
+            <div className={`workspace-topbar h-[80px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between gap-3 px-5 mx-0 w-full mt-0`}>
               {/* Liquid Glass Channel Info Container */}
               <div
                 onClick={() => setShowMemberDetails(prev => !prev)}
-                className={`liquid-glass-header flex items-center gap-2.5 cursor-pointer group px-3.5 py-1.5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
+                className={`liquid-glass-header workspace-channel-summary flex items-center gap-2.5 cursor-pointer group px-2.5 py-1.5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
                   <div className="relative z-10 flex items-center gap-3">
@@ -11273,27 +11273,28 @@ export default function CollaborationApp() {
                   </div>
                 ) : (
                   <div className="relative z-10 flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-transparent text-slate-300 border border-transparent group-hover:bg-[#2C2C2C] group-hover:text-slate-200' : 'bg-gradient-to-br from-white/80 to-slate-50/80 text-slate-600 border-2 border-white/50 shadow-sm group-hover:shadow-md group-hover:from-sky-50 group-hover:to-cyan-50 group-hover:border-sky-200 group-hover:text-sky-600'}`}>
-                      <Hash className="w-5 h-5" />
+                    <div className={`w-9 h-9 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-white/[0.06] text-slate-300 border border-white/10 group-hover:bg-white/[0.09] group-hover:text-slate-200' : 'bg-slate-50 text-slate-600 border border-slate-100 shadow-sm group-hover:bg-sky-50 group-hover:text-sky-600'}`}>
+                      <Hash className="w-[18px] h-[18px]" />
                     </div>
                     <div>
-                      <h2 className={`font-bold text-[1.05rem] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
+                      <h2 className={`font-bold text-[13px] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
                         {/* Header Breadcrumb Context */}
-                        <span className={`font-semibold max-w-[18vw] md:max-w-[28vw] lg:max-w-[32vw] xl:max-w-[36vw] 2xl:max-w-[40vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
+                        <span className={`font-semibold max-w-[11vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
                           {currentSpace?.name}
                         </span>
-                        <ChevronRight className={`w-3.5 h-3.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
-                        <span className="truncate max-w-[18vw] md:max-w-[24vw] lg:max-w-[28vw] xl:max-w-[32vw] 2xl:max-w-[36vw] block" title={getActiveViewName().replace('#','')}>
+                        <ChevronRight className={`w-3 h-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                        <span className="truncate max-w-[13vw] block" title={getActiveViewName().replace('#','')}>
                           {getActiveViewName().replace("#", "")}
                         </span>
                       </h2>
-                      <div className={`flex items-center gap-2 text-[11px] font-medium mt-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      <div className={`flex items-center gap-2 text-[10px] font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         <span className={`flex items-center gap-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                           <Users className="w-3 h-3" /> {activeMembers.length}{" "}
                           members
                         </span>
-                        <span className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'text-cyan-400' : 'text-sky-500'}`}>
-                          • View details
+                        <span className={`flex items-center gap-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                          Active now
                         </span>
                       </div>
                     </div>
@@ -11301,8 +11302,31 @@ export default function CollaborationApp() {
                 )}
               </div>
 
+              <div className="workspace-topbar-tabs flex-1 min-w-0">
+                {activeView === "channel" && (
+                  <ChannelTabs
+                    activeTab={activeChannelTab}
+                    isDarkMode={isDarkMode}
+                    onChange={handleChannelTabChange}
+                    tabs={CHANNEL_TABS}
+                    selectedCount={selectedMessageIds.length}
+                    onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
+                  />
+                )}
+                {activeView === "dm" && (
+                  <ChannelTabs
+                    activeTab={activeChannelTab}
+                    isDarkMode={isDarkMode}
+                    onChange={handleChannelTabChange}
+                    tabs={FRIEND_CHAT_TABS}
+                    selectedCount={selectedMessageIds.length}
+                    onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
+                  />
+                )}
+              </div>
+
               {/* Action Buttons with Liquid Glass */}
-              <div className="flex items-center gap-1.5">
+              <div className="workspace-navbar-actions flex items-center gap-1.5">
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
@@ -11827,9 +11851,9 @@ export default function CollaborationApp() {
 
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
-            <div className={`flex-1 flex min-h-0 overflow-hidden liquid-glass-chat-area relative ${isMobile ? 'mt-[70px]' : ''}`}>
+            <div className={`flex-1 flex min-h-0 overflow-hidden liquid-glass-chat-area workspace-chat-panel relative ${isMobile ? 'mt-[70px]' : ''}`}>
               <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
-                {activeView === "channel" && (
+                {isMobile && activeView === "channel" && (
                   <ChannelTabs
                     activeTab={activeChannelTab}
                     isDarkMode={isDarkMode}
@@ -11839,7 +11863,7 @@ export default function CollaborationApp() {
                     onCreateFromSelection={() => openCreateContextModal(selectedMessageIds)}
                   />
                 )}
-                {activeView === "dm" && (
+                {isMobile && activeView === "dm" && (
                   <ChannelTabs
                     activeTab={activeChannelTab}
                     isDarkMode={isDarkMode}
