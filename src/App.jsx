@@ -13834,51 +13834,71 @@ export default function CollaborationApp() {
         </div>
       )}
 
-      {/* Add Friend Modal - UPDATED FOR BULK SELECTION */}
+      {/* Add Friend Modal */}
       {showAddFriendModal && (
-        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-6 animate-fade-in ${
-          isDarkMode ? 'bg-slate-950/60' : 'bg-slate-900/30'
+        <div className={`fixed inset-0 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6 animate-fade-in ${
+          isDarkMode ? 'bg-slate-950/70' : 'bg-slate-950/35'
         }`}>
-          <div className={`w-full max-w-4xl rounded-[26px] overflow-hidden shadow-[0_40px_110px_rgba(15,23,42,0.28)] border ${
+          <div className={`w-full max-w-2xl max-h-[calc(100vh-48px)] rounded-3xl overflow-hidden shadow-[0_28px_90px_rgba(15,23,42,0.28)] border flex flex-col ${
             isDarkMode
-              ? 'bg-slate-900 border-slate-700/80'
-              : 'bg-white border-slate-200/90'
+              ? 'bg-slate-950 border-slate-800'
+              : 'bg-white border-slate-200'
           }`}>
-            <div className="relative p-7 sm:p-9">
-              <button
-                onClick={() => setShowAddFriendModal(false)}
-                className={`absolute right-5 top-5 p-2.5 rounded-full transition-all ${
-                  isDarkMode
-                    ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
-                }`}
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="pr-14">
-                <h3 className={`text-[2rem] leading-tight font-bold ${
-                  isDarkMode ? 'text-white' : 'text-slate-900'
-                }`}>
-                  Invite friends to Spacess
-                </h3>
-              </div>
-
-              {!inviteSent ? (
-                <div className="mt-8">
-                  <label className={`block text-sm font-semibold mb-2 ${
-                    isDarkMode ? 'text-slate-200' : 'text-slate-800'
+            <div className={`px-5 py-4 sm:px-6 sm:py-5 border-b ${
+              isDarkMode ? 'border-slate-800' : 'border-slate-200'
+            }`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                    isDarkMode ? 'bg-sky-500/12 text-sky-300' : 'bg-sky-50 text-sky-700'
                   }`}>
-                    To:
-                  </label>
+                    <UserPlus className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className={`text-xl sm:text-2xl leading-tight font-bold ${
+                      isDarkMode ? 'text-white' : 'text-slate-950'
+                    }`}>
+                      Invite friends to Spacess
+                    </h3>
+                    <p className={`mt-1 text-sm ${
+                      isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
+                      Search people, select who to invite, and send requests together.
+                    </p>
+                  </div>
+                </div>
 
-                  <div className={`rounded-[22px] border-2 px-4 py-4 min-h-[110px] transition-all ${
+                <button
+                  type="button"
+                  aria-label="Close invite friends modal"
+                  onClick={() => setShowAddFriendModal(false)}
+                  className={`p-2 rounded-xl transition-all shrink-0 ${
                     isDarkMode
-                      ? 'border-sky-500/80 bg-slate-950 shadow-[0_0_0_4px_rgba(14,165,233,0.12)]'
-                      : 'border-sky-500 bg-white shadow-[0_0_0_4px_rgba(59,130,246,0.10)]'
-                  }`}>
-                    <div className="relative">
-                      <Search className={`absolute left-0 top-1 w-5 h-5 ${
+                      ? 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                      : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {!inviteSent ? (
+              <>
+                <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+                  <div>
+                    <label className={`block text-sm font-semibold mb-2 ${
+                      isDarkMode ? 'text-slate-200' : 'text-slate-800'
+                    }`}>
+                      Search people
+                    </label>
+
+                    <div className={`relative rounded-2xl border transition-all focus-within:ring-4 ${
+                      isDarkMode
+                        ? 'border-slate-800 bg-slate-900/70 focus-within:border-sky-500 focus-within:ring-sky-500/10'
+                        : 'border-slate-200 bg-slate-50 focus-within:border-sky-500 focus-within:bg-white focus-within:ring-sky-500/10'
+                    }`}>
+                      <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${
                         isDarkMode ? 'text-slate-500' : 'text-slate-400'
                       }`} />
                       <input
@@ -13887,15 +13907,15 @@ export default function CollaborationApp() {
                         onChange={e => {
                           setInviteSearchQuery(e.target.value)
                         }}
-                        placeholder="Search by name..."
-                        className={`w-full pl-8 pr-2 bg-transparent text-2xl sm:text-[2rem] leading-tight border-0 outline-none focus:outline-none focus:ring-0 ${
-                          isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'
+                        placeholder="Search by name"
+                        className={`w-full h-[52px] pl-12 pr-4 bg-transparent text-base border-0 outline-none focus:outline-none focus:ring-0 ${
+                          isDarkMode ? 'text-white placeholder-slate-500' : 'text-slate-900 placeholder-slate-400'
                         }`}
                       />
                     </div>
 
                     {selectedFriendInvitees.length > 0 && (
-                      <div className="mt-4 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         {selectedFriendInvitees.map(id => {
                           const u =
                             inviteSearchResults.find(r => r.id === id) ||
@@ -13903,20 +13923,21 @@ export default function CollaborationApp() {
                           return (
                             <div
                               key={id}
-                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
+                              className={`inline-flex max-w-full items-center gap-2 rounded-full pl-1.5 pr-2.5 py-1.5 text-sm font-medium border ${
                                 isDarkMode
-                                  ? 'bg-sky-500/12 text-sky-100 border border-sky-400/20'
-                                  : 'bg-sky-100 text-sky-800 border border-sky-200'
+                                  ? 'bg-sky-500/10 text-sky-100 border-sky-400/20'
+                                  : 'bg-sky-50 text-sky-800 border-sky-200'
                               }`}
                             >
-                              <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-transparent">
+                              <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center shrink-0 bg-transparent">
                                 {u ? renderAvatar(u, 22) : <UserIcon className="w-4 h-4" />}
                               </span>
-                              {u?.name || 'Selected user'}
+                              <span className="truncate">{u?.name || 'Selected user'}</span>
                               <button
                                 type="button"
+                                aria-label={`Remove ${u?.name || 'selected user'}`}
                                 onClick={() => toggleFriendSelection(id)}
-                                className={`rounded-full p-0.5 ${
+                                className={`rounded-full p-1 transition-colors ${
                                   isDarkMode ? 'hover:bg-white/10' : 'hover:bg-sky-200/70'
                                 }`}
                               >
@@ -13929,157 +13950,172 @@ export default function CollaborationApp() {
                     )}
                   </div>
 
-                  <div className="my-8 flex items-center gap-4">
-                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                    <span className={`text-sm ${
-                      isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                    }`}>
-                      OR
-                    </span>
-                    <div className={`h-px flex-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
-                  </div>
-
-                  <div className={`rounded-2xl border p-4 ${
-                    isDarkMode ? 'border-slate-700 bg-slate-950/40' : 'border-slate-200 bg-slate-50/60'
+                  <div className={`mt-5 rounded-2xl border overflow-hidden ${
+                    isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'
                   }`}>
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 w-10 h-10 rounded-xl flex items-center justify-center ${
-                        isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600 border border-slate-200'
-                      }`}>
-                        <Users className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className={`text-xl font-semibold ${
-                          isDarkMode ? 'text-white' : 'text-slate-900'
+                    <div className={`px-4 py-3 flex items-center justify-between gap-3 border-b ${
+                      isDarkMode ? 'border-slate-800' : 'border-slate-100'
+                    }`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600'
                         }`}>
-                          Find people from your network
-                        </p>
-                        <p className={`mt-1 text-base ${
-                          isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                        }`}>
-                          Select one or more friends and send requests together.
-                        </p>
+                          <Users className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-semibold ${
+                            isDarkMode ? 'text-slate-100' : 'text-slate-900'
+                          }`}>
+                            Suggestions
+                          </p>
+                          <p className={`text-xs truncate ${
+                            isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                          }`}>
+                            {selectedFriendInvitees.length > 0
+                              ? `${selectedFriendInvitees.length} selected`
+                              : 'Results appear as you type'}
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="mt-5">
-                      <p className={`text-sm mb-3 ${
-                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                      }`}>
-                        Suggestions
-                      </p>
-
-                      <div className={`rounded-2xl border overflow-hidden ${
-                        isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
-                      }`}>
-                        {inviteSearchResults.length > 0 ? (
-                          <div className="max-h-[220px] overflow-y-auto">
-                            {inviteSearchResults.map((u, index) => {
-                              const isSelected = selectedFriendInvitees.includes(u.id)
-                              return (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  onClick={() => toggleFriendSelection(u.id)}
-                                  className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors ${
-                                    index !== inviteSearchResults.length - 1
-                                      ? isDarkMode ? 'border-b border-slate-800' : 'border-b border-slate-100'
-                                      : ''
-                                  } ${
-                                    isSelected
-                                      ? isDarkMode ? 'bg-sky-500/10' : 'bg-sky-50'
-                                      : isDarkMode ? 'hover:bg-slate-800/80' : 'hover:bg-slate-50'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center ${
-                                      isDarkMode ? 'bg-slate-800' : 'bg-slate-100'
-                                    }`}>
-                                      {renderAvatar(u, 32)}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className={`font-medium truncate ${
-                                        isDarkMode ? 'text-slate-100' : 'text-slate-800'
-                                      }`}>
-                                        {u.name}
-                                      </p>
-                                      <p className={`text-sm ${
-                                        isDarkMode ? 'text-slate-400' : 'text-slate-500'
-                                      }`}>
-                                        {isSelected ? 'Selected' : 'Click to add'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
-                                    isSelected
-                                      ? isDarkMode
-                                        ? 'border-sky-400 bg-sky-400 text-slate-950'
-                                        : 'border-sky-500 bg-sky-500 text-white'
-                                      : isDarkMode
-                                        ? 'border-slate-600'
-                                        : 'border-slate-300'
+                    {inviteSearchResults.length > 0 ? (
+                      <div className="max-h-[300px] overflow-y-auto">
+                        {inviteSearchResults.map((u, index) => {
+                          const isSelected = selectedFriendInvitees.includes(u.id)
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => toggleFriendSelection(u.id)}
+                              className={`w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left transition-colors ${
+                                index !== inviteSearchResults.length - 1
+                                  ? isDarkMode ? 'border-b border-slate-800' : 'border-b border-slate-100'
+                                  : ''
+                              } ${
+                                isSelected
+                                  ? isDarkMode ? 'bg-sky-500/10' : 'bg-sky-50'
+                                  : isDarkMode ? 'hover:bg-slate-900' : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-11 h-11 rounded-full overflow-hidden flex items-center justify-center shrink-0 ${
+                                  isDarkMode ? 'bg-slate-800' : 'bg-slate-100'
+                                }`}>
+                                  {renderAvatar(u, 36)}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className={`font-semibold truncate ${
+                                    isDarkMode ? 'text-slate-100' : 'text-slate-900'
                                   }`}>
-                                    {isSelected && <CheckCircle className="w-4 h-4" />}
-                                  </div>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <div className="px-6 py-10 text-center">
-                            <p className={`font-medium ${
-                              isDarkMode ? 'text-slate-300' : 'text-slate-700'
-                            }`}>
-                              {inviteSearchQuery.trim() ? 'No matching people found' : 'Start typing to find friends'}
-                            </p>
-                          </div>
-                        )}
+                                    {u.name}
+                                  </p>
+                                  <p className={`text-sm truncate ${
+                                    isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                                  }`}>
+                                    {u.email || (isSelected ? 'Selected' : 'Available to invite')}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+                                isSelected
+                                  ? isDarkMode
+                                    ? 'border-sky-400 bg-sky-400 text-slate-950'
+                                    : 'border-sky-600 bg-sky-600 text-white'
+                                  : isDarkMode
+                                    ? 'border-slate-600 bg-slate-900'
+                                    : 'border-slate-300 bg-white'
+                              }`}>
+                                {isSelected && <Check className="w-4 h-4" />}
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
-                    </div>
+                    ) : (
+                      <div className="px-6 py-12 text-center">
+                        <div className={`w-12 h-12 mx-auto mb-3 rounded-2xl flex items-center justify-center ${
+                          isDarkMode ? 'bg-slate-900 text-slate-500' : 'bg-slate-50 text-slate-400'
+                        }`}>
+                          <Search className="w-5 h-5" />
+                        </div>
+                        <p className={`font-semibold ${
+                          isDarkMode ? 'text-slate-200' : 'text-slate-800'
+                        }`}>
+                          {inviteSearchQuery.trim() ? 'No matching people found' : 'Start typing to find friends'}
+                        </p>
+                        <p className={`mt-1 text-sm ${
+                          isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                        }`}>
+                          {inviteSearchQuery.trim()
+                            ? 'Try a different name or check the spelling.'
+                            : 'Search by name to add people to your invite list.'}
+                        </p>
+                      </div>
+                    )}
                   </div>
+                </div>
 
-                  <div className="mt-8 flex items-center justify-between gap-4 flex-wrap">
+                <div className={`px-5 py-4 sm:px-6 border-t flex items-center justify-between gap-3 flex-wrap ${
+                  isDarkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50/70'
+                }`}>
+                  <button
+                    type="button"
+                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                      isDarkMode ? 'text-sky-300 hover:bg-sky-500/10' : 'text-sky-700 hover:bg-sky-50'
+                    }`}
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Copy invite link
+                  </button>
+
+                  <div className="flex items-center gap-2 ml-auto">
                     <button
                       type="button"
-                      className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
-                        isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'
+                      onClick={() => setShowAddFriendModal(false)}
+                      className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                        isDarkMode
+                          ? 'text-slate-300 hover:bg-slate-900'
+                          : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <UserPlus className="w-5 h-5" />
-                      Copy invite link
+                      Cancel
                     </button>
-
                     <button
                       onClick={handleBulkFriendInvite}
                       disabled={selectedFriendInvitees.length === 0}
-                      className={`min-w-[128px] rounded-2xl px-8 py-3.5 text-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        isDarkMode
-                          ? 'bg-slate-200 text-slate-900 hover:bg-white'
-                          : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
+                      className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:shadow-none ${
+                        selectedFriendInvitees.length === 0
+                          ? isDarkMode
+                            ? 'bg-slate-800 text-slate-500'
+                            : 'bg-slate-200 text-slate-400'
+                          : isDarkMode
+                            ? 'bg-sky-400 text-slate-950 hover:bg-sky-300 shadow-lg shadow-sky-500/15'
+                            : 'bg-sky-600 text-white hover:bg-sky-700 shadow-lg shadow-sky-600/20'
                       }`}
                     >
-                      Send
+                      {selectedFriendInvitees.length > 0 ? `Send ${selectedFriendInvitees.length}` : 'Send'}
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="py-16 text-center">
-                  <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 ${
-                    isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600'
-                  }`}>
-                    <Check className="w-10 h-10" />
-                  </div>
-                  <h4 className={`text-3xl font-bold mb-2 ${
-                    isDarkMode ? 'text-white' : 'text-slate-900'
-                  }`}>
-                    Requests sent
-                  </h4>
-                  <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
-                    Your friend invites have been delivered successfully.
-                  </p>
+              </>
+            ) : (
+              <div className="px-6 py-16 text-center">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5 ${
+                  isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600'
+                }`}>
+                  <Check className="w-8 h-8" />
                 </div>
-              )}
-            </div>
+                <h4 className={`text-2xl font-bold mb-2 ${
+                  isDarkMode ? 'text-white' : 'text-slate-900'
+                }`}>
+                  Requests sent
+                </h4>
+                <p className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
+                  Your friend invites have been delivered successfully.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
