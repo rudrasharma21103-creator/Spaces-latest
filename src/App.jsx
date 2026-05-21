@@ -11273,23 +11273,23 @@ export default function CollaborationApp() {
                   </div>
                 ) : (
                   <div className="relative z-10 flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-white/[0.06] text-slate-300 border border-white/10 group-hover:bg-white/[0.09] group-hover:text-slate-200' : 'bg-slate-50 text-slate-600 border border-slate-100 shadow-sm group-hover:bg-sky-50 group-hover:text-sky-600'}`}>
-                      <Hash className="w-[18px] h-[18px]" />
+                    <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center transition-all ${isDarkMode ? 'bg-white/[0.06] text-slate-300 border border-white/10 group-hover:bg-white/[0.09] group-hover:text-slate-200' : 'bg-slate-50 text-slate-600 border border-slate-100 shadow-sm group-hover:bg-sky-50 group-hover:text-sky-600'}`}>
+                      <Hash className="w-5 h-5" />
                     </div>
                     <div>
-                      <h2 className={`font-bold text-[13px] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
+                      <h2 className={`font-bold text-[14px] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
                         {/* Header Breadcrumb Context */}
-                        <span className={`font-semibold max-w-[11vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
+                        <span className={`font-semibold max-w-[15vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
                           {currentSpace?.name}
                         </span>
                         <ChevronRight className={`w-3 h-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
-                        <span className="truncate max-w-[13vw] block" title={getActiveViewName().replace('#','')}>
+                        <span className="truncate max-w-[17vw] block" title={getActiveViewName().replace('#','')}>
                           {getActiveViewName().replace("#", "")}
                         </span>
                       </h2>
-                      <div className={`flex items-center gap-2 text-[10px] font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      <div className={`flex items-center gap-2 text-[11px] font-medium mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         <span className={`flex items-center gap-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                          <Users className="w-3 h-3" /> {activeMembers.length}{" "}
+                          <Users className="w-3.5 h-3.5" /> {activeMembers.length}{" "}
                           members
                         </span>
                         <span className={`flex items-center gap-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>

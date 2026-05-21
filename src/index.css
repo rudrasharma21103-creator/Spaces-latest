@@ -10819,8 +10819,8 @@ body.dark .liquid-glass-sidebar-right {
   margin: 0 12px !important;
   background: #ffffff !important;
   border: 0 !important;
-  border-bottom: 0 !important;
-  border-color: transparent !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16) !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
   border-radius: 18px 18px 0 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
@@ -10889,8 +10889,10 @@ body:has(.workspace-topbar) .workspace-chat-panel {
 }
 
 .workspace-channel-summary {
-  min-width: 245px;
-  max-width: 360px;
+  min-width: 285px;
+  max-width: 440px;
+  min-height: 58px;
+  padding: 10px 14px !important;
 }
 
 .workspace-topbar-tabs {
@@ -10902,6 +10904,20 @@ body:has(.workspace-topbar) .workspace-chat-panel {
 .workspace-topbar-tabs .workspace-channel-tabs {
   margin: 0 !important;
   padding: 0 !important;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs-trigger {
+  height: 34px;
+  min-width: 136px;
+  border-radius: 10px !important;
+  border-color: #e2e8f0 !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08) !important;
+}
+
+.workspace-topbar-tabs .workspace-channel-tabs-dropdown {
+  z-index: 60;
 }
 
 .workspace-topbar-tabs .workspace-channel-tabs-row {
@@ -10964,7 +10980,8 @@ body:has(.workspace-topbar) .workspace-chat-panel {
 html.dark .workspace-topbar,
 body.dark .workspace-topbar {
   background: #0d0001 !important;
-  border-color: transparent !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
   box-shadow: none !important;
 }
 
@@ -11004,6 +11021,13 @@ body.dark .workspace-topbar .liquid-glass-header:hover {
 html.dark .workspace-topbar-tabs .workspace-channel-tabs-row,
 body.dark .workspace-topbar-tabs .workspace-channel-tabs-row {
   background: #0D0001 !important;
+}
+
+html.dark .workspace-topbar-tabs .workspace-channel-tabs-trigger,
+body.dark .workspace-topbar-tabs .workspace-channel-tabs-trigger {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.13) !important;
+  color: #f8fafc !important;
 }
 
 html.dark .workspace-topbar .liquid-glass-header,

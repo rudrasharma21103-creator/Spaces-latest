@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Check,
   Clock3,
+  ChevronDown,
   File,
   FileArchive,
   FileImage,
@@ -262,29 +263,86 @@ function FilePreview({ file, isDarkMode, variant = "card" }) {
 }
 
 export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
+  const [menuOpen, setMenuOpen] = React.useState(false)
+  const menuRef = React.useRef(null)
+  const activeLabel = String(activeTab || tabs[0] || "messages")
+
+  React.useEffect(() => {
+    if (!menuOpen) return undefined
+
+    const handlePointerDown = event => {
+      if (!menuRef.current?.contains(event.target)) setMenuOpen(false)
+    }
+    const handleKeyDown = event => {
+      if (event.key === "Escape") setMenuOpen(false)
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("touchstart", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("touchstart", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [menuOpen])
+
+  const handleSelect = tab => {
+    onChange(tab)
+    setMenuOpen(false)
+  }
+
   return (
     <div className="workspace-channel-tabs mx-4 mb-0.5 px-0 sm:mx-6">
-      <div className={`workspace-channel-tabs-row flex items-center gap-0.5 overflow-x-auto border-b pb-1.5 ${isDarkMode ? "border-slate-800/90" : "border-slate-200/90"}`}>
-        {tabs.map(tab => {
-          const active = activeTab === tab
-          return (
-            <button
-              key={tab}
-              onClick={() => onChange(tab)}
-              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold capitalize transition-colors sm:text-[13px] ${
-                active
-                  ? isDarkMode
-                    ? "bg-slate-800 text-white"
-                    : "bg-slate-900 text-white"
-                  : isDarkMode
-                    ? "text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
-                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              }`}
-            >
-              {tab}
-            </button>
-          )
-        })}
+      <div ref={menuRef} className="workspace-channel-tabs-menu relative inline-flex">
+        <button
+          type="button"
+          onClick={() => setMenuOpen(open => !open)}
+          className={`workspace-channel-tabs-trigger inline-flex h-9 min-w-[132px] items-center justify-between gap-3 rounded-xl border px-3.5 text-sm font-semibold capitalize shadow-sm transition-colors ${
+            isDarkMode
+              ? "border-white/10 bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]"
+              : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+          }`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+        >
+          <span>{activeLabel}</span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        {menuOpen && (
+          <div
+            className={`workspace-channel-tabs-dropdown absolute left-0 top-full z-50 mt-2 w-44 rounded-xl border p-1.5 shadow-xl ${
+              isDarkMode ? "border-white/10 bg-[#0d1218] text-slate-100" : "border-slate-200 bg-white text-slate-900"
+            }`}
+            role="menu"
+          >
+            {tabs.map(tab => {
+              const active = activeTab === tab
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => handleSelect(tab)}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold capitalize transition-colors ${
+                    active
+                      ? isDarkMode
+                        ? "bg-white/[0.08] text-white"
+                        : "bg-slate-100 text-slate-950"
+                      : isDarkMode
+                        ? "text-slate-300 hover:bg-white/[0.06] hover:text-white"
+                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                  }`}
+                  role="menuitem"
+                >
+                  <span>{tab}</span>
+                  {active && <Check className="h-4 w-4" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
