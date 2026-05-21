@@ -10860,8 +10860,26 @@ body:has(.workspace-topbar) .liquid-glass-sidebar {
   -webkit-backdrop-filter: none !important;
 }
 
+body:has(.workspace-topbar) .liquid-glass-sidebar-right {
+  background: #F8FAFD !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-left-color: transparent !important;
+  border-right-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.dark body:has(.workspace-topbar) .liquid-glass-sidebar-right,
+body.dark:has(.workspace-topbar) .liquid-glass-sidebar-right {
+  background: #111111 !important;
+}
+
 body:has(.workspace-topbar) .liquid-glass-sidebar::before,
-body:has(.workspace-topbar) .liquid-glass-sidebar::after {
+body:has(.workspace-topbar) .liquid-glass-sidebar::after,
+body:has(.workspace-topbar) .liquid-glass-sidebar-right::before,
+body:has(.workspace-topbar) .liquid-glass-sidebar-right::after {
   display: none !important;
   opacity: 0 !important;
 }
