@@ -91,6 +91,17 @@ def _find_channel_in_space(space: dict, channel_id: str):
     return None
 
 
+def _space_channel_index():
+    index = {}
+    projection = {"_id": 0, "id": 1, "name": 1, "ownerId": 1, "createdBy": 1, "members": 1, "channels": 1}
+    for space in spaces_collection.find({}, projection):
+        for channel in space.get("channels") or []:
+            channel_id = channel.get("id")
+            if channel_id is not None:
+                index[str(channel_id)] = {"space": space, "channel": channel}
+    return index
+
+
 def _space_owner_id(space: dict):
     return _extract_id(space.get("ownerId") or space.get("createdBy"))
 
@@ -108,7 +119,7 @@ def _has_channel_access(space: dict, channel: dict, user_id):
     )
 
 
-def _message_context(chat_id):
+def _message_context(chat_id, channel_index=None):
     if isinstance(chat_id, str) and chat_id.startswith("dm_"):
         return {
             "spaceId": None,
@@ -116,8 +127,9 @@ def _message_context(chat_id):
             "channelId": chat_id,
             "channelName": "Direct message",
         }
-    space = _find_channel_space(str(chat_id))
-    channel = _find_channel_in_space(space, str(chat_id)) if space else None
+    match = (channel_index or {}).get(str(chat_id))
+    space = match.get("space") if match else _find_channel_space(str(chat_id))
+    channel = match.get("channel") if match else (_find_channel_in_space(space, str(chat_id)) if space else None)
     return {
         "spaceId": space.get("id") if space else None,
         "spaceName": space.get("name") if space else None,
@@ -126,9 +138,15 @@ def _message_context(chat_id):
     }
 
 
-def _sender_for_message(message: dict):
+def _sender_for_message(message: dict, sender_cache=None):
     user_id = message.get("userId") or message.get("senderId") or message.get("createdBy")
-    user = users_collection.find_one({"id": {"$in": _user_id_candidates(user_id)}}, {"_id": 0, "name": 1, "id": 1}) if user_id is not None else None
+    cache_key = str(user_id) if user_id is not None else None
+    if sender_cache is not None and cache_key in sender_cache:
+        user = sender_cache[cache_key]
+    else:
+        user = users_collection.find_one({"id": {"$in": _user_id_candidates(user_id)}}, {"_id": 0, "name": 1, "id": 1}) if user_id is not None else None
+        if sender_cache is not None and cache_key is not None:
+            sender_cache[cache_key] = user
     return {
         "id": user.get("id") if user else user_id,
         "name": user.get("name") if user else message.get("userName") or "Unknown user",
@@ -147,21 +165,34 @@ async def _send_timesavers_update(user_id, kind, action, payload):
         pass
 
 
-def _starred_response_item(star: dict):
-    doc = messages_collection.find_one(
-        {"chatId": star.get("chatId"), "message.id": {"$in": _message_id_candidates(str(star.get("messageId")))}},
-        {"_id": 0},
-    )
-    if not doc or not doc.get("message"):
+def _starred_response_item(star: dict, doc: dict = None, channel_index=None, sender_cache=None):
+    if not doc and not star.get("message"):
+        doc = messages_collection.find_one(
+            {"chatId": star.get("chatId"), "message.id": {"$in": _message_id_candidates(str(star.get("messageId")))}},
+            {"_id": 0},
+        )
+    if doc and doc.get("message"):
+        message = doc["message"]
+        chat_id = doc.get("chatId")
+    else:
+        message = star.get("message")
+        chat_id = star.get("chatId")
+    if not message:
         return None
-    message = doc["message"]
-    context = _message_context(doc.get("chatId"))
+    context = {
+        "spaceId": star.get("spaceId"),
+        "spaceName": star.get("spaceName"),
+        "channelId": star.get("channelId"),
+        "channelName": star.get("channelName"),
+    }
+    if not context.get("channelId"):
+        context = _message_context(chat_id, channel_index)
     return {
-        "id": f"{doc.get('chatId')}:{message.get('id')}",
+        "id": f"{chat_id}:{message.get('id')}",
         "messageId": message.get("id"),
-        "chatId": doc.get("chatId"),
+        "chatId": chat_id,
         "message": message,
-        "sender": _sender_for_message(message),
+        "sender": star.get("sender") or _sender_for_message(message, sender_cache),
         "spaceId": context.get("spaceId"),
         "spaceName": context.get("spaceName"),
         "channelId": context.get("channelId"),
@@ -170,9 +201,10 @@ def _starred_response_item(star: dict):
     }
 
 
-def _pinned_response_item(pin: dict):
-    space = _find_channel_space(str(pin.get("channelId")))
-    channel = _find_channel_in_space(space, str(pin.get("channelId"))) if space else None
+def _pinned_response_item(pin: dict, channel_index=None):
+    match = (channel_index or {}).get(str(pin.get("channelId")))
+    space = match.get("space") if match else _find_channel_space(str(pin.get("channelId")))
+    channel = match.get("channel") if match else (_find_channel_in_space(space, str(pin.get("channelId"))) if space else None)
     if not space or not channel:
         return None
     return {
@@ -191,19 +223,32 @@ async def star_message(request: Request, message_id: str):
     doc = _find_accessible_message(message_id, user_id)
     message = doc["message"]
     now = _now_iso()
+    context = _message_context(doc.get("chatId"))
+    sender = _sender_for_message(message)
     record = starred_messages_collection.find_one_and_update(
         {"userId": user_id, "messageId": str(message.get("id")), "chatId": doc.get("chatId")},
-        {"$setOnInsert": {
-            "userId": user_id,
-            "messageId": str(message.get("id")),
-            "chatId": doc.get("chatId"),
-            "createdAt": now,
-        }},
+        {
+            "$set": {
+                "message": message,
+                "sender": sender,
+                "spaceId": context.get("spaceId"),
+                "spaceName": context.get("spaceName"),
+                "channelId": context.get("channelId"),
+                "channelName": context.get("channelName"),
+                "updatedAt": now,
+            },
+            "$setOnInsert": {
+                "userId": user_id,
+                "messageId": str(message.get("id")),
+                "chatId": doc.get("chatId"),
+                "createdAt": now,
+            },
+        },
         upsert=True,
         return_document=ReturnDocument.AFTER,
         projection={"_id": 0},
     )
-    item = _starred_response_item(record)
+    item = _starred_response_item(record, doc=doc)
     await _send_timesavers_update(user_id, "starred_messages", "star", item)
     return {"status": "starred", "item": item}
 
@@ -228,11 +273,13 @@ def get_starred_messages(request: Request):
     records = list(starred_messages_collection.find({"userId": user_id}, {"_id": 0}).sort("createdAt", -1))
     items = []
     stale_records = []
+    channel_index = _space_channel_index()
+    sender_cache = {}
     for record in records:
         chat_id = record.get("chatId")
         if not chat_id or not _check_channel_access(str(chat_id), user_id):
             continue
-        item = _starred_response_item(record)
+        item = _starred_response_item(record, channel_index=channel_index, sender_cache=sender_cache)
         if item:
             items.append(item)
         else:
@@ -258,17 +305,24 @@ async def pin_channel(request: Request, channel_id: str):
     now = _now_iso()
     record = pinned_channels_collection.find_one_and_update(
         {"userId": user_id, "channelId": str(channel.get("id"))},
-        {"$setOnInsert": {
-            "userId": user_id,
-            "channelId": str(channel.get("id")),
-            "spaceId": space.get("id"),
-            "createdAt": now,
-        }},
+        {
+            "$set": {
+                "spaceId": space.get("id"),
+                "spaceName": space.get("name"),
+                "channelName": channel.get("name"),
+                "updatedAt": now,
+            },
+            "$setOnInsert": {
+                "userId": user_id,
+                "channelId": str(channel.get("id")),
+                "createdAt": now,
+            },
+        },
         upsert=True,
         return_document=ReturnDocument.AFTER,
         projection={"_id": 0},
     )
-    item = _pinned_response_item(record)
+    item = _pinned_response_item(record, {str(channel.get("id")): {"space": space, "channel": channel}})
     await _send_timesavers_update(user_id, "pinned_channels", "pin", item)
     return {"status": "pinned", "item": item}
 
@@ -294,15 +348,17 @@ def get_pinned_channels(request: Request):
     records = list(pinned_channels_collection.find({"userId": user_id}, {"_id": 0}).sort("createdAt", -1))
     items = []
     stale_records = []
+    channel_index = _space_channel_index()
     for record in records:
-        space = _find_channel_space(str(record.get("channelId")))
-        channel = _find_channel_in_space(space, str(record.get("channelId"))) if space else None
+        match = channel_index.get(str(record.get("channelId")))
+        space = match.get("space") if match else None
+        channel = match.get("channel") if match else None
         if not space or not channel:
             stale_records.append(record)
             continue
         if not _has_channel_access(space, channel, user_id):
             continue
-        item = _pinned_response_item(record)
+        item = _pinned_response_item(record, channel_index)
         if item:
             items.append(item)
     for record in stale_records:

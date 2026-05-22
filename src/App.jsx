@@ -6870,6 +6870,64 @@ export default function CollaborationApp() {
     [pinnedChannels]
   )
 
+  const findSpaceAndChannel = useCallback(channelId => {
+    for (const space of spaces || []) {
+      const channel = (space.channels || []).find(item => String(item.id) === String(channelId))
+      if (channel) return { space, channel }
+    }
+    return { space: null, channel: null }
+  }, [spaces])
+
+  const buildOptimisticStarredItem = useCallback(message => {
+    if (!message?.id) return null
+    const resolvedView = activeView === "contexts" ? contextsSourceView : activeView
+    const chatId =
+      resolvedView === "channel"
+        ? activeChannel
+        : resolvedView === "dm" && activeDMUser && currentUser
+          ? getDMChatId(activeDMUser)
+          : null
+    const match = resolvedView === "channel" ? findSpaceAndChannel(activeChannel) : { space: null, channel: null }
+    const messageUserId = message.userId || message.senderId || message.createdBy
+    const senderName =
+      message.userName ||
+      message.senderName ||
+      message.sender?.name ||
+      (String(messageUserId) === String(currentUser?.id) ? currentUser?.name : null) ||
+      "Unknown user"
+
+    return {
+      id: `${chatId || "message"}:${message.id}`,
+      messageId: message.id,
+      chatId,
+      message,
+      sender: {
+        id: messageUserId || currentUser?.id,
+        name: senderName,
+      },
+      spaceId: match.space?.id || null,
+      spaceName: match.space?.name || (resolvedView === "dm" ? "Direct messages" : null),
+      channelId: match.channel?.id || chatId,
+      channelName: match.channel?.name || (resolvedView === "dm" ? "Direct message" : null),
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    }
+  }, [activeChannel, activeDMUser, activeView, contextsSourceView, currentUser, findSpaceAndChannel])
+
+  const buildOptimisticPinnedChannel = useCallback(channelId => {
+    const { space, channel } = findSpaceAndChannel(channelId)
+    if (!space || !channel) return null
+    return {
+      id: `${space.id}:${channel.id}`,
+      spaceId: space.id,
+      spaceName: space.name,
+      channelId: channel.id,
+      channelName: channel.name,
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    }
+  }, [findSpaceAndChannel])
+
   const loadTimesavers = useCallback(async () => {
     if (!currentUser?.id) return
     setTimesaversLoading(true)
@@ -6888,9 +6946,9 @@ export default function CollaborationApp() {
   }, [currentUser?.id])
 
   useEffect(() => {
-    if (!isAuthenticated || !currentUser?.id || !appDataReady) return
+    if (!isAuthenticated || !currentUser?.id) return
     loadTimesavers()
-  }, [appDataReady, currentUser?.id, isAuthenticated, loadTimesavers])
+  }, [currentUser?.id, isAuthenticated, loadTimesavers])
 
   const openStarredMessages = useCallback(() => {
     setOpenContextId(null)
@@ -6937,10 +6995,14 @@ export default function CollaborationApp() {
         setStarredMessages(prev => (prev || []).filter(item => String(item.messageId) !== String(messageId)))
         await Storage.unstarMessage(messageId)
       } else {
+        const optimisticItem = buildOptimisticStarredItem(message)
+        if (optimisticItem) {
+          setStarredMessages(prev => [optimisticItem, ...(prev || []).filter(existing => String(existing.messageId) !== String(messageId))])
+        }
         const item = await Storage.starMessage(messageId)
         if (item) {
           setStarredMessages(prev => [item, ...(prev || []).filter(existing => String(existing.messageId) !== String(item.messageId))])
-        } else {
+        } else if (!optimisticItem) {
           await loadTimesavers()
         }
       }
@@ -6949,7 +7011,7 @@ export default function CollaborationApp() {
       await loadTimesavers()
       if (error?.status === 403) setShowAccessDeniedModal(true)
     }
-  }, [loadTimesavers, starredMessageKeySet])
+  }, [buildOptimisticStarredItem, loadTimesavers, starredMessageKeySet])
 
   const toggleChannelPin = useCallback(async (channelId) => {
     if (!channelId) return
@@ -6959,10 +7021,14 @@ export default function CollaborationApp() {
         setPinnedChannels(prev => (prev || []).filter(item => String(item.channelId) !== String(channelId)))
         await Storage.unpinChannel(channelId)
       } else {
+        const optimisticItem = buildOptimisticPinnedChannel(channelId)
+        if (optimisticItem) {
+          setPinnedChannels(prev => [optimisticItem, ...(prev || []).filter(existing => String(existing.channelId) !== String(channelId))])
+        }
         const item = await Storage.pinChannel(channelId)
         if (item) {
           setPinnedChannels(prev => [item, ...(prev || []).filter(existing => String(existing.channelId) !== String(item.channelId))])
-        } else {
+        } else if (!optimisticItem) {
           await loadTimesavers()
         }
       }
@@ -6971,7 +7037,7 @@ export default function CollaborationApp() {
       await loadTimesavers()
       if (error?.status === 403) setShowAccessDeniedModal(true)
     }
-  }, [loadTimesavers, pinnedChannelIdSet])
+  }, [buildOptimisticPinnedChannel, loadTimesavers, pinnedChannelIdSet])
 
   const openStarredMessage = useCallback(item => {
     if (!item) return
