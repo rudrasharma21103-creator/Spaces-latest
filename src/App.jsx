@@ -259,6 +259,14 @@ const createSpaceIconElement = iconType => {
   return <UserIcon className="w-5 h-5" />
 }
 
+const SpaceFolderIcon = ({ isDarkMode, className = "h-5 w-5" }) => (
+  <SmartImage
+    src={isDarkMode ? "/Folder%20dark%20theme.png" : "/Folder%20Light%20Theme.png"}
+    alt="Space folder"
+    className={`${className} object-contain`}
+  />
+)
+
 const PUBLIC_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "googlemail.com",
@@ -10797,7 +10805,7 @@ export default function CollaborationApp() {
                               : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
                           }`}
                         >
-                          <Briefcase className="w-4 h-4" />
+                          <SpaceFolderIcon isDarkMode={isDarkMode} className="h-5 w-5" />
                         </span>
                         <span
                           className={`font-semibold text-sm truncate flex-1 transition-colors ${
@@ -10990,8 +10998,8 @@ export default function CollaborationApp() {
                       openCollapsedSpaceMenu(s, event)
                     }}
                   >
-                    <span className={`text-sm font-bold ${activeSpace === s.id ? (isDarkMode ? 'text-white' : 'text-slate-700') : isDarkMode ? 'text-slate-200' : 'text-slate-600'}`}>
-                      {s.name.charAt(0).toUpperCase()}
+                    <span className="flex h-7 w-7 items-center justify-center">
+                      <SpaceFolderIcon isDarkMode={isDarkMode} className="h-6 w-6" />
                     </span>
                   </button>
                 )
