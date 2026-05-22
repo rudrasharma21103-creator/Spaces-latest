@@ -34,6 +34,8 @@ import {
   Briefcase,
   User as UserIcon,
   MessageCircle,
+  Star,
+  Pin,
   LogIn,
   UserPlus as UserPlusIcon,
   CheckCircle,
@@ -199,6 +201,7 @@ const isProtectedAppPath = pathname => {
   const normalized = String(pathname || "/").replace(/\/+$/, "") || "/"
   return (
     normalized === "/tasks" ||
+    normalized === "/starred" ||
     normalized === "/contexts" ||
     normalized.startsWith("/contexts/") ||
     normalized.startsWith("/space/") ||
@@ -420,6 +423,7 @@ export default function CollaborationApp() {
     (Array.isArray(initialAuthBoot.cachedSpaces) ? initialAuthBoot.cachedSpaces : []).map(space => ({
       ...space,
       icon: createSpaceIconElement(space.iconType),
+      expanded: false,
     }))
   )
   const [users, setUsers] = useState([])
@@ -440,6 +444,9 @@ export default function CollaborationApp() {
   const [homeDMSending, setHomeDMSending] = useState(false)
   const [drafts, setDrafts] = useState(() => initialAuthBoot.cachedDrafts || [])
   const [activeDraftId, setActiveDraftId] = useState(null)
+  const [starredMessages, setStarredMessages] = useState([])
+  const [pinnedChannels, setPinnedChannels] = useState([])
+  const [timesaversLoading, setTimesaversLoading] = useState(false)
   const authResolvedAtRef = useRef(0)
   const authLookupCacheRef = useRef(new Map())
   const googleAuthInFlightRef = useRef(false)
@@ -685,7 +692,7 @@ export default function CollaborationApp() {
       if (savedState.homeSection) setHomeSection(savedState.homeSection)
       if (savedState.contextsSourceView) setContextsSourceView(savedState.contextsSourceView)
       if (savedState.openContextId !== undefined) setOpenContextId(savedState.openContextId)
-      if (["home", "channel", "dm", "tasks", "contexts"].includes(savedState.activeView)) {
+      if (["home", "channel", "dm", "tasks", "contexts", "starred"].includes(savedState.activeView)) {
         setActiveView(savedState.activeView)
       }
     }
@@ -706,6 +713,13 @@ export default function CollaborationApp() {
         applySavedNavigation(savedState)
         setOpenContextId(null)
         setActiveView("tasks")
+        return true
+      }
+
+      if (pathname === "/starred") {
+        applySavedNavigation(savedState)
+        setOpenContextId(null)
+        setActiveView("starred")
         return true
       }
 
@@ -862,15 +876,17 @@ export default function CollaborationApp() {
     const targetPath =
       activeView === "tasks"
         ? "/tasks"
-        : activeView === "contexts"
-          ? openContextId
-            ? `/contexts/${encodeURIComponent(String(openContextId))}`
-            : "/contexts"
-          : activeView === "channel" && currentSpace && currentChannel
-            ? `/space/${encodeURIComponent(slugifyRoutePart(currentSpace.name) || String(currentSpace.id))}/${encodeURIComponent(slugifyRoutePart(currentChannel.name) || String(currentChannel.id))}`
-            : activeView === "dm" && activeDMUser
-              ? `/dm/${encodeURIComponent(slugifyRoutePart(dmUser?.name) || String(activeDMUser))}`
-              : "/"
+        : activeView === "starred"
+          ? "/starred"
+          : activeView === "contexts"
+            ? openContextId
+              ? `/contexts/${encodeURIComponent(String(openContextId))}`
+              : "/contexts"
+            : activeView === "channel" && currentSpace && currentChannel
+              ? `/space/${encodeURIComponent(slugifyRoutePart(currentSpace.name) || String(currentSpace.id))}/${encodeURIComponent(slugifyRoutePart(currentChannel.name) || String(currentChannel.id))}`
+              : activeView === "dm" && activeDMUser
+                ? `/dm/${encodeURIComponent(slugifyRoutePart(dmUser?.name) || String(activeDMUser))}`
+                : "/"
 
     const currentIsEquivalentChannel =
       activeView === "channel" &&
@@ -2373,6 +2389,11 @@ export default function CollaborationApp() {
 
               console.log('User socket received message:', data.type, data)
 
+              if (data.type === "timesavers_updated") {
+                applyStarredRealtimeUpdate(data)
+                return
+              }
+
               // When backend notifies that a domain was verified, try to auto-login the org admin
               if (data.type === 'org_verified') {
                 try {
@@ -3072,9 +3093,28 @@ export default function CollaborationApp() {
       (Array.isArray(list) ? list : []).map(space => ({
         ...space,
         icon: getSpaceIconElement(space.iconType),
+        expanded:
+          activeView === "channel" &&
+          Boolean(activeChannel) &&
+          String(space.id) === String(activeSpace),
       })),
-    [getSpaceIconElement]
+    [activeChannel, activeSpace, activeView, getSpaceIconElement]
   )
+
+  useEffect(() => {
+    if (!isAuthenticated || !routeReady || !appDataReady || activeView !== "channel" || !activeSpace || !activeChannel) return
+
+    setSpaces(prev => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev
+      let changed = false
+      const next = prev.map(space => {
+        if (String(space.id) !== String(activeSpace) || space.expanded) return space
+        changed = true
+        return { ...space, expanded: true }
+      })
+      return changed ? next : prev
+    })
+  }, [activeChannel, activeSpace, activeView, appDataReady, isAuthenticated, routeReady, spaces.length])
 
   const getFirstReadableChannel = React.useCallback((space, user) => {
     if (!space || !user) return null
@@ -6820,6 +6860,145 @@ export default function CollaborationApp() {
   }
 }
 
+  const starredMessageKeySet = useMemo(
+    () => new Set((starredMessages || []).map(item => String(item?.messageId))),
+    [starredMessages]
+  )
+
+  const pinnedChannelIdSet = useMemo(
+    () => new Set((pinnedChannels || []).map(item => String(item?.channelId))),
+    [pinnedChannels]
+  )
+
+  const loadTimesavers = useCallback(async () => {
+    if (!currentUser?.id) return
+    setTimesaversLoading(true)
+    try {
+      const [starred, pinned] = await Promise.all([
+        Storage.getStarredMessages(),
+        Storage.getPinnedChannels(),
+      ])
+      setStarredMessages(Array.isArray(starred) ? starred : [])
+      setPinnedChannels(Array.isArray(pinned) ? pinned : [])
+    } catch (error) {
+      console.error("Failed to load timesavers", error)
+    } finally {
+      setTimesaversLoading(false)
+    }
+  }, [currentUser?.id])
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id || !appDataReady) return
+    loadTimesavers()
+  }, [appDataReady, currentUser?.id, isAuthenticated, loadTimesavers])
+
+  const openStarredMessages = useCallback(() => {
+    setOpenContextId(null)
+    setActiveView("starred")
+    pushAppRoute("/starred")
+    if (isMobile) setMobileView("chat")
+  }, [isMobile])
+
+  const applyStarredRealtimeUpdate = useCallback(data => {
+    const action = data?.action
+    const payload = data?.payload
+    if (!action || !payload) return
+    if (data.kind === "starred_messages") {
+      setStarredMessages(prev => {
+        const list = Array.isArray(prev) ? prev : []
+        if (action === "unstar") {
+          return list.filter(item => String(item.messageId) !== String(payload.messageId))
+        }
+        if (action === "star" && payload.messageId) {
+          return [payload, ...list.filter(item => String(item.messageId) !== String(payload.messageId))]
+        }
+        return list
+      })
+    } else if (data.kind === "pinned_channels") {
+      setPinnedChannels(prev => {
+        const list = Array.isArray(prev) ? prev : []
+        if (action === "unpin") {
+          return list.filter(item => String(item.channelId) !== String(payload.channelId))
+        }
+        if (action === "pin" && payload.channelId) {
+          return [payload, ...list.filter(item => String(item.channelId) !== String(payload.channelId))]
+        }
+        return list
+      })
+    }
+  }, [])
+
+  const toggleMessageStar = useCallback(async message => {
+    if (!message?.id) return
+    const messageId = message.id
+    const isStarred = starredMessageKeySet.has(String(messageId))
+    try {
+      if (isStarred) {
+        setStarredMessages(prev => (prev || []).filter(item => String(item.messageId) !== String(messageId)))
+        await Storage.unstarMessage(messageId)
+      } else {
+        const item = await Storage.starMessage(messageId)
+        if (item) {
+          setStarredMessages(prev => [item, ...(prev || []).filter(existing => String(existing.messageId) !== String(item.messageId))])
+        } else {
+          await loadTimesavers()
+        }
+      }
+    } catch (error) {
+      console.error("Failed to toggle star", error)
+      await loadTimesavers()
+      if (error?.status === 403) setShowAccessDeniedModal(true)
+    }
+  }, [loadTimesavers, starredMessageKeySet])
+
+  const toggleChannelPin = useCallback(async (channelId) => {
+    if (!channelId) return
+    const isPinned = pinnedChannelIdSet.has(String(channelId))
+    try {
+      if (isPinned) {
+        setPinnedChannels(prev => (prev || []).filter(item => String(item.channelId) !== String(channelId)))
+        await Storage.unpinChannel(channelId)
+      } else {
+        const item = await Storage.pinChannel(channelId)
+        if (item) {
+          setPinnedChannels(prev => [item, ...(prev || []).filter(existing => String(existing.channelId) !== String(item.channelId))])
+        } else {
+          await loadTimesavers()
+        }
+      }
+    } catch (error) {
+      console.error("Failed to toggle channel pin", error)
+      await loadTimesavers()
+      if (error?.status === 403) setShowAccessDeniedModal(true)
+    }
+  }, [loadTimesavers, pinnedChannelIdSet])
+
+  const openStarredMessage = useCallback(item => {
+    if (!item) return
+    const messageId = item.messageId
+    const chatId = item.chatId || item.channelId
+
+    if (item.spaceId && item.channelId) {
+      handleChannelNavigation(item.spaceId, item.channelId)
+    } else if (typeof chatId === "string" && chatId.startsWith("dm_")) {
+      const parts = chatId.split("_")
+      const otherUserId = parts.find(part => part && part !== "dm" && String(part) !== String(currentUser?.id))
+      if (otherUserId) {
+        setActiveDMUser(otherUserId)
+        setHomeActiveDMUser(otherUserId)
+        setActiveView("dm")
+        setFriendsSidebarCollapsed(false)
+      }
+    }
+
+    if (messageId) {
+      setHighlightTerm("")
+      setTargetMessageId(messageId)
+      setPinnedMessageId(messageId)
+    }
+    if (isMobile) setMobileView("chat")
+  }, [currentUser?.id, handleChannelNavigation, isMobile])
+
   const handleFileSelect = async e => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true)
@@ -10488,7 +10667,7 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          sidebarCollapsed ? "w-[92px]" : "w-[272px]"
+          sidebarCollapsed ? "w-[76px]" : "w-[248px]"
         } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left z-[70]" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
@@ -10496,7 +10675,7 @@ export default function CollaborationApp() {
           <div className="swipe-indicator mt-2" />
         )}
         {/* ... (Sidebar Content) ... */}
-        <div className={`p-6 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[80px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
+        <div className={`px-4 py-3 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[60px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           {(!sidebarCollapsed || isMobile) && (
             <div
               className="flex items-center gap-3 animate-fade-in cursor-pointer group"
@@ -10512,7 +10691,7 @@ export default function CollaborationApp() {
               <SmartImage
                 src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
                 alt="Spaces logo"
-                className="h-8 w-auto object-contain"
+                className="h-7 w-auto object-contain"
                 loading="eager"
                 fetchPriority="high"
               />
@@ -10522,62 +10701,62 @@ export default function CollaborationApp() {
             {isMobile && (
               <button
                 onClick={() => { setActiveView("home"); setHomeSection("overview"); setMobileView("chat") }}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Home"
               >
-                <HomeIcon className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <HomeIcon className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {isMobile && (
               <button
                 onClick={() => { setActiveSpace(null); openTasksPage(); setMobileView('chat') }}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Tasks"
               >
-                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Create Space"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
               </button>
             )}
             {isMobile && (
               <button
                 onClick={() => setMobileView("chat")}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
               </button>
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => { setActiveView("home"); setHomeSection("overview") }}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Home"
               >
-                <HomeIcon className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <HomeIcon className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => { setActiveSpace(null); openTasksPage() }}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
                 title="Tasks"
               >
-                <ClipboardList className={`w-5 h-5 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
             {/* Admin dashboard access - visible to org admins of verified org */}
@@ -10592,33 +10771,33 @@ export default function CollaborationApp() {
                     setShowAdminDashboard(true)
                   }
                 }}
-                className="p-2 rounded-xl transition-colors hover:bg-slate-100 text-slate-400 hover:text-sky-600"
+                className="p-1.5 rounded-lg transition-colors hover:bg-slate-100 text-slate-400 hover:text-sky-600"
                 title="Admin Dashboard"
               >
-                <Grid3x3 className="w-5 h-5" />
+                <Grid3x3 className="w-4 h-4" />
               </button>
             )}
             {!isMobile && (
               <button
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400'}`}
               >
-                <Menu className="w-5 h-5" />
+                <Menu className="w-4 h-4" />
               </button>
             )}
           </div>
         </div>
 
         {(!sidebarCollapsed || isMobile) && (
-          <div className="px-5 pt-6 pb-2 animate-fade-in">
+          <div className="px-4 pt-4 pb-1 animate-fade-in">
             <div className="relative group">
-              <Search className="absolute left-4 top-3.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
+              <Search className="absolute left-3 top-2.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
               <input
                 type="text"
                 placeholder="Find a space..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all ease-in-out duration-300 ${
+                className={`w-full pl-9 pr-3 py-2 rounded-xl text-[13px] focus:outline-none transition-all ease-in-out duration-300 ${
                   isDarkMode
                     ? 'bg-slate-800/60 border border-slate-700/50 focus:bg-slate-800 focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500/50 text-slate-200 hover:bg-slate-800/80 placeholder:text-slate-500'
                     : 'bg-slate-100/60 border border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/25 focus:border-sky-300 text-slate-700 hover:bg-slate-100/80 hover:border-slate-200 placeholder:text-slate-400 shadow-sm'
@@ -10628,14 +10807,14 @@ export default function CollaborationApp() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-6">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3 space-y-4">
           {(!sidebarCollapsed || isMobile) ? (
             <div className="animate-fade-in">
               {/* Conditional Rendering: Show Search Results or Standard Tree */}
               {debouncedSearchQuery.trim().length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-2">
                   <div className="px-2 mb-1 flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                       Search Results
                     </span>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
@@ -10700,9 +10879,9 @@ export default function CollaborationApp() {
                             setActiveSpace(result.spaceId)
                           }
                         }}
-                        className="p-3 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
+                        className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
                       >
-                        <div className="flex items-center gap-3 mb-1">
+                        <div className="flex items-center gap-2 mb-1">
                           <span
                             className={`p-1.5 rounded-lg ${
                               result.type === "message"
@@ -10733,7 +10912,7 @@ export default function CollaborationApp() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-3">
                   <button
                     onClick={() => {
                       if (!googleCalendarToken) {
@@ -10743,36 +10922,98 @@ export default function CollaborationApp() {
                         setActiveSpace(null)
                       }
                     }}
-                    className={`w-full flex items-center gap-4 p-3 rounded-2xl cursor-pointer transition-all duration-300 mb-6 group hover-lift ${
+                    className={`w-full flex h-10 items-center gap-3 px-3 rounded-full cursor-pointer transition-colors duration-150 ease-in-out mb-3 group ${
                       activeView === "calendar"
                         ? (isDarkMode
-                            ? "bg-transparent border border-transparent text-slate-200"
-                            : "bg-gradient-to-r from-white to-sky-50/50 shadow-lg shadow-sky-100/50 border border-sky-100/80 ring-1 ring-sky-100 text-sky-600")
+                            ? "bg-[rgba(96,165,250,0.16)] text-slate-100"
+                            : "bg-[rgba(59,130,246,0.12)] text-sky-700")
                         : (isDarkMode
-                            ? "hover:bg-[#2C2C2C] border border-transparent text-slate-300"
-                            : "hover:bg-white/80 border border-transparent hover:border-slate-200/50 hover:shadow-md text-slate-600")
+                            ? "text-slate-300 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100"
+                            : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
                     }`}
                   >
                     <div
-                      className={`p-2.5 rounded-xl transition-all duration-300 ${
+                      className={`p-1.5 rounded-full transition-colors duration-150 ease-in-out ${
                         activeView === "calendar"
                           ? (isDarkMode
-                              ? "bg-[#2C2C2C] text-slate-200"
-                              : "bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-lg shadow-sky-300/50")
+                              ? "text-slate-100"
+                              : "text-sky-700")
                           : (isDarkMode
-                              ? "bg-transparent text-slate-400 group-hover:bg-[#2C2C2C] group-hover:text-slate-200"
-                              : "bg-slate-100/80 text-slate-500 group-hover:bg-gradient-to-br group-hover:from-sky-100 group-hover:to-cyan-100 group-hover:text-sky-600")
+                              ? "text-slate-400 group-hover:text-slate-100"
+                              : "text-slate-500 group-hover:text-slate-900")
                       }`}
                     >
-                      <Calendar className="w-5 h-5" />
+                      <Calendar className="w-4 h-4" />
                     </div>
-                    <span className="font-bold text-sm tracking-wide">
+                    <span className="font-semibold text-[13px] tracking-normal">
                       Calendar
                     </span>
                   </button>
 
-                  <div className="px-2 mb-3 flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <div className="px-2 mb-1 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Timesavers
+                    </span>
+                    {timesaversLoading && (
+                      <Loader2 className={`h-3.5 w-3.5 animate-spin ${isDarkMode ? "text-slate-500" : "text-slate-400"}`} />
+                    )}
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <button
+                      onClick={openStarredMessages}
+                      className={`flex h-8 w-full items-center gap-2.5 rounded-full px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
+                        activeView === "starred"
+                          ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
+                          : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
+                      }`}
+                    >
+                      <Star className={`h-3.5 w-3.5 ${activeView === "starred" ? "fill-current" : ""}`} />
+                      <span className="min-w-0 flex-1 truncate text-left">Starred</span>
+                      {starredMessages.length > 0 && (
+                        <span className={`text-[10px] font-semibold ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                          {starredMessages.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {pinnedChannels.length > 0 && (
+                      <div className="pt-0.5">
+                        <div className="px-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          Pinned channels
+                        </div>
+                        <div className="space-y-0.5">
+                          {pinnedChannels.map(item => {
+                            const isActivePinned =
+                              activeView === "channel" &&
+                              String(activeChannel) === String(item.channelId)
+                            return (
+                              <button
+                                key={`pinned-${item.spaceId}-${item.channelId}`}
+                                onClick={() => handleChannelNavigation(item.spaceId, item.channelId)}
+                                className={`flex h-8 w-full items-center gap-2.5 rounded-full px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
+                                  isActivePinned
+                                    ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
+                                    : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
+                                }`}
+                                title={`${item.spaceName || "Space"} / #${item.channelName || "channel"}`}
+                              >
+                                <Hash className={`h-3.5 w-3.5 ${isActivePinned ? (isDarkMode ? "text-slate-100" : "text-sky-700") : ""}`} />
+                                <span className="min-w-0 flex-1 truncate text-left">{item.channelName || "channel"}</span>
+                                {unreadChannels.some(id => String(id) === String(item.channelId)) &&
+                                  String(activeChannel) !== String(item.channelId) && (
+                                    <span className="h-1.5 w-1.5 rounded-full bg-sky-600" />
+                                  )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="px-2 mb-1 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                       Your Spaces
                     </span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
@@ -10781,37 +11022,35 @@ export default function CollaborationApp() {
                   </div>
 
                   {spaces.map(space => (
-                    <div key={space.id} className="mb-2">
+                    <div key={space.id} className="mb-1">
                       <div
-                        className={`flex items-center gap-2 p-3 rounded-[10px] cursor-pointer transition-colors duration-200 group ${
+                        className={`flex h-9 items-center gap-2 px-2 rounded-full cursor-pointer transition-colors duration-150 ease-in-out group ${
                             activeView === "channel" && activeSpace === space.id
                               ? (isDarkMode
-                                  ? "bg-[#2C2C2C] border border-slate-700/70 text-white"
-                              : "bg-[#f4f7fb] border border-slate-200/80 text-slate-900")
+                                  ? "bg-[rgba(96,165,250,0.16)] text-slate-100"
+                                  : "bg-[rgba(59,130,246,0.12)] text-slate-900")
                               : (isDarkMode
-                                  ? "bg-transparent border border-transparent hover:bg-[#2C2C2C] hover:border-slate-700/60"
-                                  : "bg-transparent border border-transparent hover:bg-[#f4f7fb] hover:border-slate-200/70")
+                                  ? "bg-transparent text-slate-300 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100"
+                                  : "bg-transparent text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
                           }`}
                         onClick={() => {
-                          setActiveSpace(space.id)
-                          setActiveView("channel")
                           toggleSpaceExpansion(space.id)
                         }}
                       >
                         <span
-                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-                            activeSpace === space.id
-                              ? (isDarkMode ? "bg-[#3A3A3A] text-white" : "bg-white text-slate-700")
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                            activeView === "channel" && activeSpace === space.id
+                              ? (isDarkMode ? "bg-white/10 text-slate-100" : "bg-white/70 text-slate-700")
                               : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
                           }`}
                         >
-                          <SpaceFolderIcon isDarkMode={isDarkMode} className="h-5 w-5" />
+                          <SpaceFolderIcon isDarkMode={isDarkMode} className="h-4 w-4" />
                         </span>
                         <span
-                          className={`font-semibold text-sm truncate flex-1 transition-colors ${
-                            activeSpace === space.id
-                              ? (isDarkMode ? "text-white" : "text-slate-900")
-                              : (isDarkMode ? "text-white" : "text-slate-600")
+                          className={`font-semibold text-[13px] truncate flex-1 transition-colors ${
+                            activeView === "channel" && activeSpace === space.id
+                              ? (isDarkMode ? "text-slate-100" : "text-slate-900")
+                              : (isDarkMode ? "text-slate-300 group-hover:text-slate-100" : "text-slate-600 group-hover:text-slate-900")
                           }`}
                         >
                           {space.name}
@@ -10852,7 +11091,7 @@ export default function CollaborationApp() {
                       </div>
 
                       {space.expanded && (
-                        <div className="ml-6 pl-4 border-l-2 mt-2 space-y-1 border-slate-100">
+                        <div className="ml-5 pl-3 border-l-2 mt-1 space-y-0.5 border-slate-100">
                           {(space.channels || []).filter(channel => {
                             const chMembers = channel?.members || []
                             if (chMembers && chMembers.length > 0) {
@@ -10871,26 +11110,37 @@ export default function CollaborationApp() {
                               key={channel.id}
                               className="relative group/channel"
                             >
-                              <button
+                              {(() => {
+                                const isPinnedChannel = pinnedChannelIdSet.has(String(channel.id))
+                                return (
+                              <div
+                                role="button"
+                                tabIndex={0}
                                 onClick={() =>
                                   handleChannelNavigation(space.id, channel.id)
                                 }
-                                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-[10px] text-[13px] font-medium transition-all duration-200 ${
+                                onKeyDown={event => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault()
+                                    handleChannelNavigation(space.id, channel.id)
+                                  }
+                                }}
+                                className={`flex h-8 items-center gap-2.5 w-full px-2.5 rounded-full text-[13px] font-medium transition-colors duration-150 ease-in-out ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
                                     ? (isDarkMode
-                                        ? "bg-[#2C2C2C] text-slate-200"
-                                        : "bg-[#f4f7fb] text-slate-700 shadow-sm")
+                                        ? "bg-[rgba(96,165,250,0.16)] text-slate-100"
+                                        : "bg-[rgba(59,130,246,0.12)] text-sky-800")
                                     : (isDarkMode
-                                        ? "text-slate-400 hover:text-slate-200 hover:bg-[#2C2C2C] hover:shadow-sm"
-                                        : "text-slate-500 hover:text-slate-800 hover:bg-[#f4f7fb] hover:shadow-sm")
+                                        ? "text-slate-400 hover:text-slate-100 hover:bg-[rgba(255,255,255,0.06)]"
+                                        : "text-slate-500 hover:text-slate-900 hover:bg-[rgba(15,23,42,0.06)]")
                                 }`} 
                               >
                                 <Hash
-                                  className={`w-4 h-4 transition-colors ${
+                                  className={`w-3.5 h-3.5 transition-colors ${
                                     activeChannel === channel.id
-                                      ? (isDarkMode ? "text-slate-200" : "text-slate-600")
-                                      : (isDarkMode ? "text-slate-400 group-hover/channel:text-slate-200" : "text-slate-300 group-hover/channel:text-sky-400")
+                                      ? (isDarkMode ? "text-slate-100" : "text-sky-700")
+                                      : (isDarkMode ? "text-slate-400 group-hover/channel:text-slate-100" : "text-slate-300 group-hover/channel:text-slate-700")
                                   }`} 
                                 />
                                 <span className="truncate flex-1 text-left">
@@ -10900,8 +11150,33 @@ export default function CollaborationApp() {
                                 {/* Unread Indicator */}
                                 {unreadChannels.some(id => String(id) === String(channel.id)) &&
                                   String(activeChannel) !== String(channel.id) && (
-                                    <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full mr-1 bg-[#2C2C2C]"></div>
                                   )}
+
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  className={`${isPinnedChannel ? "flex" : "hidden group-hover/channel:flex"} h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                                    isPinnedChannel
+                                      ? (isDarkMode ? "text-sky-300 hover:bg-white/10" : "text-sky-600 hover:bg-slate-200/70")
+                                      : (isDarkMode ? "text-slate-500 hover:bg-white/10 hover:text-slate-200" : "text-slate-300 hover:bg-slate-200/70 hover:text-slate-600")
+                                  }`}
+                                  title={isPinnedChannel ? "Unpin channel" : "Pin channel"}
+                                  aria-label={isPinnedChannel ? "Unpin channel" : "Pin channel"}
+                                  onClick={event => {
+                                    event.stopPropagation()
+                                    toggleChannelPin(channel.id)
+                                  }}
+                                  onKeyDown={event => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      toggleChannelPin(channel.id)
+                                    }
+                                  }}
+                                >
+                                  <Pin className={`h-3.5 w-3.5 ${isPinnedChannel ? "fill-current" : ""}`} />
+                                </span>
 
                                 {space.ownerId === currentUser?.id && (
                                   <div className="hidden group-hover/channel:flex items-center gap-1">
@@ -10932,7 +11207,9 @@ export default function CollaborationApp() {
                                     </span>
                                   </div>
                                 )}
-                              </button>
+                              </div>
+                                )
+                              })()}
                             </div>
                           ))}
                           {space.ownerId === currentUser?.id && (
@@ -10941,9 +11218,13 @@ export default function CollaborationApp() {
                                 setActiveSpace(space.id)
                                 setShowChannelModal(true)
                               }}
-                              className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-[13px] transition-all group mt-1 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
+                              className={`flex h-8 items-center gap-2.5 w-full px-2.5 rounded-full text-[13px] transition-colors duration-150 ease-in-out group mt-1 ${
+                                isDarkMode
+                                  ? "text-slate-400 hover:text-slate-100 hover:bg-[rgba(255,255,255,0.06)]"
+                                  : "text-slate-400 hover:text-slate-900 hover:bg-[rgba(15,23,42,0.06)]"
+                              }`}
                             >
-                              <Plus className="w-4 h-4" />
+                              <Plus className="w-3.5 h-3.5" />
                               <span>Add channel</span>
                             </button>
                           )}
@@ -10955,7 +11236,7 @@ export default function CollaborationApp() {
               )}
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
+            <div className="flex flex-col items-center gap-2 mt-1 animate-fade-in">
               <button
                 onClick={() => {
                   if (!googleCalendarToken) {
@@ -10965,26 +11246,26 @@ export default function CollaborationApp() {
                     setActiveSpace(null)
                   }
                 }}
-                className={`p-3 rounded-2xl transition-all duration-300 ${
+                className={`p-2.5 rounded-[14px] transition-colors duration-150 ease-in-out ${
                   activeView === "calendar"
-                    ? "bg-sky-600 text-white shadow-lg shadow-sky-500/30"
-                    : (isDarkMode ? "bg-transparent text-slate-400 hover:bg-[#2C2C2C]" : "bg-slate-100 text-slate-500 hover:bg-white hover:shadow-md")
+                    ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-700")
+                    : (isDarkMode ? "bg-transparent text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-500 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
                 }`}
                 title="Calendar"
               >
-                <Calendar className="w-5 h-5" />
+                <Calendar className="w-4 h-4" />
               </button>
-              <div className="w-8 h-px my-2 bg-slate-200"></div>
+              <div className="w-7 h-px my-1 bg-slate-200"></div>
               {spaces.map(s => {
                 const accessibleChannels = getAccessibleChannelsForSpace(s)
                 const isMenuOpen = collapsedSpaceMenu?.spaceId === s.id
                 return (
                   <button
                     key={s.id}
-                    className={`w-11 h-11 flex items-center justify-center rounded-[10px] transition-all duration-300 relative ${
+                    className={`w-9 h-9 flex items-center justify-center rounded-[14px] transition-colors duration-150 ease-in-out relative ${
                       activeSpace === s.id || isMenuOpen
-                        ? (isDarkMode ? 'bg-transparent' : 'bg-[#f4f7fb]')
-                        : (isDarkMode ? 'hover:bg-[#2C2C2C]' : 'hover:bg-[#f4f7fb]')
+                        ? (isDarkMode ? 'bg-[rgba(96,165,250,0.16)]' : 'bg-[rgba(59,130,246,0.12)]')
+                        : (isDarkMode ? 'hover:bg-[rgba(255,255,255,0.06)]' : 'hover:bg-[rgba(15,23,42,0.06)]')
                     }`}
                     title={s.name}
                     onClick={event => {
@@ -10998,17 +11279,23 @@ export default function CollaborationApp() {
                       openCollapsedSpaceMenu(s, event)
                     }}
                   >
-                    <span className="flex h-7 w-7 items-center justify-center">
-                      <SpaceFolderIcon isDarkMode={isDarkMode} className="h-6 w-6" />
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold uppercase ${
+                        activeSpace === s.id || isMenuOpen
+                          ? (isDarkMode ? "bg-white/10 text-slate-100" : "bg-white/70 text-sky-700")
+                          : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-600")
+                      }`}
+                    >
+                      {(s.name || "?").trim().charAt(0) || "?"}
                     </span>
                   </button>
                 )
               })}
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
-                className="p-3 rounded-2xl border-2 border-dashed transition-all border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500"
+                className="p-2.5 rounded-xl border border-dashed transition-all border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -11257,6 +11544,86 @@ export default function CollaborationApp() {
                   )
                 })}
               </div>
+            </div>
+          </div>
+        ) : activeView === "starred" ? (
+          <div className={`flex-1 overflow-hidden ${isDarkMode ? "bg-[#0d0001] text-slate-100" : "bg-white text-slate-900"}`}>
+            <div className={`h-[80px] flex items-center justify-between px-8 border-b ${isDarkMode ? "border-white/10" : "border-slate-200/70"}`}>
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                  isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-sky-200" : "bg-[rgba(59,130,246,0.12)] text-sky-700"
+                }`}>
+                  <Star className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold">Starred messages</h2>
+                  <p className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                    {starredMessages.length ? `${starredMessages.length} saved message${starredMessages.length === 1 ? "" : "s"}` : "No starred messages yet"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-[calc(100%-80px)] overflow-y-auto px-6 py-5">
+              {starredMessages.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center">
+                    <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
+                      isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-slate-100 text-slate-400"
+                    }`}>
+                      <Star className="h-7 w-7" />
+                    </div>
+                    <div className={`text-sm font-semibold ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>No starred messages yet</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-auto max-w-4xl space-y-2">
+                  {starredMessages.map(item => {
+                    const message = item.message || {}
+                    const preview = String(message.text || "Attachment").replace(/\s+/g, " ").trim()
+                    const dateLabel = formatDateLabel(message.timestamp || item.createdAt, timeTicker)
+                    const senderName = item.sender?.name || "Unknown user"
+                    const contextLabel = [item.spaceName, item.channelName ? `#${item.channelName}` : ""].filter(Boolean).join(" / ")
+                    return (
+                      <article
+                        key={`starred-${item.chatId}-${item.messageId}`}
+                        onClick={() => openStarredMessage(item)}
+                        className={`group flex cursor-pointer items-start gap-3 rounded-2xl px-4 py-3 transition-colors ${
+                          isDarkMode ? "hover:bg-white/[0.06]" : "hover:bg-slate-100"
+                        }`}
+                      >
+                        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                          isDarkMode ? "bg-amber-400/15 text-amber-300" : "bg-amber-50 text-amber-500"
+                        }`}>
+                          <Star className="h-4 w-4 fill-current" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`truncate text-sm font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>{senderName}</span>
+                            <span className={`shrink-0 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{dateLabel}</span>
+                          </div>
+                          <div className={`mt-0.5 truncate text-sm ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>{preview}</div>
+                          <div className={`mt-1 truncate text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{contextLabel}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation()
+                            toggleMessageStar({ id: item.messageId })
+                          }}
+                          className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${
+                            isDarkMode ? "text-slate-400 hover:bg-white/10 hover:text-slate-100" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                          }`}
+                          aria-label="Unstar message"
+                          title="Unstar message"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </article>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         ) : activeView === "contexts" ? (
@@ -12136,6 +12503,7 @@ export default function CollaborationApp() {
                         const isEditingThisMessage = editingMessageId === msg.id
                         const isActionMenuOpen = messageActionMenu?.messageId === msg.id
                         const isContextPickerOpen = messageContextPicker?.messageId === msg.id
+                        const isMessageStarred = starredMessageKeySet.has(String(msg.id))
                         const isAttachmentOnlyMessage =
                           Array.isArray(msg.attachments) &&
                           msg.attachments.length > 0 &&
@@ -12269,6 +12637,16 @@ export default function CollaborationApp() {
                                   }`}
                                   onClick={e => e.stopPropagation()}
                                 >
+                                  {isMessageStarred && (
+                                    <span
+                                      className={`mb-1 flex h-7 w-7 items-center justify-center rounded-full ${
+                                        isDarkMode ? "bg-amber-400/15 text-amber-300" : "bg-amber-50 text-amber-500"
+                                      }`}
+                                      title="Starred"
+                                    >
+                                      <Star className="h-3.5 w-3.5 fill-current" />
+                                    </span>
+                                  )}
                                   <MessageActionButton
                                     buttonRef={node => {
                                       if (node) {
@@ -12297,6 +12675,7 @@ export default function CollaborationApp() {
                                         preferredAlign={isChannelFeed ? "left" : "right"}
                                         isDarkMode={isDarkMode}
                                         isSelected={isMessageSelected}
+                                        isStarred={isMessageStarred}
                                         emojis={EMOJIS}
                                         onClose={() => setMessageActionMenu(null)}
                                         onReact={emoji => {
@@ -12326,6 +12705,10 @@ export default function CollaborationApp() {
                                         onAddToContext={() => {
                                           setMessageActionMenu(null)
                                           setMessageContextPicker({ messageId: msg.id })
+                                        }}
+                                        onToggleStar={() => {
+                                          toggleMessageStar(msg)
+                                          setMessageActionMenu(null)
                                         }}
                                         onMarkDecision={activeView === "channel" ? (() => {
                                           markMessageDecision(msg)

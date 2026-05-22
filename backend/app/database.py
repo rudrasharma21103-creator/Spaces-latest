@@ -37,6 +37,8 @@ files_collection = db["files"]
 drafts_collection = db["drafts"]
 organizations_collection = db["organizations"]
 gmail_docs_collection = db["gmail_docs"]
+starred_messages_collection = db["starred_messages"]
+pinned_channels_collection = db["pinned_channels"]
 logger = logging.getLogger("app.database")
 
 
@@ -199,6 +201,12 @@ try:
     messages_collection.create_index("message.id")
     messages_collection.create_index([("chatId", 1), ("message.id", 1)])
     messages_collection.create_index([("chatId", 1), ("message.timestamp", 1)])
+
+    starred_messages_collection.create_index([("userId", 1), ("createdAt", -1)])
+    starred_messages_collection.create_index([("userId", 1), ("messageId", 1), ("chatId", 1)], unique=True)
+
+    pinned_channels_collection.create_index([("userId", 1), ("createdAt", -1)])
+    pinned_channels_collection.create_index([("userId", 1), ("channelId", 1)], unique=True)
 
     contexts_collection.create_index("chatId", unique=True)
 

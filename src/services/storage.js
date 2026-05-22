@@ -901,6 +901,84 @@ export const deleteMessageAttachment = async (chatId, messageId, attachmentId) =
   return data
 }
 
+export const getStarredMessages = async () => {
+  const res = await authFetch(`${API_BASE}/me/starred-messages`)
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to load starred messages (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return ensureArray(data)
+}
+
+export const starMessage = async messageId => {
+  if (!messageId) return null
+  const res = await authFetch(`${API_BASE}/messages/${encodeURIComponent(String(messageId))}/star`, {
+    method: "POST",
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to star message (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return data?.item || null
+}
+
+export const unstarMessage = async messageId => {
+  if (!messageId) return null
+  const res = await authFetch(`${API_BASE}/messages/${encodeURIComponent(String(messageId))}/star`, {
+    method: "DELETE",
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to unstar message (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return data || { status: "unstarred" }
+}
+
+export const getPinnedChannels = async () => {
+  const res = await authFetch(`${API_BASE}/me/pinned-channels`)
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to load pinned channels (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return ensureArray(data)
+}
+
+export const pinChannel = async channelId => {
+  if (!channelId) return null
+  const res = await authFetch(`${API_BASE}/channels/${encodeURIComponent(String(channelId))}/pin`, {
+    method: "POST",
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to pin channel (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return data?.item || null
+}
+
+export const unpinChannel = async channelId => {
+  if (!channelId) return null
+  const res = await authFetch(`${API_BASE}/channels/${encodeURIComponent(String(channelId))}/pin`, {
+    method: "DELETE",
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    const error = new Error(data?.detail || `Failed to unpin channel (${res.status})`)
+    error.status = res.status
+    throw error
+  }
+  return data || { status: "unpinned" }
+}
+
 export const getContextState = async chatId => {
   if (!chatId) return { chatId: null, contexts: [], decisions: [], tasks: [] }
   const requestKey = String(chatId)

@@ -19,6 +19,7 @@ import {
   Presentation,
   Search,
   Sparkles,
+  Star,
   Trash2,
   Users,
   X,
@@ -362,6 +363,8 @@ export function MessageActionsMenu({
   onToggleSelection,
   onCreateContext,
   onAddToContext,
+  onToggleStar,
+  isStarred = false,
   onMarkDecision,
   onCreateTask,
 }) {
@@ -468,6 +471,8 @@ export function MessageActionsMenu({
     onToggleSelection,
     onCreateContext,
     onAddToContext,
+    onToggleStar,
+    isStarred,
     onMarkDecision,
     onCreateTask,
   ])
@@ -526,6 +531,7 @@ export function MessageActionsMenu({
       : null,
     onCreateContext ? { key: "create-context", label: "Create context", icon: Sparkles, onClick: onCreateContext } : null,
     onAddToContext ? { key: "add-context", label: "Add to context", icon: FolderOpen, onClick: onAddToContext } : null,
+    onToggleStar ? { key: "star", label: isStarred ? "Unstar message" : "Star message", icon: Star, onClick: onToggleStar } : null,
     onMarkDecision ? { key: "decision", label: "Mark as decision", icon: Check, onClick: onMarkDecision } : null,
     onCreateTask ? { key: "task", label: "Create task", icon: Plus, onClick: onCreateTask } : null,
   ].filter(Boolean)
