@@ -12110,7 +12110,7 @@ export default function CollaborationApp() {
 
             {/* Header - Mobile */}
             {isMobile && (
-              <div className={`h-[70px] fixed top-0 left-0 right-0 z-[60] flex items-center justify-between gap-2 px-3 border-b backdrop-blur-xl shadow-sm safe-area-top ${
+              <div className={`workspace-mobile-header h-[64px] fixed top-0 left-0 right-0 z-[60] flex items-center justify-between gap-2 px-3 border-b backdrop-blur-xl shadow-sm safe-area-top ${
                 isDarkMode 
                   ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/30' 
                   : 'bg-white/95 border-slate-200/60 shadow-slate-100/50'
@@ -12118,7 +12118,7 @@ export default function CollaborationApp() {
                 {/* Left: Profile & Context */}
                 <div 
                   onClick={() => setShowMemberDetails(prev => !prev)}
-                  className="flex-1 min-w-0 flex items-center gap-3 cursor-pointer touch-active"
+                  className="workspace-mobile-title flex-1 min-w-0 flex items-center gap-3 cursor-pointer touch-active"
                 >
                   {activeView === "dm" ? (
                     <div className="flex items-center gap-3 min-w-0">
@@ -12149,8 +12149,8 @@ export default function CollaborationApp() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3">
-                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 ${
+                    <div className="flex min-w-0 w-full items-center gap-2.5">
+                      <div className={`workspace-mobile-channel-icon w-10 h-10 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 ${
                         isDarkMode 
                           ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-300 border border-slate-600' 
                           : 'bg-gradient-to-br from-slate-100 to-slate-50 text-slate-600 border border-slate-200/50'
@@ -12158,10 +12158,10 @@ export default function CollaborationApp() {
                         <Hash className="w-5 h-5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h2 className={`font-bold text-[15px] leading-tight flex items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                          <span className={`font-medium text-xs truncate max-w-[70px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{currentSpace?.name}</span>
+                        <h2 className={`workspace-mobile-channel-name font-bold text-[15px] leading-tight flex min-w-0 items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                          <span className={`font-medium text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{currentSpace?.name}</span>
                           <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
-                          <span className="truncate max-w-[100px]">{getActiveViewName().replace("#", "")}</span>
+                          <span className="truncate">{getActiveViewName().replace("#", "")}</span>
                         </h2>
                         <p className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                           <Users className="w-3 h-3" /> {activeMembers.length} members
@@ -12172,11 +12172,11 @@ export default function CollaborationApp() {
                 </div>
 
                 {/* Right: Action Icons & Menu */}
-                <div className="flex items-center gap-1 flex-shrink-0 relative z-10">
+                <div className="workspace-mobile-actions flex items-center gap-1 flex-shrink-0 relative z-10">
                   {/* Docs Icon */}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDocsClick(); }}
-                    className={`p-2.5 rounded-xl transition-all relative touch-active ${
+                    className={`workspace-mobile-action p-2.5 rounded-xl transition-all relative touch-active ${
                       isDarkMode 
                         ? 'bg-slate-800 text-[#c9d3df] active:bg-slate-700' 
                         : 'bg-slate-50 text-[#475569] active:bg-sky-50'
@@ -12210,7 +12210,7 @@ export default function CollaborationApp() {
                             setShowVideoModal(true)
                           }
                         }}
-                        className={`p-2.5 rounded-xl transition-all touch-active ${
+                        className={`workspace-mobile-action p-2.5 rounded-xl transition-all touch-active ${
                           isDarkMode 
                             ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
                             : 'bg-slate-50 text-slate-500 active:bg-sky-50'
@@ -12240,7 +12240,7 @@ export default function CollaborationApp() {
                           setShowAddToSpaceModal(true)
                         }}
                         disabled={!canInvite}
-                        className={`p-2.5 rounded-xl transition-all shadow-md touch-active ${canInvite ? (isDarkMode ? 'text-white bg-gradient-to-r from-sky-600 to-cyan-600 shadow-sky-500/30 active:from-sky-500 active:to-cyan-500' : 'text-white bg-gradient-to-r from-sky-500 to-cyan-500 shadow-sky-200/50 active:from-sky-600 active:to-cyan-600') : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
+                        className={`workspace-mobile-action p-2.5 rounded-xl transition-all shadow-md touch-active ${canInvite ? (isDarkMode ? 'text-white bg-gradient-to-r from-sky-600 to-cyan-600 shadow-sky-500/30 active:from-sky-500 active:to-cyan-500' : 'text-white bg-gradient-to-r from-sky-500 to-cyan-500 shadow-sky-200/50 active:from-sky-600 active:to-cyan-600') : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
                         title="Add people"
                         aria-label="Add people to this channel"
                       >
@@ -12254,7 +12254,7 @@ export default function CollaborationApp() {
                     <button
                       type="button"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMobileDrawer(prev => !prev); }}
-                      className={`p-2.5 rounded-xl transition-all touch-active ${
+                      className={`workspace-mobile-action p-2.5 rounded-xl transition-all touch-active ${
                         isDarkMode 
                           ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
                           : 'bg-slate-50 text-slate-500 active:bg-sky-50'
@@ -12384,7 +12384,7 @@ export default function CollaborationApp() {
 
             {/* Messages / Chat Area */}
             {/* ... (Chat Area Code) ... */}
-            <div className={`flex-1 flex min-h-0 overflow-hidden liquid-glass-chat-area workspace-chat-panel relative ${isMobile ? 'mt-[70px]' : ''}`}>
+            <div className={`flex-1 flex min-h-0 overflow-hidden liquid-glass-chat-area workspace-chat-panel relative ${isMobile ? 'mt-[64px]' : ''}`}>
               <div className={`flex-1 flex flex-col min-w-0 ${activeView === 'dm' ? (isDarkMode ? 'dm-chat-background-dark' : 'dm-chat-background') : (isDarkMode ? 'channel-chat-background-dark' : 'channel-chat-background')}`}>
                 {isMobile && activeView === "channel" && (
                   <ChannelTabs
@@ -13365,7 +13365,7 @@ export default function CollaborationApp() {
                       <div className="relative flex-1">
                         {composerIsEmpty && (
                           <span
-                            className={`pointer-events-none absolute left-0 ${isMobile ? "top-2.5 text-sm" : "top-3.5"} font-medium ${
+                            className={`pointer-events-none absolute left-0 right-1 truncate ${isMobile ? "top-2.5 text-sm" : "top-3.5"} font-medium ${
                               isDarkMode ? 'text-slate-500' : 'text-slate-400'
                             }`}
                           >

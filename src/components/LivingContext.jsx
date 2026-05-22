@@ -263,6 +263,42 @@ function FilePreview({ file, isDarkMode, variant = "card" }) {
   )
 }
 
+const CHANNEL_TAB_ICONS = {
+  messages: MessageSquare,
+}
+
+const CHANNEL_TAB_ASSETS = {
+  contexts: {
+    light: "/Context%20icon%20light%20theme.png",
+    dark: "/Context%20icon%20dark%20theme.png",
+  },
+  files: {
+    light: "/channel%20files%20light%20theme%20icon.png",
+    dark: "/channel%20files%20dark%20theme%20icon.png",
+  },
+  decisions: {
+    light: "/decisions%20icon%20light%20theme.png",
+    dark: "/decisions%20icon%20dark%20theme.png",
+  },
+}
+
+function ChannelTabIcon({ tab, isDarkMode, className = "h-4 w-4" }) {
+  const asset = CHANNEL_TAB_ASSETS[tab]
+  if (asset) {
+    return (
+      <img
+        src={isDarkMode ? asset.dark : asset.light}
+        alt=""
+        aria-hidden="true"
+        className={`${className} object-contain`}
+      />
+    )
+  }
+
+  const TabIcon = CHANNEL_TAB_ICONS[tab] || MessageSquare
+  return <TabIcon className={className} />
+}
+
 export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TABS }) {
   const [menuOpen, setMenuOpen] = React.useState(false)
   const menuRef = React.useRef(null)
@@ -296,7 +332,27 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TA
 
   return (
     <div className="workspace-channel-tabs mx-4 mb-0.5 px-0 sm:mx-6">
-      <div ref={menuRef} className="workspace-channel-tabs-menu relative inline-flex">
+      <div className={`workspace-channel-tabs-row md:hidden ${isDarkMode ? "is-dark" : "is-light"}`}>
+        {tabs.map(tab => {
+          const active = activeTab === tab
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => handleSelect(tab)}
+              className={`workspace-channel-tab-button ${active ? "active" : ""}`}
+              aria-label={tab}
+              aria-pressed={active}
+              title={tab}
+            >
+              <ChannelTabIcon tab={tab} isDarkMode={isDarkMode} className="h-4 w-4" />
+              <span className="workspace-channel-tab-label">{tab}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div ref={menuRef} className="workspace-channel-tabs-menu relative hidden md:inline-flex">
         <button
           type="button"
           onClick={() => setMenuOpen(open => !open)}
@@ -337,7 +393,10 @@ export function ChannelTabs({ activeTab, isDarkMode, onChange, tabs = CHANNEL_TA
                   }`}
                   role="menuitem"
                 >
-                  <span>{tab}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ChannelTabIcon tab={tab} isDarkMode={isDarkMode} className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{tab}</span>
+                  </span>
                   {active && <Check className="h-4 w-4" />}
                 </button>
               )
