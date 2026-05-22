@@ -321,6 +321,21 @@ const dedupeMessagesById = messages => {
   return [...byId.values(), ...withoutIds]
 }
 
+const isRenderableChatMessagePayload = data => {
+  if (!data || typeof data !== "object") return false
+
+  const hasMessageId = data.id != null || data._id != null || data.localId != null
+  const hasSender = data.userId != null || data.senderId != null || data.createdBy != null
+  const hasMessageContent =
+    typeof data.text === "string" ||
+    Array.isArray(data.attachments) ||
+    Boolean(data.meetLink) ||
+    Boolean(data.task) ||
+    data.type === "meet-invite"
+
+  return Boolean(hasMessageId && (hasSender || hasMessageContent))
+}
+
 function getAttachmentCacheKey(att) {
   if (!att) return null
 
@@ -2903,6 +2918,15 @@ export default function CollaborationApp() {
         setSelectedMessageIds(prev =>
           prev.filter(messageId => String(messageId) !== String(data.messageId))
         )
+        return
+      }
+
+      if (data.type === "timesavers_updated") {
+        applyStarredRealtimeUpdate(data)
+        return
+      }
+
+      if (!isRenderableChatMessagePayload(data)) {
         return
       }
 
@@ -7015,6 +7039,10 @@ export default function CollaborationApp() {
 
   const toggleChannelPin = useCallback(async (channelId) => {
     if (!channelId) return
+    setMessageActionMenu(null)
+    setMessageContextPicker(null)
+    setComposerAttachMenuOpen(false)
+    setComposerContextPickerOpen(false)
     const isPinned = pinnedChannelIdSet.has(String(channelId))
     try {
       if (isPinned) {
