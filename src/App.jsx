@@ -152,6 +152,27 @@ try {
 
 const CONTEXT_ROUTE_STATE_KEY = "spacexyz_context_route_state"
 const NAVIGATION_STATE_KEY = "spacexyz_navigation_state"
+const READ_MESSAGE_COUNTS_KEY = "spacexyz_read_message_counts"
+
+const getReadMessageCountsStorageKey = userId => `${READ_MESSAGE_COUNTS_KEY}_${userId || "anonymous"}`
+
+const readStoredMessageCounts = userId => {
+  if (!userId || typeof window === "undefined") return {}
+  try {
+    const stored = window.localStorage.getItem(getReadMessageCountsStorageKey(userId))
+    const parsed = stored ? JSON.parse(stored) : {}
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const writeStoredMessageCounts = (userId, counts) => {
+  if (!userId || typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(getReadMessageCountsStorageKey(userId), JSON.stringify(counts || {}))
+  } catch {}
+}
 
 const slugifyRoutePart = value => {
   const text = String(value ?? "").trim()
@@ -418,7 +439,23 @@ export default function CollaborationApp() {
 
   const [messages, setMessages] = useState({})
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
-  const [messageCounts, setMessageCounts] = useState({}) // Track counts to detect changes
+  const [, setMessageCounts] = useState({}) // Track counts to detect changes
+  const readMessageCountsRef = useRef({})
+
+  const markChannelRead = React.useCallback((channelId, count = 0) => {
+    if (!channelId || !currentUser?.id) return
+    const key = String(channelId)
+    const normalizedCount = Math.max(Number(count) || 0, 0)
+    const nextReadCounts = {
+      ...readMessageCountsRef.current,
+      [key]: normalizedCount,
+    }
+
+    readMessageCountsRef.current = nextReadCounts
+    writeStoredMessageCounts(currentUser.id, nextReadCounts)
+    setMessageCounts(prev => ({ ...prev, [key]: normalizedCount }))
+    setUnreadChannels(prev => prev.filter(id => String(id) !== key))
+  }, [currentUser?.id])
 
   const protectedAppBooting = isAuthenticated && (!currentUser?.id || !appDataReady || !routeReady)
   const restoreSplashActive = restoreSplashEnabled && (authInitializing || authPending || protectedAppBooting)
@@ -452,6 +489,20 @@ export default function CollaborationApp() {
       if (hideTimer) window.clearTimeout(hideTimer)
     }
   }, [restoreSplashActive, restoreSplashEnabled, restoreSplashVisible])
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      readMessageCountsRef.current = {}
+      setMessageCounts({})
+      setUnreadChannels([])
+      return
+    }
+
+    const storedReadCounts = readStoredMessageCounts(currentUser.id)
+    readMessageCountsRef.current = storedReadCounts
+    setMessageCounts(storedReadCounts)
+    setUnreadChannels([])
+  }, [currentUser?.id])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
@@ -2006,14 +2057,34 @@ export default function CollaborationApp() {
 
           for (const { channelId, count } of channelCounts) {
             if (!Number.isFinite(count)) continue
-            const prevCount = messageCounts[channelId] || 0
-            if (count > prevCount && !unreadChannels.includes(channelId)) {
-              setUnreadChannels(prev => [...prev, channelId])
+            const key = String(channelId)
+            const nextReadCounts = { ...readMessageCountsRef.current }
+            const readCount = Number(nextReadCounts[key])
+
+            if (!Number.isFinite(readCount)) {
+              nextReadCounts[key] = count
+              readMessageCountsRef.current = nextReadCounts
+              writeStoredMessageCounts(currentUser.id, nextReadCounts)
+            } else if (count < readCount) {
+              nextReadCounts[key] = count
+              readMessageCountsRef.current = nextReadCounts
+              writeStoredMessageCounts(currentUser.id, nextReadCounts)
+            } else if (count > readCount) {
+              setUnreadChannels(prev =>
+                prev.some(id => String(id) === key)
+                  ? prev
+                  : [...prev, key]
+              )
             }
-            messageCounts[channelId] = count
           }
           if (channelCounts.length > 0) {
-            setMessageCounts({ ...messageCounts })
+            setMessageCounts(prev => {
+              const next = { ...prev }
+              channelCounts.forEach(({ channelId, count }) => {
+                if (Number.isFinite(count)) next[String(channelId)] = count
+              })
+              return next
+            })
           }
         }
 
@@ -2077,8 +2148,7 @@ export default function CollaborationApp() {
     activeCallId,
     activeSpace,
     spaces,
-    activeChannel,
-    unreadChannels
+    activeChannel
   ])
 
   // Ensure any incoming timeout is cleared when incomingCall is removed elsewhere
@@ -2091,30 +2161,26 @@ export default function CollaborationApp() {
   useEffect(() => {
     // Clear unread when entering a channel
     if (activeView === "channel" && activeChannel && currentUser) {
-      setUnreadChannels(prev => prev.filter(id => id !== activeChannel))
       const inMemory = messages[activeChannel]
       if (Array.isArray(inMemory)) {
-        messageCounts[activeChannel] = inMemory.length
-        setMessageCounts({ ...messageCounts })
+        markChannelRead(activeChannel, inMemory.length)
         return
       }
       // Update current count reference
       ;(async () => {
         try {
           const count = await Storage.getMessageCount(activeChannel, { forceRefresh: true })
-          messageCounts[activeChannel] = count
-          setMessageCounts({ ...messageCounts })
+          markChannelRead(activeChannel, count)
         } catch (e) {
           if (e && e.status === 403) {
             // restricted channel — skip silently
-            messageCounts[activeChannel] = 0
-            setMessageCounts({ ...messageCounts })
+            markChannelRead(activeChannel, 0)
           }
           // Silently ignore other errors during initial load
         }
       })()
     }
-  }, [activeChannel, activeView, currentUser, messages])
+  }, [activeChannel, activeView, currentUser, markChannelRead, messages])
 
   useEffect(() => {
     let userSocket = null
@@ -2677,7 +2743,11 @@ export default function CollaborationApp() {
             [chatId]: dedupeMessagesById([...normalized, ...optimisticOnly])
           }
         })
-        setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
+        if (resolvedView === "channel") {
+          markChannelRead(chatId, normalized.length)
+        } else {
+          setMessageCounts(prev => ({ ...prev, [chatId]: normalized.length }))
+        }
       } catch (e) {
         if (e && e.status === 403) {
           // Only show access denied modal if user has spaces loaded (not initial load)
@@ -2696,7 +2766,7 @@ export default function CollaborationApp() {
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
     const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
-  }, [isAuthenticated, activeChannel, activeView, activeDMUser, contextsSourceView, currentUser, spaces.length])
+  }, [isAuthenticated, activeChannel, activeView, activeDMUser, contextsSourceView, currentUser, spaces.length, markChannelRead])
 
 
   // Chat websocket connection for real-time message delivery
@@ -6141,7 +6211,7 @@ export default function CollaborationApp() {
         attachments: Array.isArray(message.attachments) ? message.attachments : [],
       }))
       if (!updatedMessage) continue
-      const attachmentIds = (updatedMessage.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
+      const attachmentIds = (updatedMessage.attachments || []).map(att => getAttachmentCacheKey(att) || att.name).filter(Boolean)
       const decisionId = ensureDecisionForContext(created.id, updatedMessage)
       nextContext = appendContextActivity(nextContext, {
         id: `activity-message-${messageId}-${Date.now()}`,
@@ -6221,7 +6291,7 @@ export default function CollaborationApp() {
           messageId,
           timestamp: now,
         })
-        const attachmentIds = (effectiveMessage.attachments || []).map(att => att.fileId || att.id).filter(Boolean)
+        const attachmentIds = (effectiveMessage.attachments || []).map(att => getAttachmentCacheKey(att) || att.name).filter(Boolean)
         let withFiles = next
         attachmentIds.forEach(fileId => {
           withFiles = appendContextActivity(withFiles, {
@@ -6295,7 +6365,7 @@ export default function CollaborationApp() {
 
         const linkedMessageIds = Array.from(new Set(linkedMessages.map(message => message.id)))
         const linkedFileIds = Array.from(new Set(
-          linkedMessages.flatMap(message => (message.attachments || []).map(att => att.fileId || att.id).filter(Boolean))
+          linkedMessages.flatMap(message => (message.attachments || []).map(att => getAttachmentCacheKey(att) || att.name).filter(Boolean))
         ))
         const contributorIds = Array.from(new Set([
           ...(context.contributorIds || []),
@@ -6416,7 +6486,7 @@ export default function CollaborationApp() {
             messageId: message.id,
             messageLabel: message.text || "Shared in channel",
             sourceLabel: att.source || "chat",
-            fileId: att.fileId || att.id || att.drive_file_id || att.driveId || att.url || att.webViewLink || att.name,
+            fileId: getAttachmentCacheKey(att) || att.driveId || att.name,
             author: getUser(message.userId)?.name || "Unknown",
             timestamp: message.timestamp,
             url: att.url || att.public_url || att.webViewLink || null,
@@ -6489,12 +6559,34 @@ export default function CollaborationApp() {
   )
 
   const currentContextFiles = useMemo(
-    () => currentContext
-      ? currentChannelFiles.filter(file =>
-          (currentContext.linkedFileIds || []).some(fileId => String(fileId) === String(file.fileId))
-        )
-      : [],
-    [currentContext, currentChannelFiles]
+    () => {
+      if (!currentContext) return []
+
+      const linkedFileIds = new Set((currentContext.linkedFileIds || []).map(fileId => String(fileId)))
+      const linkedMessageIds = new Set((currentContext.linkedMessageIds || []).map(messageId => String(messageId)))
+
+      currentMessages.forEach(message => {
+        if ((message.contextIds || []).some(contextId => String(contextId) === String(currentContext.id))) {
+          linkedMessageIds.add(String(message.id))
+        }
+      })
+
+      const seen = new Set()
+      return currentChannelFiles.filter(file => {
+        const fileKeys = [file.fileId, file.id, file.url, file.name].filter(value => value !== undefined && value !== null).map(value => String(value))
+        const isAttachedToContext =
+          linkedMessageIds.has(String(file.messageId)) ||
+          fileKeys.some(fileKey => linkedFileIds.has(fileKey))
+
+        if (!isAttachedToContext) return false
+
+        const dedupeKey = file.fileId || file.id || file.url || `${file.messageId}-${file.name}`
+        if (seen.has(String(dedupeKey))) return false
+        seen.add(String(dedupeKey))
+        return true
+      })
+    },
+    [currentContext, currentChannelFiles, currentMessages]
   )
 
   const currentContextDecisions = useMemo(
@@ -10798,8 +10890,8 @@ export default function CollaborationApp() {
                                 </span>
 
                                 {/* Unread Indicator */}
-                                {unreadChannels.includes(channel.id) &&
-                                  activeChannel !== channel.id && (
+                                {unreadChannels.some(id => String(id) === String(channel.id)) &&
+                                  String(activeChannel) !== String(channel.id) && (
                                     <div className="w-2 h-2 rounded-full mr-2 bg-[#2C2C2C]"></div>
                                   )}
 
@@ -13100,7 +13192,7 @@ export default function CollaborationApp() {
                   >
                     <Hash className="w-4 h-4 flex-shrink-0" />
                     <span className="truncate flex-1 text-left">{channel.name}</span>
-                    {unreadChannels.includes(channel.id) && activeChannel !== channel.id && (
+                    {unreadChannels.some(id => String(id) === String(channel.id)) && String(activeChannel) !== String(channel.id) && (
                       <span className="collapsed-space-channel-dot" />
                     )}
                   </button>
