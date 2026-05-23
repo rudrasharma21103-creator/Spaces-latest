@@ -262,9 +262,23 @@ const createSpaceIconElement = iconType => {
   return <UserIcon className="w-5 h-5" />
 }
 
-const SpaceFolderIcon = ({ isDarkMode, className = "h-5 w-5" }) => (
+const SPACE_VECTOR_ICON_SRCS = [
+  "/Vector.png",
+  "/Vector-1.png",
+  "/Vector-2.png",
+  "/Vector-5.png",
+  "/Vector-6.png",
+  "/Vector-7.png",
+  "/Vector-3.png",
+  "/Vector-4.png",
+  "/Vector-8.png",
+]
+
+const getSpaceVectorIconSrc = index => SPACE_VECTOR_ICON_SRCS[index % SPACE_VECTOR_ICON_SRCS.length]
+
+const SpaceFolderIcon = ({ src = "/Vector-1.png", className = "h-5 w-5" }) => (
   <SmartImage
-    src={isDarkMode ? "/Folder%20dark%20theme.png" : "/Folder%20Light%20Theme.png"}
+    src={src}
     alt="Space folder"
     className={`${className} object-contain`}
   />
@@ -11115,7 +11129,7 @@ export default function CollaborationApp() {
                     </span>
                   </div>
 
-                  {spaces.map(space => (
+                  {spaces.map((space, spaceIndex) => (
                     <div key={space.id} className="mb-1">
                       <div
                         className={`flex h-9 items-center gap-2 px-2 rounded-full cursor-pointer transition-colors duration-150 ease-in-out group ${
@@ -11138,7 +11152,7 @@ export default function CollaborationApp() {
                               : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
                           }`}
                         >
-                          <SpaceFolderIcon isDarkMode={isDarkMode} className="h-4 w-4" />
+                          <SpaceFolderIcon src={getSpaceVectorIconSrc(spaceIndex)} className="h-4 w-4" />
                         </span>
                         <span
                           className={`font-semibold text-[13px] truncate flex-1 transition-colors ${
