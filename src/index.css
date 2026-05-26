@@ -10885,6 +10885,60 @@ body:has(.workspace-topbar) .liquid-glass-sidebar-right::after {
   opacity: 0 !important;
 }
 
+.liquid-glass-sidebar .sidebar-section-group {
+  border-radius: 22px;
+  padding: 6px;
+  background: transparent;
+  border: 0;
+  transition: background-color 160ms ease;
+}
+
+.liquid-glass-sidebar .sidebar-section-group:hover {
+  background: rgba(226, 232, 240, 0.55);
+}
+
+.liquid-glass-sidebar .sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 8px 4px;
+  color: rgb(148, 163, 184);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.liquid-glass-sidebar .sidebar-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.liquid-glass-sidebar .sidebar-section-row {
+  border-radius: 16px !important;
+  box-shadow: none !important;
+}
+
+html.dark .liquid-glass-sidebar .sidebar-section-group,
+body.dark .liquid-glass-sidebar .sidebar-section-group {
+  background: transparent;
+  border: 0;
+}
+
+html.dark .liquid-glass-sidebar .sidebar-section-group:hover,
+body.dark .liquid-glass-sidebar .sidebar-section-group:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+html.dark .liquid-glass-sidebar .sidebar-section-header,
+body.dark .liquid-glass-sidebar .sidebar-section-header {
+  color: rgb(148, 163, 184);
+}
+
 body:has(.workspace-topbar) .workspace-chat-panel {
   background: #ffffff !important;
   border: 0 !important;

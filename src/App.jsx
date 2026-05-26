@@ -11020,7 +11020,7 @@ export default function CollaborationApp() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   <button
                     onClick={() => {
                       if (!googleCalendarToken) {
@@ -11058,93 +11058,97 @@ export default function CollaborationApp() {
                     </span>
                   </button>
 
-                  <div className="px-2 mb-1 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                      Timesavers
-                    </span>
-                    {timesaversLoading && (
-                      <Loader2 className={`h-3.5 w-3.5 animate-spin ${isDarkMode ? "text-slate-500" : "text-slate-400"}`} />
-                    )}
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <button
-                      onClick={openStarredMessages}
-                      className={`flex h-8 w-full items-center gap-2.5 rounded-full px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
-                        activeView === "starred"
-                          ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
-                          : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
-                      }`}
-                    >
-                      <Star className={`h-3.5 w-3.5 ${activeView === "starred" ? "fill-current" : ""}`} />
-                      <span className="min-w-0 flex-1 truncate text-left">Starred</span>
-                      {starredMessages.length > 0 && (
-                        <span className={`text-[10px] font-semibold ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                          {starredMessages.length}
-                        </span>
+                  <section className="sidebar-section-group">
+                    <div className="sidebar-section-header">
+                      <span>
+                        Timesavers
+                      </span>
+                      {timesaversLoading && (
+                        <Loader2 className={`h-3.5 w-3.5 animate-spin ${isDarkMode ? "text-slate-500" : "text-slate-400"}`} />
                       )}
-                    </button>
+                    </div>
 
-                    {pinnedChannels.length > 0 && (
-                      <div className="pt-0.5">
-                        <div className="px-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          Pinned channels
-                        </div>
-                        <div className="space-y-0.5">
-                          {pinnedChannels.map(item => {
-                            const isActivePinned =
-                              activeView === "channel" &&
-                              String(activeChannel) === String(item.channelId)
-                            return (
-                              <button
-                                key={`pinned-${item.spaceId}-${item.channelId}`}
-                                onClick={() => handleChannelNavigation(item.spaceId, item.channelId)}
-                                className={`flex h-8 w-full items-center gap-2.5 rounded-full px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
-                                  isActivePinned
-                                    ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
-                                    : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
-                                }`}
-                                title={`${item.spaceName || "Space"} / #${item.channelName || "channel"}`}
-                              >
-                                <Hash className={`h-3.5 w-3.5 ${isActivePinned ? (isDarkMode ? "text-slate-100" : "text-sky-700") : ""}`} />
-                                <span className="min-w-0 flex-1 truncate text-left">{item.channelName || "channel"}</span>
-                                {unreadChannels.some(id => String(id) === String(item.channelId)) &&
-                                  String(activeChannel) !== String(item.channelId) && (
-                                    <span className="h-1.5 w-1.5 rounded-full bg-sky-600" />
-                                  )}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="px-2 mb-1 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                      Your Spaces
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-                      {spaces.length}
-                    </span>
-                  </div>
-
-                  {spaces.map((space, spaceIndex) => (
-                    <div key={space.id} className="mb-1">
-                      <div
-                        className={`flex h-9 items-center gap-2 px-2 rounded-full cursor-pointer transition-colors duration-150 ease-in-out group ${
-                            activeView === "channel" && activeSpace === space.id
-                              ? (isDarkMode
-                                  ? "bg-[rgba(96,165,250,0.16)] text-slate-100"
-                                  : "bg-[rgba(59,130,246,0.12)] text-slate-900")
-                              : (isDarkMode
-                                  ? "bg-transparent text-slate-300 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100"
-                                  : "bg-transparent text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
-                          }`}
-                        onClick={() => {
-                          toggleSpaceExpansion(space.id)
-                        }}
+                    <div className="sidebar-section-list">
+                      <button
+                        onClick={openStarredMessages}
+                        className={`sidebar-section-row flex h-8 w-full items-center gap-2.5 px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
+                          activeView === "starred"
+                            ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
+                            : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
+                        }`}
                       >
+                        <Star className={`h-3.5 w-3.5 ${activeView === "starred" ? "fill-current" : ""}`} />
+                        <span className="min-w-0 flex-1 truncate text-left">Starred</span>
+                        {starredMessages.length > 0 && (
+                          <span className={`text-[10px] font-semibold ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                            {starredMessages.length}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </section>
+
+                  {pinnedChannels.length > 0 && (
+                    <section className="sidebar-section-group">
+                      <div className="sidebar-section-header">
+                        Pinned channels
+                      </div>
+                      <div className="sidebar-section-list">
+                        {pinnedChannels.map(item => {
+                          const isActivePinned =
+                            activeView === "channel" &&
+                            String(activeChannel) === String(item.channelId)
+                          return (
+                            <button
+                              key={`pinned-${item.spaceId}-${item.channelId}`}
+                              onClick={() => handleChannelNavigation(item.spaceId, item.channelId)}
+                              className={`sidebar-section-row flex h-8 w-full items-center gap-2.5 px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
+                                isActivePinned
+                                  ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
+                                  : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
+                              }`}
+                              title={`${item.spaceName || "Space"} / #${item.channelName || "channel"}`}
+                            >
+                              <Hash className={`h-3.5 w-3.5 ${isActivePinned ? (isDarkMode ? "text-slate-100" : "text-sky-700") : ""}`} />
+                              <span className="min-w-0 flex-1 truncate text-left">{item.channelName || "channel"}</span>
+                              {unreadChannels.some(id => String(id) === String(item.channelId)) &&
+                                String(activeChannel) !== String(item.channelId) && (
+                                  <span className="h-1.5 w-1.5 rounded-full bg-sky-600" />
+                                )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )}
+
+                  <section className="sidebar-section-group">
+                    <div className="sidebar-section-header">
+                      <span>
+                        Your Spaces
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                        {spaces.length}
+                      </span>
+                    </div>
+
+                    <div className="sidebar-section-list">
+                      {spaces.map((space, spaceIndex) => (
+                        <div key={space.id} className="mb-1">
+                          <div
+                            className={`sidebar-section-row flex h-9 items-center gap-2 px-2 cursor-pointer transition-colors duration-150 ease-in-out group ${
+                              activeView === "channel" && activeSpace === space.id
+                                ? (isDarkMode
+                                    ? "bg-[rgba(96,165,250,0.16)] text-slate-100"
+                                    : "bg-[rgba(59,130,246,0.12)] text-slate-900")
+                                : (isDarkMode
+                                    ? "bg-transparent text-slate-300 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100"
+                                    : "bg-transparent text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
+                            }`}
+                            onClick={() => {
+                              toggleSpaceExpansion(space.id)
+                            }}
+                          >
                         <span
                           className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
                             activeView === "channel" && activeSpace === space.id
@@ -11199,7 +11203,7 @@ export default function CollaborationApp() {
                       </div>
 
                       {space.expanded && (
-                        <div className="ml-5 pl-3 border-l-2 mt-1 space-y-0.5 border-slate-100">
+                        <div className={`ml-5 pl-3 border-l mt-1 space-y-0.5 ${isDarkMode ? "border-white/[0.06]" : "border-slate-200/60"}`}>
                           {(space.channels || []).filter(channel => {
                             const chMembers = channel?.members || []
                             if (chMembers && chMembers.length > 0) {
@@ -11233,7 +11237,7 @@ export default function CollaborationApp() {
                                     handleChannelNavigation(space.id, channel.id)
                                   }
                                 }}
-                                className={`flex h-8 items-center gap-2.5 w-full px-2.5 rounded-full text-[13px] font-medium transition-colors duration-150 ease-in-out ${
+                                className={`sidebar-section-row flex h-8 items-center gap-2.5 w-full px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
                                   activeView === "channel" &&
                                   activeChannel === channel.id
                                     ? (isDarkMode
@@ -11326,7 +11330,7 @@ export default function CollaborationApp() {
                                 setActiveSpace(space.id)
                                 setShowChannelModal(true)
                               }}
-                              className={`flex h-8 items-center gap-2.5 w-full px-2.5 rounded-full text-[13px] transition-colors duration-150 ease-in-out group mt-1 ${
+                              className={`sidebar-section-row flex h-8 items-center gap-2.5 w-full px-2.5 text-[13px] transition-colors duration-150 ease-in-out group mt-1 ${
                                 isDarkMode
                                   ? "text-slate-400 hover:text-slate-100 hover:bg-[rgba(255,255,255,0.06)]"
                                   : "text-slate-400 hover:text-slate-900 hover:bg-[rgba(15,23,42,0.06)]"
@@ -11340,6 +11344,8 @@ export default function CollaborationApp() {
                       )}
                     </div>
                   ))}
+                    </div>
+                  </section>
                 </div>
               )}
             </div>
