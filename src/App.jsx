@@ -11913,9 +11913,15 @@ export default function CollaborationApp() {
                   <button
                     onClick={handleDocsClick}
                     className={`liquid-glass-nav-item p-2 transition-all relative group`}
+                    aria-label="Documents"
                     title="Documents"
                   >
-                    <FileText className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                    <SmartImage
+                      src={isDarkMode ? "/Documents%20dark.png" : "/Documents%20light.png"}
+                      alt=""
+                      className="w-[17px] h-[17px] object-contain group-hover:scale-110 transition-transform"
+                      fallback={<FileText className={`w-[17px] h-[17px] ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />}
+                    />
                     {googleAccessToken && (
                       <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
                     )}
@@ -11927,9 +11933,15 @@ export default function CollaborationApp() {
                   <button
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
                     className={`liquid-glass-nav-item p-2 transition-all group`}
+                    aria-label="Google Apps"
                     title="Google Apps"
                   >
-                    <Grid3x3 className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                    <SmartImage
+                      src={isDarkMode ? "/Google%20Apps%20Dark.png" : "/Google%20Apps%20Light.png"}
+                      alt=""
+                      className="w-[17px] h-[17px] object-contain group-hover:scale-110 transition-transform"
+                      fallback={<Grid3x3 className={`w-[17px] h-[17px] ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />}
+                    />
                   </button>
 
                   {showGoogleAppsMenu && (
@@ -11993,9 +12005,15 @@ export default function CollaborationApp() {
                         }
                       }}
                       className={`liquid-glass-nav-item p-2 transition-all group`}
+                      aria-label={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                       title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
                     >
-                      <Video className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <SmartImage
+                        src={isDarkMode ? "/Start%20group%20call%20dark.png" : "/Start%20group%20call%20light.png"}
+                        alt=""
+                        className="w-[17px] h-[17px] object-contain group-hover:scale-110 transition-transform"
+                        fallback={<Video className={`w-[17px] h-[17px] ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />}
+                      />
                     </button>
                     {/* In Call Indicator */}
                     {showWebRTCCall && (
@@ -12022,9 +12040,16 @@ export default function CollaborationApp() {
                         canInvite ? '' : 'opacity-60 cursor-not-allowed'
                       }`}
                     >
-                      <UserPlus className={`w-[18px] h-[18px] transition-transform ${
+                      <SmartImage
+                        src={isDarkMode ? "/Add%20People%20Dark.png" : "/Add%20People%20Light.png"}
+                        alt=""
+                        className={`w-[18px] h-[18px] object-contain transition-transform ${
+                          canInvite ? 'group-hover:scale-110' : ''
+                        }`}
+                        fallback={<UserPlus className={`w-[18px] h-[18px] transition-transform ${
                         canInvite ? 'group-hover:scale-110' : ''
-                      } ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                      } ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />}
+                      />
                     </button>
                   )
                 })()}
