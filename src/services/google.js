@@ -64,56 +64,56 @@ const ensureGooglePreconnect = () => {
 export const GOOGLE_APPS = [
   {
     name: 'Gmail',
-    icon: '/gmail.png',
+    icon: '/gmail%20(1).png',
     url: 'https://mail.google.com',
-    color: 'bg-red-50 text-red-600',
+    color: 'bg-rose-50 text-rose-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Drive',
-    icon: '/google-drive.png',
+    icon: '/google%20drive.png',
     url: 'https://drive.google.com',
-    color: 'bg-blue-50 text-blue-600',
+    color: 'bg-sky-50 text-sky-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Docs',
-    icon: '/google-docs.png',
+    icon: '/google%20docs.png',
     url: 'https://docs.google.com',
     color: 'bg-blue-50 text-blue-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Sheets',
-    icon: '/google-sheets.png',
+    icon: '/google%20sheets.png',
     url: 'https://sheets.google.com',
-    color: 'bg-green-50 text-green-600',
+    color: 'bg-emerald-50 text-emerald-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Slides',
-    icon: '/slides.png',
+    icon: '/google%20slides.png',
     url: 'https://slides.google.com',
-    color: 'bg-yellow-50 text-yellow-600',
+    color: 'bg-amber-50 text-amber-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Calendar',
-    icon: 'https://calendar.google.com/googlecalendar/images/favicons_2020q4/calendar_31.ico',
+    icon: '/google%20calendar.png',
     url: 'https://calendar.google.com',
     color: 'bg-blue-50 text-blue-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Meet',
-    icon: 'https://fonts.gstatic.com/s/i/productlogos/meet_2020q4/v6/web-64dp/logo_meet_2020q4_color_2x_web_64dp.png',
+    icon: '/google%20meet.png',
     url: 'https://meet.google.com',
-    color: 'bg-green-50 text-green-600',
+    color: 'bg-lime-50 text-lime-600',
     iconSize: 'w-8 h-8'
   },
   {
     name: 'Photos',
-    icon: 'https://ssl.gstatic.com/images/branding/product/1x/photos_48dp.png',
+    icon: '/google-app-photos.svg',
     url: 'https://photos.google.com',
     color: 'bg-teal-50 text-teal-600',
     iconSize: 'w-8 h-8'

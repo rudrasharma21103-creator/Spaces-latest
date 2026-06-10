@@ -286,6 +286,19 @@ const PUBLIC_EMAIL_DOMAINS = new Set([
   "protonmail.com",
 ])
 
+const ADMIN_DASHBOARD_ROLES = new Set(["admin", "org_admin", "owner"])
+
+const getEmailDomain = email => {
+  const match = String(email || "").trim().toLowerCase().match(/@([A-Za-z0-9.-]+)$/)
+  return match ? match[1] : ""
+}
+
+const isVerifiedOrg = org => (
+  org?.verified === true ||
+  String(org?.verified || "").toLowerCase() === "true" ||
+  String(org?.status || "").toLowerCase() === "verified"
+)
+
 const createClientId = prefix => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}-${crypto.randomUUID()}`
@@ -1107,6 +1120,37 @@ export default function CollaborationApp() {
   const [adminSearch, setAdminSearch] = useState("")
   const adminSocketRef = useRef(null)
   const [adminOnlineSet, setAdminOnlineSet] = useState(new Set())
+  const currentUserEmail = String(currentUser?.email || "").trim().toLowerCase()
+  const currentUserDomain = getEmailDomain(currentUserEmail)
+  const orgDomain = String(orgInfo?.domain || "").trim().toLowerCase()
+  const orgAdminEmail = String(orgInfo?.adminEmail || "").trim().toLowerCase()
+  const userOrganizationId = String(currentUser?.organizationId || "").trim().toLowerCase()
+  const hasAdminDashboardRole = ADMIN_DASHBOARD_ROLES.has(currentUser?.role)
+  const hasCompanyEmailDomain = Boolean(currentUserDomain && !PUBLIC_EMAIL_DOMAINS.has(currentUserDomain))
+  const isRegisteredCompanyAdmin =
+    Boolean(orgAdminEmail && currentUserEmail === orgAdminEmail) ||
+    Boolean(userOrganizationId && orgDomain && userOrganizationId === orgDomain)
+  const hasVerifiedOrgAccess = orgInfo ? isVerifiedOrg(orgInfo) : hasAdminDashboardRole && hasCompanyEmailDomain
+  const canOpenAdminDashboard = Boolean(
+    currentUser?.id &&
+    hasVerifiedOrgAccess &&
+    (hasAdminDashboardRole || isRegisteredCompanyAdmin) &&
+    (
+      currentUser?.role === "admin" ||
+      isRegisteredCompanyAdmin ||
+      (hasAdminDashboardRole && hasCompanyEmailDomain) ||
+      currentUserDomain === orgDomain ||
+      !orgDomain
+    )
+  )
+  const openAdminDashboard = useCallback(() => {
+    if (!canOpenAdminDashboard) return
+    try {
+      window.location.assign("/admin/dashboard")
+    } catch (e) {
+      setShowAdminDashboard(true)
+    }
+  }, [canOpenAdminDashboard])
 
   // Load organization info when currentUser changes (by domain)
   useEffect(() => {
@@ -10763,6 +10807,8 @@ export default function CollaborationApp() {
             setAvatarFile(null)
             setShowProfileModal(true)
           }}
+          onOpenAdminDashboard={openAdminDashboard}
+          canOpenAdminDashboard={canOpenAdminDashboard}
           connectPreferredPane={connectPreferredPane}
           setConnectPreferredPane={setConnectPreferredPane}
           setDmInput={setHomeDMInput}
@@ -10955,18 +11001,10 @@ export default function CollaborationApp() {
                 <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
               </button>
             )}
-            {/* Admin dashboard access - visible to org admins of verified org */}
-            {!sidebarCollapsed && !isMobile && currentUser?.role === 'org_admin' && orgInfo?.verified && (
+            {/* Admin dashboard access - visible to company admins/owners of verified orgs */}
+            {!sidebarCollapsed && !isMobile && canOpenAdminDashboard && (
               <button
-                onClick={() => {
-                  try {
-                    const url = `${window.location.origin}/admin/dashboard`
-                    window.open(url, '_blank')
-                  } catch (e) {
-                    // fallback to same-tab modal if window.open is blocked
-                    setShowAdminDashboard(true)
-                  }
-                }}
+                onClick={openAdminDashboard}
                 className="p-1.5 rounded-lg transition-colors hover:bg-slate-100 text-slate-400 hover:text-sky-600"
                 title="Admin Dashboard"
               >

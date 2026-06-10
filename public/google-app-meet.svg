@@ -1,0 +1,21 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="meet-yellow" x1="14" y1="14" x2="43" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe36c"/>
+      <stop offset="1" stop-color="#fbbc04"/>
+    </linearGradient>
+    <linearGradient id="meet-green" x1="20" y1="20" x2="45" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#47d769"/>
+      <stop offset="1" stop-color="#0f9d58"/>
+    </linearGradient>
+    <linearGradient id="meet-blue" x1="42" y1="23" x2="56" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#65a4ff"/>
+      <stop offset="1" stop-color="#1a73e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="16" width="36" height="32" rx="9" fill="url(#meet-yellow)"/>
+  <path d="M10 32c0-8.8 7.2-16 16-16h11c5 0 9 4 9 9v7H10Z" fill="url(#meet-green)" opacity=".96"/>
+  <path d="M46 26.5 57 20.8c2-1 4 .4 4 2.6v17.2c0 2.2-2 3.6-4 2.6l-11-5.7v-11Z" fill="url(#meet-blue)"/>
+  <path d="M19 25h18v14H19z" fill="#fff" opacity=".95"/>
+  <path d="M10 32h36v7c0 5-4 9-9 9H19c-5 0-9-4-9-9v-7Z" fill="#fff" opacity=".16"/>
+</svg>

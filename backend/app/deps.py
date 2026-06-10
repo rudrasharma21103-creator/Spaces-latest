@@ -1,10 +1,11 @@
 import os
+import re
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth import decode_token
-from app.database import users_collection
+from app.database import organizations_collection, users_collection
 
 AUTH_COOKIE_NAME = "spaces_session"
 security = HTTPBearer(auto_error=False)
@@ -85,7 +86,25 @@ def require_admin_user(
     creds: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     user = require_current_user_doc(request, creds)
-    if user.get("role") not in ("admin", "org_admin", "owner"):
+    if user.get("role") in ("admin", "org_admin", "owner"):
+        return user
+
+    email = str(user.get("email") or "").strip()
+    domain = email.rsplit("@", 1)[1].lower() if "@" in email else ""
+    is_registered_org_admin = False
+    if email and domain:
+        is_registered_org_admin = bool(
+            organizations_collection.find_one(
+                {
+                    "domain": domain,
+                    "verified": True,
+                    "adminEmail": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+                },
+                {"_id": 1},
+            )
+        )
+
+    if not is_registered_org_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 

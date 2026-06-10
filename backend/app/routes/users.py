@@ -138,6 +138,43 @@ def organization_defaults_for_email(email):
     }
 
 
+def is_registered_org_admin_for_domain(user, domain):
+    normalized_domain = str(domain or "").strip().lower()
+    email = normalize_email(user.get("email")) if isinstance(user, dict) else None
+    if not email or not normalized_domain:
+        return False
+    return bool(
+        organizations_collection.find_one(
+            {
+                "domain": normalized_domain,
+                "verified": True,
+                "adminEmail": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            },
+            {"_id": 1},
+        )
+    )
+
+
+def can_manage_domain(user, domain):
+    normalized_domain = str(domain or "").strip().lower()
+    role = user.get("role") if isinstance(user, dict) else None
+    if role == "admin":
+        return True
+    requester_domain = extract_email_domain(user.get("email")) if isinstance(user, dict) else None
+    if normalized_domain and role in ("org_admin", "owner") and requester_domain == normalized_domain:
+        return True
+    return is_registered_org_admin_for_domain(user, normalized_domain)
+
+
+def can_manage_org_permissions(user, domain):
+    normalized_domain = str(domain or "").strip().lower()
+    role = user.get("role") if isinstance(user, dict) else None
+    requester_domain = extract_email_domain(user.get("email")) if isinstance(user, dict) else None
+    if normalized_domain and role in ("org_admin", "owner") and requester_domain == normalized_domain:
+        return True
+    return is_registered_org_admin_for_domain(user, normalized_domain)
+
+
 def fetch_google_userinfo(access_token):
     if not access_token:
         raise HTTPException(status_code=400, detail="Google access token required")
@@ -881,10 +918,8 @@ def users_by_domain(domain: str, request: Request):
     requester = resolve_requester(request)
     if not requester:
         raise HTTPException(status_code=401, detail="Authentication required")
-    requester_domain = extract_email_domain(requester.get("email"))
     normalized_domain = str(domain or "").strip().lower()
-    role = requester.get("role")
-    if role != "admin" and not (role == "org_admin" and requester_domain == normalized_domain):
+    if not can_manage_domain(requester, normalized_domain):
         raise HTTPException(status_code=403, detail="Admin access required for this domain")
     try:
         users = list(users_collection.find({"email_domain": normalized_domain}, USER_LIST_PROJECTION))
@@ -994,7 +1029,8 @@ async def update_professional_profile(user_id: str, payload: ProfessionalProfile
         raise HTTPException(status_code=401, detail="Authentication required")
 
     actual_id = existing_user.get("id")
-    if str(requester.get("id")) != str(actual_id) and requester.get("role") not in ("admin", "org_admin"):
+    target_domain = extract_email_domain(existing_user.get("email"))
+    if str(requester.get("id")) != str(actual_id) and not can_manage_domain(requester, target_domain):
         raise HTTPException(status_code=403, detail="Not authorized to update this profile")
 
     normalized_profile = normalize_professional_profile(payload.model_dump(), strict=True)
@@ -1031,27 +1067,29 @@ async def update_user(user_id: str, user: dict, request: Request):
         update_doc.pop(field, None)
 
     requested_role = update_doc.get("role")
+    target_domain = extract_email_domain(existing_user.get("email"))
     if requested_role is not None:
-        if str(requester.get("id")) == str(actual_id) or requester.get("role") not in ("admin", "org_admin"):
+        if str(requester.get("id")) == str(actual_id) or not can_manage_domain(requester, target_domain):
             raise HTTPException(status_code=403, detail="Only admins can change roles")
 
     if str(requester.get("id")) != str(actual_id):
-        if requester.get("role") not in ("admin", "org_admin"):
+        if not can_manage_domain(requester, target_domain):
             raise HTTPException(status_code=403, detail="Not authorized to update this user")
-        requester_domain = extract_email_domain(requester.get("email"))
-        target_domain = extract_email_domain(existing_user.get("email"))
-        if requester_domain and target_domain and requester_domain != target_domain:
-            raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
 
     try:
         if "invitePermissions" in update_doc:
             requester_id = requester.get("id")
             if str(requester_id) != str(actual_id):
-                if requester.get("role") != "org_admin":
-                    raise HTTPException(status_code=403, detail="Only org admins can change other users' invite permissions")
+                if not can_manage_org_permissions(requester, target_domain):
+                    raise HTTPException(status_code=403, detail="Only org admins or owners can change other users' invite permissions")
                 requester_org = requester.get("organizationId")
                 target_org = existing_user.get("organizationId")
-                if requester_org and target_org and str(requester_org) != str(target_org):
+                if (
+                    requester_org
+                    and target_org
+                    and str(requester_org) != str(target_org)
+                    and not is_registered_org_admin_for_domain(requester, target_domain)
+                ):
                     raise HTTPException(status_code=403, detail="Org admin can only modify users in their organization")
     except HTTPException:
         raise

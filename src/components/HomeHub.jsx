@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock3,
   FileText,
+  Grid3x3,
   MessageCircle,
   Moon,
   Plus,
@@ -192,6 +193,8 @@ export default function HomeHub({
   onOpenDocumentsHub,
   onOpenNotifications,
   onOpenProfile,
+  onOpenAdminDashboard = () => {},
+  canOpenAdminDashboard = false,
   onConnectUser,
   onSaveProfessionalProfile,
   connectPreferredPane = "discover",
@@ -412,6 +415,9 @@ export default function HomeHub({
     { key: "drafts", label: "Drafts", icon: FileText, action: () => onSectionChange("drafts") },
     { key: "files", label: "Files", icon: FileText, action: () => onSectionChange("files") },
     { key: "tasks", label: "Tasks", icon: ClipboardList, action: () => onSectionChange("tasks") },
+    ...(canOpenAdminDashboard
+      ? [{ key: "admin-dashboard", label: "Admin Dashboard", icon: Grid3x3, action: onOpenAdminDashboard }]
+      : []),
   ]
 
   const overviewWidgetClass = isDarkMode ? "bg-[#111111]" : ""
@@ -501,6 +507,18 @@ export default function HomeHub({
       icon: ClipboardList,
       action: () => onSectionChange("tasks"),
     },
+    ...(canOpenAdminDashboard
+      ? [
+          {
+            key: "admin-dashboard",
+            label: "Admin Dashboard",
+            description: "Manage your company team and permissions",
+            badge: "Admin",
+            icon: Grid3x3,
+            action: onOpenAdminDashboard,
+          },
+        ]
+      : []),
   ]
 
   const renderThoughtsCard = (className = "") => (

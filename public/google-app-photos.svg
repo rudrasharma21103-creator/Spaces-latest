@@ -1,0 +1,25 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="photos-red" x1="30" y1="6" x2="43" y2="31" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff8a80"/>
+      <stop offset="1" stop-color="#ea4335"/>
+    </linearGradient>
+    <linearGradient id="photos-blue" x1="58" y1="30" x2="33" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79b1ff"/>
+      <stop offset="1" stop-color="#1a73e8"/>
+    </linearGradient>
+    <linearGradient id="photos-green" x1="34" y1="58" x2="21" y2="33" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57d875"/>
+      <stop offset="1" stop-color="#34a853"/>
+    </linearGradient>
+    <linearGradient id="photos-yellow" x1="6" y1="34" x2="31" y2="21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe36b"/>
+      <stop offset="1" stop-color="#fbbc04"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 8c6.1 0 11 4.9 11 11v13H32c-6.6 0-12-5.4-12-12S25.4 8 32 8Z" fill="url(#photos-red)"/>
+  <path d="M56 32c0 6.1-4.9 11-11 11H32V32c0-6.6 5.4-12 12-12s12 5.4 12 12Z" fill="url(#photos-blue)"/>
+  <path d="M32 56c-6.1 0-11-4.9-11-11V32h11c6.6 0 12 5.4 12 12s-5.4 12-12 12Z" fill="url(#photos-green)"/>
+  <path d="M8 32c0-6.1 4.9-11 11-11h13v11c0 6.6-5.4 12-12 12S8 38.6 8 32Z" fill="url(#photos-yellow)"/>
+  <circle cx="32" cy="32" r="7" fill="#fff" opacity=".92"/>
+</svg>
