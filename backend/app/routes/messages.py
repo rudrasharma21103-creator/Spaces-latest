@@ -321,6 +321,63 @@ def _remove_message_attachment(chat_id: str, message_id: str, attachment_id: str
     }
 
 
+def _normalize_reactions(value):
+    if not isinstance(value, dict):
+        return {}
+
+    reactions = {}
+    for emoji, user_ids in value.items():
+        if not isinstance(user_ids, list) or len(user_ids) == 0:
+            continue
+
+        normalized_ids = set()
+        cleaned = []
+        for user_id in user_ids:
+            normalized_id = _extract_id(user_id)
+            if normalized_id is None or normalized_id == "" or normalized_id in normalized_ids:
+                continue
+            normalized_ids.add(normalized_id)
+            cleaned.append(user_id)
+
+        if cleaned:
+            reactions[str(emoji)] = cleaned
+
+    return reactions
+
+
+def _set_message_reaction(chat_id: str, message_id: str, emoji: str, user_id, should_have_reaction: bool):
+    doc = _fetch_message_document(chat_id, message_id)
+    if not doc or not doc.get("message"):
+        return {"found": False}
+
+    message = doc["message"]
+    reactions = _normalize_reactions(message.get("reactions"))
+    normalized_user_id = str(user_id)
+    current = reactions.get(emoji) or []
+    without_user = [item for item in current if _extract_id(item) != normalized_user_id]
+
+    if should_have_reaction:
+        reactions[emoji] = [*without_user, user_id]
+    elif without_user:
+        reactions[emoji] = without_user
+    else:
+        reactions.pop(emoji, None)
+
+    updated_at = time.time()
+    message["reactions"] = reactions
+    message["reactionsUpdatedAt"] = updated_at
+
+    res = messages_collection.update_one(
+        _message_filter(chat_id, message_id),
+        {"$set": {"message.reactions": reactions, "message.reactionsUpdatedAt": updated_at}}
+    )
+
+    if res.matched_count == 0:
+        return {"found": False}
+
+    return {"found": True, "message": message}
+
+
 @router.get("/{chat_id}")
 def get_messages(request: Request, chat_id: str):
     user_id = _get_user_id_from_request(request)
@@ -391,6 +448,39 @@ def update_message(request: Request, chat_id: str, message_id: str, message: dic
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
     return {"status": "updated"}
+
+
+@router.patch("/{chat_id}/{message_id}/reactions")
+async def update_message_reaction(request: Request, chat_id: str, message_id: str, payload: dict):
+    user_id = _get_user_id_from_request(request)
+    has_access = await run_in_threadpool(_check_channel_access, chat_id, user_id) if user_id is not None else False
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not has_access:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    emoji = str(payload.get("emoji") or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="emoji required")
+
+    result = await run_in_threadpool(
+        _set_message_reaction,
+        chat_id,
+        message_id,
+        emoji,
+        user_id,
+        bool(payload.get("shouldHaveReaction")),
+    )
+    if not result.get("found"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    message = result.get("message")
+    try:
+        await manager.broadcast(chat_id, message)
+    except Exception:
+        pass
+
+    return {"status": "updated", "message": message}
 
 
 @router.delete("/{chat_id}/{message_id}/attachments/{attachment_id}")

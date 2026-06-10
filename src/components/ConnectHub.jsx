@@ -65,24 +65,43 @@ const getLocalRelationship = (person, currentUser, friends, pendingRequests) => 
   return { relationshipStatus: "can_connect", incomingRequestNotificationId: null }
 }
 
+const normalizePeopleCardUser = (user, currentUser, friends, pendingRequests) => {
+  const profile = getProfessionalProfile(user)
+  const localRelationship = getLocalRelationship(user, currentUser, friends, pendingRequests)
+  const relationshipStatus =
+    localRelationship.relationshipStatus === "can_connect"
+      ? user.relationshipStatus || "can_connect"
+      : localRelationship.relationshipStatus
+
+  return {
+    ...user,
+    id: user.id,
+    name: user.name || "",
+    avatar_url: user.avatar_url,
+    avatar_preset: user.avatar_preset,
+    professionalProfile: profile.companyName || profile.position || profile.linkedInUrl ? profile : user.professionalProfile || null,
+    relationshipStatus,
+    incomingRequestNotificationId: localRelationship.incomingRequestNotificationId || user.incomingRequestNotificationId || null,
+  }
+}
+
+const isConnectableSuggestion = person => !["self", "connected"].includes(person?.relationshipStatus)
+
 const buildInstantResults = (query, currentUser, friends, pendingRequests) => {
   const normalizedQuery = query.trim().toLowerCase()
   if (!normalizedQuery) return []
   return Storage.peekUsers()
-    .filter(user => (user?.name || "").toLowerCase().includes(normalizedQuery))
+    .filter(user => user?.id != null && (user?.name || "").toLowerCase().includes(normalizedQuery))
     .slice(0, 10)
-    .map(user => {
-      const profile = getProfessionalProfile(user)
-      return {
-        id: user.id,
-        name: user.name || "",
-        avatar_url: user.avatar_url,
-        avatar_preset: user.avatar_preset,
-        professionalProfile: profile.companyName || profile.position || profile.linkedInUrl ? profile : null,
-        ...getLocalRelationship(user, currentUser, friends, pendingRequests),
-      }
-    })
+    .map(user => normalizePeopleCardUser(user, currentUser, friends, pendingRequests))
 }
+
+const buildLocalSuggestions = (currentUser, friends, pendingRequests, limit = 8) =>
+  Storage.peekUsers()
+    .filter(user => user?.id != null)
+    .map(user => normalizePeopleCardUser(user, currentUser, friends, pendingRequests))
+    .filter(isConnectableSuggestion)
+    .slice(0, limit)
 
 const getActionLabel = status => status === "connected" ? "Message" : status === "outgoing_request" ? "Pending" : status === "incoming_request" ? "Accept" : status === "self" ? "You" : "Connect"
 
@@ -104,6 +123,8 @@ export default function ConnectHub({
   const [results, setResults] = useState([])
   const [loadingResults, setLoadingResults] = useState(false)
   const [searchError, setSearchError] = useState("")
+  const [suggestions, setSuggestions] = useState([])
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [savingIds, setSavingIds] = useState([])
   const [networkQuery, setNetworkQuery] = useState("")
   const [networkSort, setNetworkSort] = useState("recent")
@@ -165,6 +186,34 @@ export default function ConnectHub({
     }
   }, [currentUser, debouncedQuery, friends, pendingRequests])
 
+  useEffect(() => {
+    let ignore = false
+    const localSuggestions = buildLocalSuggestions(currentUser, friends, pendingRequests, 8)
+
+    setSuggestions(localSuggestions)
+    setLoadingSuggestions(true)
+
+    Storage.getConnectSuggestions(8)
+      .then(items => {
+        if (ignore) return
+        const nextSuggestions = (Array.isArray(items) ? items : [])
+          .filter(user => user?.id != null)
+          .map(user => normalizePeopleCardUser(user, currentUser, friends, pendingRequests))
+          .filter(isConnectableSuggestion)
+        setSuggestions(nextSuggestions.length > 0 ? nextSuggestions : localSuggestions)
+      })
+      .catch(() => {
+        if (!ignore) setSuggestions(localSuggestions)
+      })
+      .finally(() => {
+        if (!ignore) setLoadingSuggestions(false)
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [currentUser, friends, pendingRequests])
+
   const networkConnections = useMemo(() => {
     const normalizedQuery = networkQuery.trim().toLowerCase()
     const items = [...friends]
@@ -203,38 +252,42 @@ export default function ConnectHub({
       if (person.relationshipStatus === "incoming_request" && person.incomingRequestNotificationId) {
         await onAcceptRequest?.(person.incomingRequestNotificationId)
         setResults(prev => patchResults(prev, person.id, { relationshipStatus: "connected", incomingRequestNotificationId: null }))
+        setSuggestions(prev => patchResults(prev, person.id, { relationshipStatus: "connected", incomingRequestNotificationId: null }).filter(isConnectableSuggestion))
         return
       }
 
       const response = await onConnectUser?.(person.id)
       if (response?.status === "already_connected") {
         setResults(prev => patchResults(prev, person.id, { relationshipStatus: "connected" }))
+        setSuggestions(prev => patchResults(prev, person.id, { relationshipStatus: "connected" }).filter(isConnectableSuggestion))
       } else if (response?.status === "incoming_request") {
         setResults(prev => patchResults(prev, person.id, { relationshipStatus: "incoming_request", incomingRequestNotificationId: response?.notificationId || null }))
+        setSuggestions(prev => patchResults(prev, person.id, { relationshipStatus: "incoming_request", incomingRequestNotificationId: response?.notificationId || null }))
       } else {
         setResults(prev => patchResults(prev, person.id, { relationshipStatus: "outgoing_request" }))
+        setSuggestions(prev => patchResults(prev, person.id, { relationshipStatus: "outgoing_request" }))
       }
     } finally {
       setSavingIds(prev => prev.filter(id => String(id) !== String(person.id)))
     }
   }
 
-  const renderPersonCard = person => {
+  const renderPersonCard = (person, compact = false) => {
     const meta = getResultMeta(person)
     const isBusy = savingIds.includes(person.id)
     const disabled = person.relationshipStatus === "self" || person.relationshipStatus === "outgoing_request" || isBusy
 
     return (
-      <div key={person.id} className={cx("rounded-[24px] border p-4 transition sm:p-5", ui.soft, !isDarkMode && "hover:shadow-[0_16px_34px_rgba(15,23,42,0.06)]")}>
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
-            <div className={cx("flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[20px]", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f7fb]")}>
-              {renderAvatar(person, 50)}
+      <div key={person.id} className={cx("rounded-[24px] border transition", compact ? "p-3.5" : "p-4 sm:p-5", ui.soft, !isDarkMode && "hover:shadow-[0_16px_34px_rgba(15,23,42,0.06)]")}>
+        <div className={cx("flex flex-col", compact ? "gap-3" : "gap-4 md:flex-row md:items-start md:justify-between")}>
+          <div className={cx("flex min-w-0 items-start", compact ? "gap-3" : "gap-4")}>
+            <div className={cx("flex shrink-0 items-center justify-center overflow-hidden", compact ? "h-11 w-11 rounded-[16px]" : "h-14 w-14 rounded-[20px]", isDarkMode ? "bg-white/[0.04]" : "bg-[#f3f7fb]")}>
+              {renderAvatar(person, compact ? 40 : 50)}
             </div>
             <div className="min-w-0">
-              <div className={cx("truncate text-[1.08rem] font-semibold", ui.textPrimary)}>{person.name}</div>
-              <div className={cx("mt-1 text-sm leading-6", meta.headline ? ui.textSecondary : ui.textMuted)}>{meta.headline || "Professional details appear here when available."}</div>
-              <div className={cx("mt-1.5 text-sm", ui.textMuted)}>
+              <div className={cx("truncate font-semibold", compact ? "text-base" : "text-[1.08rem]", ui.textPrimary)}>{person.name}</div>
+              <div className={cx("mt-1 text-sm", compact ? "line-clamp-2 leading-5" : "leading-6", meta.headline ? ui.textSecondary : ui.textMuted)}>{meta.headline || "Professional details appear here when available."}</div>
+              <div className={cx("mt-1.5 text-sm", compact && "leading-5", ui.textMuted)}>
                 {person.relationshipStatus === "connected"
                   ? "Already in your network."
                   : person.relationshipStatus === "incoming_request"
@@ -255,9 +308,9 @@ export default function ConnectHub({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className={cx("flex items-center gap-3", compact ? "justify-end" : "")}>
             {person.relationshipStatus === "connected" ? <CheckCircle2 className={cx("h-5 w-5", isDarkMode ? "text-emerald-300" : "text-emerald-600")} /> : null}
-            <button type="button" onClick={() => handlePersonAction(person)} disabled={disabled} className={cx("inline-flex min-w-[118px] items-center justify-center rounded-full px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60", person.relationshipStatus === "connected" ? ui.secondaryButton : ui.primaryButton)}>
+            <button type="button" onClick={() => handlePersonAction(person)} disabled={disabled} className={cx("inline-flex items-center justify-center rounded-full text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60", compact ? "min-w-[104px] px-4 py-2" : "min-w-[118px] px-4 py-2.5", person.relationshipStatus === "connected" ? ui.secondaryButton : ui.primaryButton)}>
               {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : getActionLabel(person.relationshipStatus)}
             </button>
           </div>
@@ -386,17 +439,17 @@ export default function ConnectHub({
   )
 
   const renderDiscoverPane = () => (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_320px]">
-      <div className="space-y-5">
-        <section className={cx("rounded-[28px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
-          <div className="flex flex-col gap-4">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_300px]">
+      <div className="space-y-4">
+        <section className={cx("rounded-[24px] border p-4 shadow-[0_12px_26px_rgba(15,23,42,0.045)] sm:p-5", ui.shell)}>
+          <div className="flex flex-col gap-3.5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className={cx("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", ui.pill)}>
+                <div className={cx("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]", ui.pill)}>
                   <Search className="h-3.5 w-3.5" />
                   Find people
                 </div>
-                <div className={cx("mt-3 text-[1.45rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>Search your network by name</div>
+                <div className={cx("mt-2.5 text-[1.28rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>Search your network by name</div>
                 <p className={cx("mt-1.5 max-w-2xl text-sm leading-6", ui.textMuted)}>
                   
                 </p>
@@ -423,7 +476,7 @@ export default function ConnectHub({
                 value={query}
                 onChange={event => setQuery(event.target.value)}
                 placeholder="Search for teammates, collaborators, or friends"
-                className={cx("h-14 w-full rounded-[22px] border pl-14 pr-4 text-[15px] outline-none transition", ui.input)}
+                className={cx("h-12 w-full rounded-[18px] border pl-12 pr-4 text-sm outline-none transition", ui.input)}
               />
             </label>
           </div>
@@ -461,89 +514,110 @@ export default function ConnectHub({
           </section>
         ) : null}
 
-        <section className={cx("rounded-[28px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
+        <section className={cx("rounded-[24px] border p-4 shadow-[0_12px_26px_rgba(15,23,42,0.045)] sm:p-5", ui.shell)}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className={cx("text-[1.25rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>Search results</div>
+              <div className={cx("text-[1.15rem] font-semibold tracking-[-0.03em]", ui.textPrimary)}>{debouncedQuery ? "Search results" : "People to connect with"}</div>
               <p className={cx("mt-1.5 text-sm leading-6", ui.textMuted)}>
                 {debouncedQuery
                   ? loadingResults && results.length > 0
                     ? "Showing quick matches first while the backend refreshes."
                     : ""
-                  : "Start typing above to look for people in your network."}
+                  : suggestions.length > 0
+                    ? "People outside your current network are ready to connect."
+                    : loadingSuggestions
+                      ? "Finding people you are not connected with yet."
+                      : "Start typing above to look for people in your network."}
               </p>
             </div>
-            <div className={cx("rounded-full border px-3 py-1 text-xs font-semibold", ui.pill)}>{results.length}</div>
+            <div className={cx("rounded-full border px-3 py-1 text-xs font-semibold", ui.pill)}>{debouncedQuery ? results.length : suggestions.length}</div>
           </div>
 
           <div className="mt-5">
-            {loadingResults && results.length === 0 ? (
+            {debouncedQuery ? (
+              loadingResults && results.length === 0 ? (
               <div className={cx("flex min-h-[220px] flex-col items-center justify-center rounded-[24px] border border-dashed text-center", isDarkMode ? "border-white/10 bg-white/[0.02]" : "border-[#e5edf5] bg-[#fbfdff]")}>
                 <LoaderCircle className={cx("h-6 w-6 animate-spin", ui.textSoft)} />
                 <p className={cx("mt-3 text-sm", ui.textMuted)}>Searching people...</p>
               </div>
-            ) : searchError ? (
+              ) : searchError ? (
               <div className={cx("min-h-[220px] rounded-[24px] border border-dashed px-6 py-10 text-center", isDarkMode ? "border-rose-400/20 bg-rose-500/5 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700")}>
                 {searchError}
               </div>
-            ) : results.length > 0 ? (
+              ) : results.length > 0 ? (
               <div className="space-y-3">{results.map(renderPersonCard)}</div>
+              ) : (
+              <div className={cx("min-h-[220px] rounded-[24px] border border-dashed px-6 py-10 text-center", isDarkMode ? "border-white/10 bg-white/[0.02]" : "border-[#e5edf5] bg-[#fbfdff]")}>
+                <div className={cx("mx-auto flex h-16 w-16 items-center justify-center rounded-full", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-[#506176] shadow-[0_12px_24px_rgba(15,23,42,0.06)]")}>
+                  <Users className="h-7 w-7" />
+                </div>
+                <div className={cx("mt-5 text-xl font-semibold", ui.textPrimary)}>No matching people found</div>
+                <p className={cx("mx-auto mt-2 max-w-md text-sm leading-6", ui.textMuted)}>
+                  Try another spelling or a shorter name to widen the search.
+                </p>
+              </div>
+              )
+            ) : suggestions.length > 0 ? (
+              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{suggestions.map(person => renderPersonCard(person, true))}</div>
+            ) : loadingSuggestions ? (
+              <div className={cx("flex min-h-[220px] flex-col items-center justify-center rounded-[24px] border border-dashed text-center", isDarkMode ? "border-white/10 bg-white/[0.02]" : "border-[#e5edf5] bg-[#fbfdff]")}>
+                <LoaderCircle className={cx("h-6 w-6 animate-spin", ui.textSoft)} />
+                <p className={cx("mt-3 text-sm", ui.textMuted)}>Loading people...</p>
+              </div>
             ) : (
               <div className={cx("min-h-[220px] rounded-[24px] border border-dashed px-6 py-10 text-center", isDarkMode ? "border-white/10 bg-white/[0.02]" : "border-[#e5edf5] bg-[#fbfdff]")}>
                 <div className={cx("mx-auto flex h-16 w-16 items-center justify-center rounded-full", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-white text-[#506176] shadow-[0_12px_24px_rgba(15,23,42,0.06)]")}>
                   <Users className="h-7 w-7" />
                 </div>
-                <div className={cx("mt-5 text-xl font-semibold", ui.textPrimary)}>{debouncedQuery ? "No matching people found" : "Search for someone new"}</div>
-                <p className={cx("mx-auto mt-2 max-w-md text-sm leading-6", ui.textMuted)}>
-                  {debouncedQuery ? "Try another spelling or a shorter name to widen the search." : "Type a name above to search the backend for possible connections."}
-                </p>
+                <div className={cx("mt-5 text-xl font-semibold", ui.textPrimary)}>No new people right now</div>
+                <p className={cx("mx-auto mt-2 max-w-md text-sm leading-6", ui.textMuted)}>Everyone we found is already in your network.</p>
               </div>
             )}
           </div>
         </section>
       </div>
 
-      <aside className="space-y-5">
-        <section className={cx("rounded-[28px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
-          <div className={cx("text-sm font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Network pulse</div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
+      <aside className="space-y-4">
+        <section className={cx("rounded-[24px] border p-4 shadow-[0_12px_26px_rgba(15,23,42,0.045)]", ui.shell)}>
+          <div className={cx("text-xs font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Network pulse</div>
+          <div className="mt-3 grid grid-cols-2 gap-2.5">
             {[["Connections", friends.length], ["Pending", pendingRequests.length]].map(([label, value]) => (
-              <div key={label} className={cx("rounded-[20px] border p-4", ui.tint)}>
-                <div className={cx("text-[1.8rem] font-semibold", ui.textPrimary)}>{value}</div>
-                <div className={cx("mt-1 text-sm", ui.textMuted)}>{label}</div>
+              <div key={label} className={cx("rounded-[16px] border p-3", ui.tint)}>
+                <div className={cx("text-[1.45rem] font-semibold", ui.textPrimary)}>{value}</div>
+                <div className={cx("mt-0.5 text-xs", ui.textMuted)}>{label}</div>
               </div>
             ))}
           </div>
         </section>
 
-        <section className={cx("rounded-[28px] border p-5 shadow-[0_16px_34px_rgba(15,23,42,0.05)] sm:p-6", ui.shell)}>
-          <div className="flex items-start gap-4">
-            <div className={cx("flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[22px]", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f7fb]")}>
-              {currentUser ? renderAvatar(currentUser, 52) : null}
+        <section className={cx("rounded-[24px] border p-4 shadow-[0_12px_26px_rgba(15,23,42,0.045)]", ui.shell)}>
+          <div className="flex items-start gap-3">
+            <div className={cx("flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px]", isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f7fb]")}>
+              {currentUser ? renderAvatar(currentUser, 44) : null}
             </div>
             <div className="min-w-0">
-              <div className={cx("text-[1.05rem] font-semibold", ui.textPrimary)}>{currentUser?.name}</div>
-              <div className={cx("mt-1 text-sm leading-6", ui.textMuted)}>
+              <div className={cx("text-base font-semibold", ui.textPrimary)}>{currentUser?.name}</div>
+              <div className={cx("mt-1 text-sm leading-5", ui.textMuted)}>
                 {profileStrength > 0 ? "Your profile has enough context to look credible in search." : "Add role, company, or LinkedIn from Settings to strengthen your card."}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 space-y-2.5">
-            <div className={cx("rounded-[18px] border px-4 py-3", ui.tint)}>
+          <div className="mt-3 space-y-2.5">
+            <div className={cx("rounded-[16px] border px-3.5 py-2.5", ui.tint)}>
               <div className={cx("text-[11px] font-semibold uppercase tracking-[0.18em]", ui.textSoft)}>Profile strength</div>
-              <div className={cx("mt-1 text-base font-semibold", ui.textPrimary)}>{profileStrength}/3 fields added</div>
+              <div className={cx("mt-1 text-sm font-semibold", ui.textPrimary)}>{profileStrength}/3 fields added</div>
             </div>
             {currentProfile.position || currentProfile.companyName ? (
-              <div className={cx("rounded-[18px] border px-4 py-3", ui.tint)}>
+              <div className={cx("rounded-[16px] border px-3.5 py-2.5", ui.tint)}>
                 <div className={cx("flex items-center gap-2 text-sm font-medium", ui.textPrimary)}>
                   <BriefcaseBusiness className="h-4 w-4" />
                   {currentProfile.position && currentProfile.companyName ? `${currentProfile.position} at ${currentProfile.companyName}` : currentProfile.position || currentProfile.companyName}
                 </div>
               </div>
             ) : null}
-            <div className={cx("rounded-[18px] border px-4 py-3 text-sm leading-6", ui.tint, ui.textSecondary)}>
-              <ShieldCheck className="mb-2 h-4 w-4" />
+            <div className={cx("rounded-[16px] border px-3.5 py-2.5 text-sm leading-5", ui.tint, ui.textSecondary)}>
+              <ShieldCheck className="mb-1.5 h-4 w-4" />
               Keep the page focused on discovery. Manage profile details from the homepage settings menu.
             </div>
           </div>

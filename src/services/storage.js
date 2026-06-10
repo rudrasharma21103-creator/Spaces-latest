@@ -825,21 +825,29 @@ export const getMessageCount = async (chatId, options = {}) => {
   return request
 }
 
+const updateMessageCache = (chatId, messageId, updater) => {
+  try {
+    const cached = peekMessages(chatId)
+    if (!Array.isArray(cached)) return
+
+    let changed = false
+    const next = cached.map(item => {
+      if (String(item.id) !== String(messageId)) return item
+      changed = true
+      return typeof updater === "function" ? updater(item) : { ...item, ...updater }
+    })
+
+    if (changed) {
+      writeMessagesCache(chatId, next)
+      writeMessageCountCache(chatId, next.length)
+    }
+  } catch (e) {}
+}
+
 export const updateMessage = async (chatId, message) => {
   if (!chatId || !message || !message.id) return
 
-  try {
-    const cached = peekMessages(chatId)
-    const next = Array.isArray(cached)
-      ? cached.map(item =>
-          String(item.id) === String(message.id)
-            ? { ...item, ...message }
-            : item
-        )
-      : []
-    writeMessagesCache(chatId, next)
-    writeMessageCountCache(chatId, next.length)
-  } catch (e) {}
+  updateMessageCache(chatId, message.id, message)
 
   const res = await authFetch(`${API_BASE}/messages/${chatId}/${message.id}`, {
     method: "PATCH",
@@ -848,6 +856,23 @@ export const updateMessage = async (chatId, message) => {
   if (!res.ok) {
     throw new Error(`Failed to update message (${res.status})`)
   }
+}
+
+export const updateMessageReaction = async (chatId, messageId, emoji, shouldHaveReaction) => {
+  if (!chatId || !messageId || !emoji) return null
+
+  const res = await authFetch(`${API_BASE}/messages/${chatId}/${encodeURIComponent(String(messageId))}/reactions`, {
+    method: "PATCH",
+    body: JSON.stringify({ emoji, shouldHaveReaction: Boolean(shouldHaveReaction) })
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(data?.detail || `Failed to update reaction (${res.status})`)
+  }
+  if (data?.message) {
+    updateMessageCache(chatId, messageId, data.message)
+  }
+  return data?.message || null
 }
 
 export const deleteMessage = async (chatId, messageId) => {

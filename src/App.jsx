@@ -473,6 +473,62 @@ export default function CollaborationApp() {
   const [unreadChannels, setUnreadChannels] = useState([]) // Track unread channel IDs
   const [, setMessageCounts] = useState({}) // Track counts to detect changes
   const readMessageCountsRef = useRef({})
+  const pendingReactionOverridesRef = useRef(new Map())
+
+  const getReactionOverrideKey = React.useCallback((chatId, messageId) => `${String(chatId)}::${String(messageId)}`, [])
+
+  const cloneReactions = React.useCallback(reactions => {
+    const next = {}
+    Object.entries(reactions || {}).forEach(([emoji, userIds]) => {
+      if (!Array.isArray(userIds) || userIds.length === 0) return
+      next[emoji] = [...userIds]
+    })
+    return next
+  }, [])
+
+  const setUserReactionState = React.useCallback((reactions, emoji, userId, shouldHaveReaction) => {
+    const normalizedUserId = String(userId)
+    const existing = Array.isArray(reactions?.[emoji]) ? reactions[emoji] : []
+    const withoutUser = existing.filter(id => String(id) !== normalizedUserId)
+
+    if (shouldHaveReaction) {
+      reactions[emoji] = [...withoutUser, userId]
+      return reactions
+    }
+
+    if (withoutUser.length > 0) reactions[emoji] = withoutUser
+    else delete reactions[emoji]
+    return reactions
+  }, [])
+
+  const applyPendingReactionOverrides = React.useCallback((chatId, items) => {
+    if (!currentUser?.id || !chatId || !Array.isArray(items) || items.length === 0) return items
+
+    const now = Date.now()
+    const ttl = 20000
+
+    return items.map(message => {
+      const messageId = message?.id
+      if (!messageId) return message
+
+      const key = getReactionOverrideKey(chatId, messageId)
+      const pending = pendingReactionOverridesRef.current.get(key)
+      if (!pending) return message
+
+      if (now - pending.updatedAt > ttl) {
+        pendingReactionOverridesRef.current.delete(key)
+        return message
+      }
+
+      const reactions = cloneReactions(message.reactions)
+
+      Object.entries(pending.emojiStates || {}).forEach(([emoji, shouldHaveReaction]) => {
+        setUserReactionState(reactions, emoji, currentUser.id, shouldHaveReaction)
+      })
+
+      return { ...message, reactions }
+    })
+  }, [cloneReactions, currentUser?.id, getReactionOverrideKey, setUserReactionState])
 
   const markChannelRead = React.useCallback((channelId, count = 0) => {
     if (!channelId || !currentUser?.id) return
@@ -2764,11 +2820,15 @@ export default function CollaborationApp() {
     
     const cachedMessages = Storage.peekMessages(chatId)
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
+      const cachedWithPendingReactions = applyPendingReactionOverrides(
+        chatId,
+        cachedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
+      )
       setMessages(prev => {
         if (prev[chatId] === cachedMessages) return prev
         return {
           ...prev,
-          [chatId]: cachedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
+          [chatId]: cachedWithPendingReactions
         }
       })
     }
@@ -2779,14 +2839,15 @@ export default function CollaborationApp() {
         const normalized = Array.isArray(storedMessages)
           ? storedMessages.map(msg => ({ ...msg, status: "sent", optimistic: false }))
           : []
+        const normalizedWithPendingReactions = applyPendingReactionOverrides(chatId, normalized)
 
         setMessages(prev => {
           const existing = prev[chatId] || []
-          const serverIds = new Set(normalized.map(m => m.id))
+          const serverIds = new Set(normalizedWithPendingReactions.map(m => m.id))
           const optimisticOnly = existing.filter(m => m.optimistic && !serverIds.has(m.id))
           return {
             ...prev,
-            [chatId]: dedupeMessagesById([...normalized, ...optimisticOnly])
+            [chatId]: dedupeMessagesById([...normalizedWithPendingReactions, ...optimisticOnly])
           }
         })
         if (resolvedView === "channel") {
@@ -2812,7 +2873,7 @@ export default function CollaborationApp() {
     // Use a slower fallback refresh; real-time delivery is handled by WebSocket.
     const interval = setInterval(() => loadMessages(true), 15000)
     return () => clearInterval(interval)
-  }, [isAuthenticated, activeChannel, activeView, activeDMUser, contextsSourceView, currentUser, spaces.length, markChannelRead])
+  }, [isAuthenticated, activeChannel, activeView, activeDMUser, contextsSourceView, currentUser, spaces.length, markChannelRead, applyPendingReactionOverrides])
 
 
   // Chat websocket connection for real-time message delivery
@@ -2932,7 +2993,7 @@ export default function CollaborationApp() {
         return
       }
 
-      const normalized = { ...data, status: "sent", optimistic: false }
+      const normalized = applyPendingReactionOverrides(chatId, [{ ...data, status: "sent", optimistic: false }])[0]
 
       setMessages(prev => {
         const key = chatId
@@ -5125,7 +5186,7 @@ export default function CollaborationApp() {
     if (!chatId) return
     try {
       const items = await Storage.getMessages(chatId, { forceRefresh: true })
-      setMessages(prev => ({ ...prev, [chatId]: Array.isArray(items) ? items : [] }))
+      setMessages(prev => ({ ...prev, [chatId]: applyPendingReactionOverrides(chatId, Array.isArray(items) ? items : []) }))
     } catch (error) {
       console.warn("Failed to load DM messages", error)
     }
@@ -5399,24 +5460,57 @@ export default function CollaborationApp() {
   const toggleReaction = async (chatId, messageId, emoji) => {
     if (!chatId || !currentUser) return
     const msgs = messages[chatId] || []
-    const idx = msgs.findIndex(m => m.id === messageId)
+    const idx = msgs.findIndex(m => String(m.id) === String(messageId))
     if (idx === -1) return
-    const msg = { ...msgs[idx] }
-    if (!msg.reactions) msg.reactions = {}
-    const current = Array.isArray(msg.reactions[emoji]) ? [...msg.reactions[emoji]] : []
-    const hasReacted = current.includes(currentUser.id)
-    const next = hasReacted ? current.filter(id => id !== currentUser.id) : [...current, currentUser.id]
-    if (next.length === 0) delete msg.reactions[emoji]
-    else msg.reactions[emoji] = next
+    const previousMessage = {
+      ...msgs[idx],
+      reactions: cloneReactions(msgs[idx].reactions),
+    }
+    const reactions = cloneReactions(previousMessage.reactions)
+    const current = Array.isArray(reactions[emoji]) ? reactions[emoji] : []
+    const hasReacted = current.some(id => String(id) === String(currentUser.id))
+    const shouldHaveReaction = !hasReacted
+    setUserReactionState(reactions, emoji, currentUser.id, shouldHaveReaction)
+
+    const msg = {
+      ...previousMessage,
+      reactions,
+    }
+
+    const overrideKey = getReactionOverrideKey(chatId, msg.id)
+    const existingOverride = pendingReactionOverridesRef.current.get(overrideKey)
+    pendingReactionOverridesRef.current.set(overrideKey, {
+      emojiStates: {
+        ...(existingOverride?.emojiStates || {}),
+        [emoji]: shouldHaveReaction,
+      },
+      updatedAt: Date.now(),
+    })
+
+    setMessages(prev => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map(m => (String(m.id) === String(msg.id) ? msg : m))
+    }))
 
     try {
-      await Storage.updateMessage(chatId, msg)
-      setMessages(prev => ({
-        ...prev,
-        [chatId]: prev[chatId].map(m => (m.id === msg.id ? msg : m))
-      }))
+      const updatedMessage = await Storage.updateMessageReaction(chatId, msg.id, emoji, shouldHaveReaction)
+      if (updatedMessage) {
+        setMessages(prev => ({
+          ...prev,
+          [chatId]: (prev[chatId] || []).map(m =>
+            String(m.id) === String(updatedMessage.id)
+              ? { ...m, ...updatedMessage, status: updatedMessage.status || m.status || "sent", optimistic: false }
+              : m
+          )
+        }))
+      }
     } catch (e) {
       console.error('Failed to update reaction', e)
+      pendingReactionOverridesRef.current.delete(overrideKey)
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).map(m => (String(m.id) === String(previousMessage.id) ? previousMessage : m))
+      }))
     }
   }
 
@@ -6605,6 +6699,13 @@ export default function CollaborationApp() {
   }
 
   const openContext = contextId => {
+    if ((activeView === "channel" || activeView === "dm") && activeChannelTab === "contexts") {
+      setOpenContextId(contextId)
+      setMessageActionMenu(null)
+      setMessageContextPicker(null)
+      return
+    }
+
     openContextsPage(contextId)
     setMessageActionMenu(null)
     setMessageContextPicker(null)
@@ -6771,11 +6872,6 @@ export default function CollaborationApp() {
   }
 
   const handleChannelTabChange = nextTab => {
-    if (nextTab === "contexts") {
-      openContextsPage(null)
-      return
-    }
-
     const activeChatId = getActiveChatId()
     if ((activeView === "channel" || activeView === "dm") && activeChatId) {
       if (activeChannelTab === "messages" && nextTab !== "messages") {
@@ -6787,6 +6883,10 @@ export default function CollaborationApp() {
       } else if (nextTab !== "messages") {
         pendingTabScrollRestoreRef.current = null
       }
+    }
+
+    if (nextTab !== "contexts") {
+      setOpenContextId(null)
     }
 
     setActiveChannelTab(nextTab)
@@ -12445,15 +12545,59 @@ export default function CollaborationApp() {
                 {/* Updated Container with Custom Pattern Background */}
 
                 {(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" && (
-                  <div className="flex-1 overflow-y-auto py-2 pb-6">
+                  <div className={`flex-1 ${activeChannelTab === "contexts" && currentContext ? "min-h-0 overflow-hidden" : "overflow-y-auto py-2 pb-6"}`}>
                     {activeChannelTab === "contexts" && (
-                      <ContextsTabView
-                        contexts={currentChannelContexts}
-                        isDarkMode={isDarkMode}
-                        onOpen={openContext}
-                        renderOwner={getContextOwnerName}
-                        formatUpdatedTime={formatContextTime}
-                      />
+                      currentContext ? (
+                        <LivingContextPanel
+                          isDarkMode={isDarkMode}
+                          context={currentContext}
+                          ownerName={getContextOwnerName(currentContext.ownerId)}
+                          contributorNames={(currentContext.contributorIds || []).map(getContextOwnerName)}
+                          linkedMessages={currentContextMessages}
+                          files={currentContextFiles}
+                          decisions={currentContextDecisions}
+                          tasks={currentContextTasks.map(task => ({
+                            ...task,
+                            assigneeLabel: (task.assigneeIds || []).map(getContextOwnerName).join(", ") || "Unassigned",
+                          }))}
+                          activity={currentContextActivity}
+                          canEdit={isContextManager(currentContext)}
+                          canAddSelectedMessage={selectedMessageIds.length > 0}
+                          onAddSelectedMessage={async () => {
+                            for (const messageId of selectedMessageIds) {
+                              await addMessageToContext(currentContext.id, messageId)
+                            }
+                          }}
+                          onMarkDecision={activeView === "channel" ? (() => {
+                            const selected = getMessageById(selectedMessageIds[0])
+                            if (selected) markMessageDecision(selected)
+                          }) : undefined}
+                          onCreateTask={() => {
+                            const selected = getMessageById(selectedMessageIds[0])
+                            if (selected) openTaskFromMessage(selected)
+                          }}
+                          onEdit={() => {
+                            setEditingContextId(currentContext.id)
+                            setContextDraft({
+                              title: currentContext.title,
+                              summary: currentContext.summary,
+                              status: currentContext.status,
+                              ownerId: String(currentContext.ownerId),
+                              messageIds: currentContext.linkedMessageIds || [],
+                            })
+                          }}
+                          onClose={() => setOpenContextId(null)}
+                          formatTime={formatContextTime}
+                        />
+                      ) : (
+                        <ContextsTabView
+                          contexts={currentChannelContexts}
+                          isDarkMode={isDarkMode}
+                          onOpen={openContext}
+                          renderOwner={getContextOwnerName}
+                          formatUpdatedTime={formatContextTime}
+                        />
+                      )
                     )}
                     {activeChannelTab === "files" && (
                       <ChannelFilesGallery

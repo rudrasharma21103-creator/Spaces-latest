@@ -504,11 +504,11 @@ export default function HomeHub({
   ]
 
   const renderThoughtsCard = (className = "") => (
-    <div className={cx("flex flex-col rounded-[24px] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : cx("bg-gradient-to-br text-[#111827]", thought.accent), className)}>
+    <div className={cx("flex flex-col rounded-[24px] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]", isDarkMode ? "border border-white/10 bg-[#111111] text-slate-100" : "border border-[#edf1f5] bg-white text-[#111827]", className)}>
       <div className={cx("text-xs font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-[#3f3f46]/65")}>Thoughts</div>
       <h3 className="mt-3 text-[1.8rem] font-semibold leading-tight">{thought.title}</h3>
       <p className={cx("mt-3 text-sm leading-7", isDarkMode ? "text-slate-300" : "text-[#27272a]/78")}>{thought.body}</p>
-      <div className={cx("mt-6 rounded-[18px] px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/55 text-[#3f3f46]/70", className && "mt-auto")}>Refreshes once every 24 hours</div>
+      <div className={cx("mt-6 rounded-[18px] px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] backdrop-blur-sm", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-[#f4f7fb] text-[#3f3f46]/70", className && "mt-auto")}>Refreshes once every 24 hours</div>
     </div>
   )
 
@@ -603,15 +603,15 @@ export default function HomeHub({
 
   const renderMobileThoughtsCard = () => (
     <div className={cx("relative flex-1 overflow-hidden rounded-[30px] border p-5 shadow-[0_18px_40px_rgba(15,23,42,0.10)]", isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#e8eef5] bg-white")}>
-      <div className={cx("pointer-events-none absolute inset-0", isDarkMode ? "bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.16),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.12),transparent_35%)]" : "bg-[linear-gradient(155deg,rgba(255,244,230,0.9)_0%,rgba(236,248,255,0.92)_48%,rgba(228,245,238,0.95)_100%)]")} />
+      <div className={cx("pointer-events-none absolute inset-0", isDarkMode ? "bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.16),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.12),transparent_35%)]" : "")} />
       <div className={cx("pointer-events-none absolute -right-10 bottom-[-20%] h-44 w-44 rounded-full", isDarkMode ? "bg-sky-500/10 blur-3xl" : "bg-sky-200/60 blur-2xl")} />
 
       <div className="relative flex min-h-[280px] flex-col">
-        <div className={cx("inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/70 text-[#607085]")}>Thought Of The Day</div>
+        <div className={cx("inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-[#f4f7fb] text-[#607085]")}>Thought Of The Day</div>
         <h3 className={cx("mt-5 max-w-[12ch] text-[2rem] font-semibold leading-[1.05] tracking-[-0.05em]", ui.textPrimary)}>{thought.title}</h3>
         <p className={cx("mt-4 max-w-[28ch] text-[15px] leading-7", isDarkMode ? "text-slate-300" : "text-[#334155]")}>{thought.body}</p>
 
-        <div className={cx("mt-auto inline-flex w-fit rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-white/75 text-[#64748b] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]")}>
+        <div className={cx("mt-auto inline-flex w-fit rounded-full px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-[#f4f7fb] text-[#64748b]")}>
           Refreshes Once Every 24 Hours
         </div>
       </div>
