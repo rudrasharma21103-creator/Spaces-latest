@@ -189,6 +189,7 @@ try:
     users_collection.create_index("email_domain")
     users_collection.create_index("id", unique=True)
     users_collection.create_index("friends")
+    users_collection.create_index([("notifications.type", 1), ("notifications.status", 1), ("notifications.fromId", 1)])
     users_collection.create_index("professionalProfile.companyName")
     users_collection.create_index("professionalProfile.position")
 

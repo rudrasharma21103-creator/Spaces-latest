@@ -9,9 +9,9 @@ import {
   ListOrdered,
   List,
   AlignLeft,
+  AtSign,
   Code2,
   Braces,
-  Type,
   Hash,
   Users,
   Search,
@@ -1019,7 +1019,7 @@ export default function CollaborationApp() {
   // Modals & Panels
   const [messageInput, setMessageInput] = useState("")
   const [composerIsEmpty, setComposerIsEmpty] = useState(true)
-  const [showComposerFormatting, setShowComposerFormatting] = useState(false)
+  const [showComposerFormatting, setShowComposerFormatting] = useState(true)
   const [activeComposerFormats, setActiveComposerFormats] = useState({})
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingMessageText, setEditingMessageText] = useState("")
@@ -5306,6 +5306,17 @@ export default function CollaborationApp() {
     setHomeSection("overview")
   }
 
+  const openHomeConnect = () => {
+    setActiveDraftId(null)
+    setInviteSearchQuery("")
+    setSelectedFriendInvitees([])
+    setShowAddFriendModal(false)
+    setActiveView("home")
+    setHomeSection("connect")
+    setConnectPreferredPane("discover")
+    if (isMobile) setMobileView("chat")
+  }
+
   const openHomeDM = async (partnerId, options = {}) => {
     if (options.clearDraft !== false) {
       setActiveDraftId(null)
@@ -8200,18 +8211,20 @@ export default function CollaborationApp() {
 
   const sendFriendRequest = async targetId => {
     if (!currentUser) return
-    const target = users.find(u => u.id === targetId)
-    if (!target) return
-    if (pendingFriendRequestIdsRef.current.has(target.id)) return
+    const target = users.find(u => String(u.id) === String(targetId))
+    const requestTargetId = target?.id ?? targetId
+    if (requestTargetId === undefined || requestTargetId === null || requestTargetId === "") return null
+    const pendingKey = String(requestTargetId)
+    if (pendingFriendRequestIdsRef.current.has(pendingKey)) return { status: "pending" }
 
-    pendingFriendRequestIdsRef.current.add(target.id)
-    setPendingFriendRequestIds(prev => (prev.includes(target.id) ? prev : [...prev, target.id]))
+    pendingFriendRequestIdsRef.current.add(pendingKey)
+    setPendingFriendRequestIds(prev => (prev.some(id => String(id) === pendingKey) ? prev : [...prev, requestTargetId]))
 
     try {
-      await Storage.sendFriendRequest(currentUser.id, currentUser.name, target.id)
+      return await Storage.sendFriendRequest(currentUser.id, currentUser.name, requestTargetId)
     } finally {
-      pendingFriendRequestIdsRef.current.delete(target.id)
-      setPendingFriendRequestIds(prev => prev.filter(id => id !== target.id))
+      pendingFriendRequestIdsRef.current.delete(pendingKey)
+      setPendingFriendRequestIds(prev => prev.filter(id => String(id) !== pendingKey))
     }
   }
 
@@ -10787,11 +10800,7 @@ export default function CollaborationApp() {
           onOpenWorkspace={openWorkspaceHome}
           onOpenDirectMessages={openWorkspaceFriendsHome}
           onOpenDM={openHomeDM}
-          onOpenAddConnection={() => {
-            setInviteSearchQuery("")
-            setSelectedFriendInvitees([])
-            setShowAddFriendModal(true)
-          }}
+          onOpenAddConnection={openHomeConnect}
           onOpenTask={openTaskDetailView}
           onOpenDraft={openDraft}
           onDeleteDraft={deleteDraftById}
@@ -10809,6 +10818,7 @@ export default function CollaborationApp() {
           }}
           onOpenAdminDashboard={openAdminDashboard}
           canOpenAdminDashboard={canOpenAdminDashboard}
+          onConnectUser={sendFriendRequest}
           connectPreferredPane={connectPreferredPane}
           setConnectPreferredPane={setConnectPreferredPane}
           setDmInput={setHomeDMInput}
@@ -13347,10 +13357,10 @@ export default function CollaborationApp() {
                 <div ref={messageInputRef} className={`workspace-composer-wrap ${isMobile ? "px-3 pt-1 pb-16" : "p-6 pt-2"}`}>
                   {/* ... (Input UI) ... */}
                   <div
-                    className={`workspace-composer ${isMobile ? "rounded-[1.75rem] p-1.5" : "rounded-[2rem] p-2"} relative transition-all duration-300 ${
+                    className={`workspace-composer ${isMobile ? "rounded-xl" : "rounded-md"} relative overflow-visible p-0 transition-all duration-300 ${
                       isDarkMode
-                        ? 'bg-[#191b1f] border border-slate-700/50'
-                        : 'bg-[#e9eef6]'
+                        ? 'border border-slate-700/70 bg-[#191b1f]'
+                        : 'border border-[#d8dce3] bg-white shadow-[0_12px_28px_rgba(15,23,42,0.08)]'
                     }`}
                   >
                     {/* Attachments Preview */}
@@ -13409,37 +13419,38 @@ export default function CollaborationApp() {
                     )}
 
                     {showComposerFormatting && (
-                      <div className={`${isMobile ? "mx-1 mb-1 gap-0.5 rounded-2xl px-1.5 py-1" : "mx-2 mb-2 gap-1 rounded-[1.35rem] px-2 py-2"} flex flex-wrap items-center border ${
+                      <div className={`flex min-h-9 items-center gap-0.5 rounded-t-[inherit] border-b px-2 ${
                         isDarkMode
-                          ? 'border-slate-700/80 bg-slate-900/60'
-                          : 'border-slate-200/80 bg-white/75'
+                          ? 'border-slate-700/80 bg-slate-900/70'
+                          : 'border-[#edf0f3] bg-[#f7f7f8]'
                       }`}>
-                        {COMPOSER_FORMAT_ACTIONS.map(action => {
+                        {COMPOSER_FORMAT_ACTIONS.filter(action => action.key !== "underline" && action.key !== "quote").map(action => {
                           const FormatIcon = action.icon
                           const isActiveFormat = Boolean(activeComposerFormats[action.key])
+                          const showDivider = action.dividerBefore || action.key === "inline-code"
                           return (
                             <React.Fragment key={action.key}>
-                              {action.dividerBefore && (
-                                <span className={`${isMobile ? "mx-0.5 h-5" : "mx-1 h-6"} w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                              {showDivider && (
+                                <span className={`mx-1 h-5 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-[#e2e5e9]'}`} />
                               )}
                               <button
                                 type="button"
                                 onMouseDown={event => event.preventDefault()}
                                 onClick={() => applyComposerFormat(action.key)}
-                                className={`flex ${isMobile ? "h-8 w-8 rounded-lg" : "h-9 w-9 rounded-xl"} items-center justify-center transition-colors ${
+                                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                                   isActiveFormat
                                     ? isDarkMode
-                                      ? 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-400/30'
-                                      : 'bg-sky-100 text-sky-700 ring-1 ring-sky-200'
+                                      ? 'bg-white/10 text-slate-100'
+                                      : 'bg-white text-slate-800 shadow-sm'
                                     : isDarkMode
-                                      ? 'text-slate-300 hover:bg-slate-800 hover:text-cyan-300'
-                                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                                      ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
+                                      : 'text-[#a4a9af] hover:bg-white hover:text-slate-700'
                                 }`}
                                 title={action.label}
                                 aria-label={action.label}
                                 aria-pressed={isActiveFormat}
                               >
-                                <FormatIcon className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
+                                <FormatIcon className="h-4 w-4" />
                               </button>
                             </React.Fragment>
                           )
@@ -13447,147 +13458,15 @@ export default function CollaborationApp() {
                       </div>
                     )}
 
-                    <div className={`flex items-end ${isMobile ? "gap-1 px-1 pb-0.5" : "gap-2 px-2 pb-1"} relative`}>
-                      <div className="relative">
-                        <button
-                          ref={composerAttachButtonRef}
-                          onClick={e => {
-                            e.stopPropagation()
-                            setComposerAttachMenuOpen(prev => !prev)
-                            setComposerContextPickerOpen(false)
-                            setMessageActionMenu(null)
-                            setMessageContextPicker(null)
-                          }}
-                          className={`${isMobile ? "p-2.5 mb-0.5" : "p-3 mb-1"} rounded-full transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
-                        >
-                          <Paperclip className={isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} />
-                        </button>
-
-                        {composerAttachMenuOpen && (
-                          <div
-                            className={`absolute left-0 bottom-[calc(100%+0.5rem)] z-30 min-w-[220px] rounded-2xl border p-2 shadow-2xl ${
-                              isDarkMode ? 'border-slate-700 bg-slate-900/95' : 'border-slate-200 bg-white/95'
-                            }`}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <button
-                              onClick={() => {
-                                fileInputRef.current?.click()
-                                setComposerAttachMenuOpen(false)
-                              }}
-                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                                isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
-                              }`}
-                            >
-                              <Paperclip className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`} />
-                              Attach from computer
-                            </button>
-                            <button
-                              onClick={() => {
-                                setShowTaskModal(true)
-                                setComposerAttachMenuOpen(false)
-                              }}
-                              className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                                isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
-                              }`}
-                            >
-                              <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
-                              Create task
-                            </button>
-                            {(activeView === "channel" || activeView === "dm") && (
-                              <button
-                                onClick={() => {
-                                  setComposerAttachMenuOpen(false)
-                                  setComposerContextPickerOpen(true)
-                                  setMessageActionMenu(null)
-                                  setMessageContextPicker(null)
-                                }}
-                                className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                                  isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
-                                }`}
-                              >
-                                <Zap className={`w-4 h-4 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`} />
-                                Add to context
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        {(activeView === "channel" || activeView === "dm") && composerContextPickerOpen && (
-                          <div
-                            className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <AddToContextPopover
-                              anchorEl={composerAttachButtonRef.current}
-                              boundaryEl={messageInputRef.current || messagesContainerRef.current}
-                              isDarkMode={isDarkMode}
-                              contexts={currentChannelContexts}
-                              onClose={() => setComposerContextPickerOpen(false)}
-                              onSelect={contextId => {
-                                setSelectedComposerContextId(contextId)
-                                setComposerContextPickerOpen(false)
-                              }}
-                            />
-                          </div>
-                        )}
-
-                        {showEmojiPickerFor === 'input' && (
-                          <div className={`absolute left-0 top-12 flex gap-1 p-2 rounded-xl shadow-lg z-30 ${isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`}>
-                            {EMOJIS.map(e => (
-                              <button
-                                key={e}
-                                className="p-1 text-lg"
-                                onClick={() => {
-                                  setMessageInput(prev => prev + e)
-                                  setShowEmojiPickerFor(null)
-                                }}
-                              >
-                                {e}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        multiple
-                        className="hidden"
-                        ref={fileInputRef}
-                        onChange={handleFileSelect}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowComposerFormatting(prev => !prev)
-                          setComposerAttachMenuOpen(false)
-                          setComposerContextPickerOpen(false)
-                        }}
-                        className={`${isMobile ? "p-2.5 mb-0.5" : "p-3 mb-1"} rounded-full transition-colors ${
-                          showComposerFormatting
-                            ? isDarkMode
-                              ? 'bg-slate-800 text-cyan-300'
-                              : 'bg-white text-sky-700'
-                            : isDarkMode
-                              ? 'hover:bg-slate-700 text-slate-400 hover:text-cyan-400'
-                              : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'
-                        }`}
-                        title={showComposerFormatting ? "Hide formatting" : "Show formatting"}
-                        aria-label={showComposerFormatting ? "Hide formatting options" : "Show formatting options"}
-                        aria-pressed={showComposerFormatting}
-                      >
-                        <Type className={isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} />
-                      </button>
-
-                      <div className="relative flex-1">
+                    <div className="relative px-3 pb-2 pt-2">
+                      <div className="relative min-h-[38px]">
                         {composerIsEmpty && (
                           <span
-                            className={`pointer-events-none absolute left-0 right-1 truncate ${isMobile ? "top-2.5 text-sm" : "top-3.5"} font-medium ${
-                              isDarkMode ? 'text-slate-500' : 'text-slate-400'
+                            className={`pointer-events-none absolute left-0 right-1 top-1 truncate text-base font-normal ${
+                              isDarkMode ? 'text-slate-500' : 'text-[#8e949b]'
                             }`}
                           >
-                            {`Message ${getActiveViewName()}`}
+                            Message
                           </span>
                         )}
                         <div
@@ -13608,43 +13487,267 @@ export default function CollaborationApp() {
                               sendMessage()
                             }
                           }}
-                          className={`w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 ${isMobile ? "py-2 max-h-24 text-sm" : "py-3.5 max-h-32"} overflow-y-auto whitespace-pre-wrap break-words leading-relaxed font-medium [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:px-3 [&_pre]:py-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
+                          className={`w-full max-h-32 overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent py-1 pr-2 text-base font-normal leading-6 outline-none focus:outline-none focus:ring-0 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:px-3 [&_pre]:py-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
                             isDarkMode
                               ? 'text-white [&_a]:text-sky-300 [&_blockquote]:border-slate-600 [&_code]:bg-white/10 [&_code]:text-sky-100 [&_pre]:bg-black/25'
                               : 'text-slate-800 [&_a]:text-sky-700 [&_blockquote]:border-slate-300 [&_code]:bg-slate-100 [&_code]:text-slate-800 [&_pre]:bg-slate-100'
                           }`}
-                          style={{ minHeight: isMobile ? "36px" : "48px" }}
+                          style={{ minHeight: "30px" }}
                         />
                       </div>
 
-                      {(activeView === "channel" || activeView === "dm") && (
-                        <button
-                          onClick={saveWorkspaceDraft}
-                          disabled={!messageInput.trim()}
-                          className={`${isMobile ? "mb-0.5 rounded-xl px-3 py-2.5 text-xs" : "mb-1 rounded-2xl px-4 py-3 text-sm"} border font-semibold transition-all duration-300 ${
-                            isDarkMode
-                              ? 'border-slate-700 text-slate-300 hover:bg-slate-800 disabled:text-slate-500'
-                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:text-slate-400'
-                          } disabled:cursor-not-allowed disabled:opacity-70`}
-                        >
-                          {isMobile ? "Save" : "Save draft"}
-                        </button>
-                      )}
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <div className="relative flex min-w-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            ref={composerAttachButtonRef}
+                            onClick={e => {
+                              e.stopPropagation()
+                              setComposerAttachMenuOpen(prev => !prev)
+                              setComposerContextPickerOpen(false)
+                              setMessageActionMenu(null)
+                              setMessageContextPicker(null)
+                            }}
+                            className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+                              isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100' : 'bg-[#f1f2f4] text-[#a5abb2] hover:bg-[#e7eaee] hover:text-slate-600'
+                            }`}
+                            title="Attach"
+                            aria-label="Attach"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
 
-                      <button
-                        onClick={sendMessage}
-                        disabled={
-                          (!messageInput.trim() && selectedFiles.length === 0) ||
-                          isUploading
-                        }
-                        className={`${isMobile ? "p-2.5 mb-0.5 rounded-xl" : "p-3.5 mb-1 rounded-2xl"} border shadow-sm transition-all duration-300 active:scale-95 transform ${
-                          isDarkMode
-                            ? 'bg-[#191919] border-slate-700 text-slate-200 disabled:bg-[#191919] disabled:border-slate-700 disabled:text-slate-500'
-                            : 'bg-[#ffffff] border-slate-200/90 text-slate-600 hover:bg-[#ffffff] hover:border-slate-300 disabled:bg-[#ffffff] disabled:border-slate-200 disabled:text-slate-400'
-                        } disabled:opacity-70 hover:scale-105`}
-                      >
-                        <Send className={`${isMobile ? "h-[18px] w-[18px]" : "w-5 h-5"} ml-0.5`} />
-                      </button>
+                          {composerAttachMenuOpen && (
+                            <div
+                              className={`absolute left-0 bottom-[calc(100%+0.5rem)] z-30 min-w-[220px] rounded-2xl border p-2 shadow-2xl ${
+                                isDarkMode ? 'border-slate-700 bg-slate-900/95' : 'border-slate-200 bg-white/95'
+                              }`}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => {
+                                  fileInputRef.current?.click()
+                                  setComposerAttachMenuOpen(false)
+                                }}
+                                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                  isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <Paperclip className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`} />
+                                Attach from computer
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowTaskModal(true)
+                                  setComposerAttachMenuOpen(false)
+                                }}
+                                className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                  isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`} />
+                                Create task
+                              </button>
+                              {(activeView === "channel" || activeView === "dm") && (
+                                <button
+                                  onClick={() => {
+                                    setComposerAttachMenuOpen(false)
+                                    setComposerContextPickerOpen(true)
+                                    setMessageActionMenu(null)
+                                    setMessageContextPicker(null)
+                                  }}
+                                  className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                    isDarkMode ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <Zap className={`w-4 h-4 ${isDarkMode ? 'text-sky-300' : 'text-sky-600'}`} />
+                                  Add to context
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {(activeView === "channel" || activeView === "dm") && composerContextPickerOpen && (
+                            <div
+                              className="absolute left-0 bottom-[calc(100%+0.5rem)] z-30"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <AddToContextPopover
+                                anchorEl={composerAttachButtonRef.current}
+                                boundaryEl={messageInputRef.current || messagesContainerRef.current}
+                                isDarkMode={isDarkMode}
+                                contexts={currentChannelContexts}
+                                onClose={() => setComposerContextPickerOpen(false)}
+                                onSelect={contextId => {
+                                  setSelectedComposerContextId(contextId)
+                                  setComposerContextPickerOpen(false)
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            ref={fileInputRef}
+                            onChange={handleFileSelect}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowComposerFormatting(prev => !prev)
+                              setComposerAttachMenuOpen(false)
+                              setComposerContextPickerOpen(false)
+                            }}
+                            className={`flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-sm font-semibold underline-offset-2 transition-colors ${
+                              showComposerFormatting
+                                ? isDarkMode
+                                  ? 'text-slate-100 underline'
+                                  : 'text-slate-700 underline'
+                                : isDarkMode
+                                  ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
+                                  : 'text-[#7c838c] hover:bg-slate-100 hover:text-slate-700'
+                            }`}
+                            title={showComposerFormatting ? "Hide formatting" : "Show formatting"}
+                            aria-label={showComposerFormatting ? "Hide formatting options" : "Show formatting options"}
+                            aria-pressed={showComposerFormatting}
+                          >
+                            Aa
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowEmojiPickerFor(prev => (prev === 'input' ? null : 'input'))
+                              setComposerAttachMenuOpen(false)
+                              setComposerContextPickerOpen(false)
+                            }}
+                            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                              isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100' : 'text-[#6d747c] hover:bg-slate-100 hover:text-slate-800'
+                            }`}
+                            title="Emoji"
+                            aria-label="Emoji"
+                          >
+                            <Smile className="h-4 w-4" />
+                          </button>
+
+                          {showEmojiPickerFor === 'input' && (
+                            <div className={`absolute left-16 bottom-[calc(100%+0.5rem)] z-30 flex gap-1 rounded-xl p-2 shadow-lg ${isDarkMode ? 'border border-slate-700 bg-slate-800' : 'border border-slate-200 bg-white'}`}>
+                              {EMOJIS.map(e => (
+                                <button
+                                  key={e}
+                                  className="p-1 text-lg"
+                                  onClick={() => {
+                                    setMessageInput(prev => prev + e)
+                                    setShowEmojiPickerFor(null)
+                                  }}
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => composerEditorRef.current?.focus()}
+                            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                              isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100' : 'text-[#6d747c] hover:bg-slate-100 hover:text-slate-800'
+                            }`}
+                            title="Mention"
+                            aria-label="Mention"
+                          >
+                            <AtSign className="h-4 w-4" />
+                          </button>
+
+                          <span className={`mx-1 h-5 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-[#dfe3e8]'}`} />
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activeView === 'dm' && activeDMUser) {
+                                const partner = getUser(activeDMUser)
+                                if (partner) startWebRTCCall(partner)
+                              } else if (activeView === 'channel') {
+                                createMeetCall({ callEveryone: true })
+                              } else {
+                                setSelectedCallMembers([])
+                                setShowVideoModal(true)
+                              }
+                            }}
+                            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                              isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100' : 'text-[#6d747c] hover:bg-slate-100 hover:text-slate-800'
+                            }`}
+                            title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                            aria-label={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                          >
+                            <Video className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => composerEditorRef.current?.focus()}
+                            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                              isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100' : 'text-[#6d747c] hover:bg-slate-100 hover:text-slate-800'
+                            }`}
+                            title="Voice"
+                            aria-label="Voice"
+                          >
+                            <Mic className="h-4 w-4" />
+                          </button>
+
+                          {(activeView === "channel" || activeView === "dm") && (
+                            <>
+                              <span className={`mx-1 h-5 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-[#dfe3e8]'}`} />
+                              <button
+                                type="button"
+                                onClick={saveWorkspaceDraft}
+                                disabled={!messageInput.trim()}
+                                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                                  isDarkMode ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:hover:bg-transparent' : 'text-[#6d747c] hover:bg-slate-100 hover:text-slate-800 disabled:hover:bg-transparent'
+                                }`}
+                                title="Save draft"
+                                aria-label="Save draft"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={sendMessage}
+                            disabled={
+                              (!messageInput.trim() && selectedFiles.length === 0) ||
+                              isUploading
+                            }
+                            className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 ${
+                              isDarkMode
+                                ? 'text-slate-300 hover:bg-white/10 disabled:hover:bg-transparent'
+                                : 'text-[#aeb3b9] hover:bg-slate-100 hover:text-slate-700 disabled:hover:bg-transparent'
+                            }`}
+                            title="Send"
+                            aria-label="Send"
+                          >
+                            <Send className="h-4.5 w-4.5 ml-0.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => composerEditorRef.current?.focus()}
+                            className={`flex h-8 w-5 items-center justify-center rounded-md transition-colors ${
+                              isDarkMode ? 'text-slate-500 hover:bg-white/10 hover:text-slate-200' : 'text-[#aeb3b9] hover:bg-slate-100 hover:text-slate-600'
+                            }`}
+                            title="More send options"
+                            aria-label="More send options"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className={`text-center mt-3 text-[10px] font-bold uppercase tracking-widest opacity-50 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -13730,7 +13833,7 @@ export default function CollaborationApp() {
                           const hasOutgoing = memberObj?.notifications?.some(n => n.type === "friend_request" && n.fromId === currentUser?.id && n.status === "pending")
                           // Check if current user has an incoming friend request from member
                           const hasIncoming = currentUser?.notifications?.some(n => n.type === "friend_request" && n.fromId === member.id && n.status === "pending")
-                          return !!hasOutgoing || !!hasIncoming || pendingFriendRequestIds.includes(member.id)
+                          return !!hasOutgoing || !!hasIncoming || pendingFriendRequestIds.some(id => String(id) === String(member.id))
                         })()
 
                         return (
@@ -13903,11 +14006,7 @@ export default function CollaborationApp() {
           <div className="flex gap-2 ml-auto">
             {!friendsSidebarCollapsed && !isMobile && (
               <button
-                onClick={() => {
-                  setInviteSearchQuery("")
-                  setSelectedFriendInvitees([])
-                  setShowAddFriendModal(true)
-                }}
+                onClick={openHomeConnect}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -13915,11 +14014,7 @@ export default function CollaborationApp() {
             )}
             {isMobile && (
               <button
-                onClick={() => {
-                  setInviteSearchQuery("")
-                  setSelectedFriendInvitees([])
-                  setShowAddFriendModal(true)
-                }}
+                onClick={openHomeConnect}
                 className={`p-2.5 rounded-xl transition-all duration-200 ${isDarkMode ? 'hover:bg-gradient-to-br hover:from-cyan-900/50 hover:to-sky-900/50 text-slate-400 hover:text-cyan-400' : 'hover:bg-gradient-to-br hover:from-sky-50 hover:to-cyan-50 text-slate-400 hover:text-sky-600'} hover:shadow-md`}
               >
                 <UserPlus className="w-5 h-5" />
@@ -14020,7 +14115,7 @@ export default function CollaborationApp() {
                     No friends yet.
                   </p>
                   <button
-                    onClick={() => setShowAddFriendModal(true)}
+                    onClick={openHomeConnect}
                     className={`text-xs font-bold hover:underline ${isDarkMode ? 'text-cyan-400' : 'text-sky-600'}`}
                   >
                     Find people
@@ -14079,7 +14174,7 @@ export default function CollaborationApp() {
             <div className="flex flex-col items-center gap-4 mt-2 animate-fade-in">
               {friends.length === 0 ? (
                 <button
-                  onClick={() => setShowAddFriendModal(true)}
+                  onClick={openHomeConnect}
                   className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                   title="Add Friend"
                 >
@@ -14124,7 +14219,7 @@ export default function CollaborationApp() {
                     </button>
                   ))}
                   <button
-                    onClick={() => setShowAddFriendModal(true)}
+                    onClick={openHomeConnect}
                     className={`p-3 rounded-2xl border-2 border-dashed transition-all ${isDarkMode ? 'border-slate-700 text-slate-500 hover:border-cyan-500 hover:text-cyan-400' : 'border-slate-200 text-slate-400 hover:border-sky-400 hover:text-sky-500'}`}
                     title="Add Friend"
                   >
@@ -14170,7 +14265,7 @@ export default function CollaborationApp() {
                   if (showAddFriendConfirm) sendFriendRequest(showAddFriendConfirm)
                   setShowAddFriendConfirm(null)
                 }}
-                disabled={pendingFriendRequestIds.includes(showAddFriendConfirm)}
+                disabled={pendingFriendRequestIds.some(id => String(id) === String(showAddFriendConfirm))}
                 className={`flex-1 py-3 px-6 rounded-2xl font-bold text-white shadow-lg transition-all ${isDarkMode ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-500/20' : 'bg-sky-600 shadow-sky-200 hover:bg-sky-700'}`}
               >
                 Yes
@@ -14937,7 +15032,7 @@ export default function CollaborationApp() {
                     <button
                       onClick={() => {
                         setShowAddToSpaceModal(false)
-                        setShowAddFriendModal(true)
+                        openHomeConnect()
                       }}
                       className={`inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-lg font-semibold transition-all ${
                         isDarkMode
@@ -15124,7 +15219,7 @@ export default function CollaborationApp() {
                       <button
                         onClick={() => {
                           setShowAddToSpaceModal(false)
-                          setShowAddFriendModal(true)
+                          openHomeConnect()
                         }}
                         className={`inline-flex items-center gap-2 text-lg font-medium transition-colors ${
                           isDarkMode ? 'text-sky-400 hover:text-sky-300' : 'text-sky-700 hover:text-sky-800'

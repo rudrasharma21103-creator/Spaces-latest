@@ -8,6 +8,34 @@ from app.ws_manager import manager
 
 router = APIRouter(prefix="/actions")
 
+FRIEND_REQUEST_SENDER_PROJECTION = {
+    "id": 1,
+    "email": 1,
+    "organizationId": 1,
+    "invitePermissions": 1,
+    "friends": 1,
+}
+
+FRIEND_REQUEST_RECIPIENT_PROJECTION = {
+    "id": 1,
+    "email": 1,
+    "organizationId": 1,
+}
+
+
+def id_query_values(value):
+    values = []
+    for candidate in (value, str(value) if value is not None else None):
+        if candidate is not None and candidate not in values:
+            values.append(candidate)
+    try:
+        numeric = int(value)
+        if numeric not in values:
+            values.append(numeric)
+    except (TypeError, ValueError):
+        pass
+    return values
+
 
 def get_user_by_id(user_id):
     user = users_collection.find_one({"id": user_id})
@@ -53,12 +81,14 @@ async def send_friend_request(request: Request, payload: dict):
     notification = dict(payload.get("notification") or {})
     from_id = actor.get("id")
     notification["fromId"] = from_id
+    sender_id_values = id_query_values(from_id)
+    recipient_id_values = id_query_values(to_id)
 
     if str(from_id) == str(to_id):
         raise HTTPException(status_code=400, detail="You cannot send a connection request to yourself")
 
-    sender = get_user_by_id(from_id)
-    recipient = get_user_by_id(to_id)
+    sender = users_collection.find_one({"id": {"$in": sender_id_values}}, FRIEND_REQUEST_SENDER_PROJECTION)
+    recipient = users_collection.find_one({"id": {"$in": recipient_id_values}}, FRIEND_REQUEST_RECIPIENT_PROJECTION)
     if recipient is None:
         raise HTTPException(status_code=404, detail="Recipient not found")
 
@@ -94,30 +124,38 @@ async def send_friend_request(request: Request, payload: dict):
     recipient_id = recipient.get("id")
 
     try:
-        sender_id = str(sender.get("id"))
-
         if any(str(friend_id) == str(recipient_id) for friend_id in sender.get("friends") or []):
             return {"status": "already_connected"}
 
-        incoming_request = next(
-            (
-                item
-                for item in sender.get("notifications") or []
-                if item.get("type") == "friend_request"
-                and item.get("status") == "pending"
-                and str(item.get("fromId")) == str(recipient_id)
-            ),
-            None,
+        incoming_request = users_collection.find_one(
+            {
+                "id": {"$in": sender_id_values},
+                "notifications": {
+                    "$elemMatch": {
+                        "type": "friend_request",
+                        "status": "pending",
+                        "fromId": {"$in": id_query_values(recipient_id)},
+                    }
+                },
+            },
+            {"notifications.$": 1},
         )
         if incoming_request:
-            return {"status": "incoming_request", "notificationId": incoming_request.get("id")}
+            notifications = incoming_request.get("notifications") or []
+            return {"status": "incoming_request", "notificationId": notifications[0].get("id") if notifications else None}
 
-        existing_notifications = (recipient or {}).get("notifications") or []
-        already_pending = any(
-            n.get("type") == "friend_request"
-            and str(n.get("fromId")) == sender_id
-            and n.get("status") == "pending"
-            for n in existing_notifications
+        already_pending = users_collection.find_one(
+            {
+                "id": {"$in": id_query_values(recipient_id)},
+                "notifications": {
+                    "$elemMatch": {
+                        "type": "friend_request",
+                        "status": "pending",
+                        "fromId": {"$in": sender_id_values},
+                    }
+                },
+            },
+            {"_id": 1},
         )
         if already_pending:
             return {"status": "pending"}
@@ -127,10 +165,23 @@ async def send_friend_request(request: Request, payload: dict):
         pass
 
     update_result = users_collection.update_one(
-        {"id": recipient_id},
+        {
+            "id": {"$in": id_query_values(recipient_id)},
+            "notifications": {
+                "$not": {
+                    "$elemMatch": {
+                        "type": "friend_request",
+                        "status": "pending",
+                        "fromId": {"$in": sender_id_values},
+                    }
+                }
+            },
+        },
         {"$push": {"notifications": notification}}
     )
     if update_result.matched_count == 0:
+        if users_collection.find_one({"id": {"$in": id_query_values(recipient_id)}}, {"_id": 1}):
+            return {"status": "pending"}
         raise HTTPException(status_code=404, detail="Recipient not found")
     
     # Send real-time WebSocket notification to the target user
