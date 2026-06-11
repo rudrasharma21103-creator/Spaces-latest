@@ -1,38 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import * as TasksService from '../services/tasks'
 
-const getEntityId = value => {
-  if (value === undefined || value === null) return null
-  if (typeof value === "string" || typeof value === "number") return String(value)
-  if (typeof value === "object") {
-    if (value.$oid) return String(value.$oid)
-    if (value.id !== undefined && value.id !== null) return String(value.id)
-    if (value.userId !== undefined && value.userId !== null) return String(value.userId)
-    if (value._id !== undefined && value._id !== null) return getEntityId(value._id)
-  }
-  return String(value)
-}
-
-export default function TaskModal({
-  visible,
-  onClose,
-  members = [],
-  currentUser,
-  spaceId,
-  onTaskCreated,
-  initialTaskText = "",
-  initialAssignees = [],
-  sourceMessageId = null,
-}) {
+export default function TaskModal({ visible, onClose, members = [], currentUser, spaceId, onTaskCreated }) {
   const [selected, setSelected] = useState([])
   const [text, setText] = useState("")
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!visible) return
-    setText(initialTaskText || "")
-    setSelected(Array.isArray(initialAssignees) ? initialAssignees : [])
-  }, [visible, initialTaskText, initialAssignees])
 
   if (!visible) return null
 
@@ -42,16 +14,13 @@ export default function TaskModal({
 
   const submit = async () => {
     if (!text.trim() || selected.length === 0) return
-    const creatorId = getEntityId(currentUser?.id || currentUser?._id || currentUser?.userId)
     const payload = {
-      id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      created_by: creatorId,
+      created_by: currentUser?.id,
       assigned_to: selected,
       message: text,
       space_id: spaceId,
       status: 'pending',
-      timestamp: new Date().toISOString(),
-      sourceMessageId,
+      timestamp: new Date().toISOString()
     }
     setLoading(true)
     // Optimistic callback
@@ -71,7 +40,7 @@ export default function TaskModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white dark:bg-[#191b1f] text-slate-900 dark:text-slate-100 rounded-2xl p-6 w-full max-w-md shadow-lg">
+      <div className="relative bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl p-6 w-full max-w-md shadow-lg">
         <h3 className="text-lg font-bold mb-3">Create Task</h3>
         <div className="mb-3">
           <label className="block text-xs font-bold mb-1">Assign to</label>
@@ -93,10 +62,9 @@ export default function TaskModal({
 
         <div className="flex justify-end gap-2">
           <button className="px-3 py-2 rounded border" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="px-4 py-2 rounded bg-sky-600 text-white" onClick={submit} disabled={loading || selected.length===0}>Create</button>
+          <button className="px-4 py-2 rounded bg-indigo-600 text-white" onClick={submit} disabled={loading || selected.length===0}>Create</button>
         </div>
       </div>
     </div>
   )
 }
-
