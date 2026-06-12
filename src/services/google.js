@@ -503,6 +503,215 @@ export const groupGmailAttachmentsBySender = (attachments = []) => {
     .sort((a, b) => Number(b.latestEmailDateMs || 0) - Number(a.latestEmailDateMs || 0))
 }
 
+const decodeBase64UrlText = value => {
+  if (!value || typeof atob !== 'function') return ''
+
+  try {
+    const normalized = String(value).replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const binary = atob(padded)
+    const percentEncoded = Array.from(binary, char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join('')
+    return decodeURIComponent(percentEncoded)
+  } catch {
+    try {
+      return atob(String(value).replace(/-/g, '+').replace(/_/g, '/'))
+    } catch {
+      return ''
+    }
+  }
+}
+
+const stripHtmlText = value => {
+  if (!value) return ''
+  return String(value)
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim()
+}
+
+const getGmailHeader = (headers = [], name) => (
+  headers.find(header => String(header?.name || '').toLowerCase() === String(name || '').toLowerCase())?.value || ''
+)
+
+const walkGmailParts = (part, visitor) => {
+  if (!part) return
+  visitor(part)
+  if (Array.isArray(part.parts)) {
+    part.parts.forEach(child => walkGmailParts(child, visitor))
+  }
+}
+
+const extractGmailMessageBody = payload => {
+  let plainText = ''
+  let htmlText = ''
+
+  walkGmailParts(payload, part => {
+    const mimeType = String(part.mimeType || '').toLowerCase()
+    const data = part.body?.data
+    if (!data) return
+    if (!plainText && mimeType === 'text/plain') plainText = decodeBase64UrlText(data)
+    if (!htmlText && mimeType === 'text/html') htmlText = decodeBase64UrlText(data)
+  })
+
+  return (plainText || stripHtmlText(htmlText)).trim()
+}
+
+const extractGmailMessageAttachments = (payload, messageId, messageMeta = {}) => {
+  const attachments = []
+
+  walkGmailParts(payload, part => {
+    if (!part?.filename) return
+    const attachmentId = part.body?.attachmentId
+    if (!attachmentId) return
+
+    attachments.push({
+      id: attachmentId,
+      attachmentId,
+      gmailAttachmentId: attachmentId,
+      messageId,
+      gmailMessageId: messageId,
+      threadId: messageMeta.threadId || null,
+      partId: part.partId,
+      filename: part.filename,
+      name: part.filename,
+      mimeType: part.mimeType || 'application/octet-stream',
+      size: Number(part.body?.size || 0),
+      source: 'gmail',
+      subject: messageMeta.subject || 'No subject',
+      emailSubject: messageMeta.subject || 'No subject',
+      senderName: messageMeta.senderName || messageMeta.senderEmail || 'Unknown sender',
+      senderEmail: messageMeta.senderEmail || 'unknown',
+      emailDate: messageMeta.date || null,
+      emailDateMs: Number(messageMeta.dateMs || 0),
+      snippet: messageMeta.snippet || '',
+      labelIds: messageMeta.labelIds || []
+    })
+  })
+
+  return attachments
+}
+
+const normalizeGmailMessage = message => {
+  if (!message?.id) return null
+
+  const headers = message.payload?.headers || []
+  const subject = getGmailHeader(headers, 'Subject') || 'No subject'
+  const from = getGmailHeader(headers, 'From') || 'Unknown sender'
+  const to = getGmailHeader(headers, 'To') || ''
+  const date = getGmailHeader(headers, 'Date') || ''
+  const parsedSender = parseSender(from)
+  const dateMs = Number(message.internalDate || 0)
+  const meta = {
+    threadId: message.threadId || null,
+    subject,
+    senderName: parsedSender.senderName || parsedSender.senderEmail || from,
+    senderEmail: parsedSender.senderEmail || from,
+    date,
+    dateMs,
+    snippet: message.snippet || '',
+    labelIds: message.labelIds || []
+  }
+
+  return {
+    id: message.id,
+    messageId: message.id,
+    gmailMessageId: message.id,
+    threadId: message.threadId || null,
+    labelIds: message.labelIds || [],
+    subject,
+    from,
+    to,
+    senderName: meta.senderName,
+    senderEmail: meta.senderEmail,
+    date,
+    internalDate: message.internalDate || null,
+    dateMs,
+    snippet: message.snippet || '',
+    body: extractGmailMessageBody(message.payload) || message.snippet || '',
+    sizeEstimate: message.sizeEstimate || 0,
+    attachments: extractGmailMessageAttachments(message.payload, message.id, meta),
+    source: 'gmail',
+    webViewLink: `https://mail.google.com/mail/u/0/#inbox/${message.id}`
+  }
+}
+
+export const fetchGmailProfile = async accessToken => {
+  if (!accessToken) return null
+
+  const response = await axios.get(
+    'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json'
+      },
+      timeout: 30000
+    }
+  )
+
+  return response.data || null
+}
+
+export const fetchGmailMessages = async (accessToken, options = {}) => {
+  if (!accessToken) return []
+
+  const maxResults = Math.min(Math.max(Number(options.maxResults || 30), 1), 50)
+  const params = { maxResults }
+  if (options.q !== false) params.q = options.q || 'in:anywhere newer_than:180d'
+  if (options.labelIds) params.labelIds = options.labelIds
+
+  const listResponse = await axios.get(
+    'https://gmail.googleapis.com/gmail/v1/users/me/messages',
+    {
+      params,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json'
+      },
+      timeout: 45000
+    }
+  )
+
+  const listedMessages = listResponse.data?.messages || []
+  if (listedMessages.length === 0) return []
+
+  const details = await Promise.all(
+    listedMessages.map(message =>
+      axios.get(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}`,
+        {
+          params: { format: 'full' },
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json'
+          },
+          timeout: 45000
+        }
+      )
+        .then(response => normalizeGmailMessage(response.data))
+        .catch(error => {
+          console.warn('Failed to fetch Gmail message:', error)
+          return null
+        })
+    )
+  )
+
+  return details
+    .filter(Boolean)
+    .sort((a, b) => Number(b.dateMs || b.internalDate || 0) - Number(a.dateMs || a.internalDate || 0))
+}
+
 export const syncGmailDocsMetadata = async (accessToken, options = {}) => {
   if (!accessToken) return null
 

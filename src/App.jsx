@@ -4117,11 +4117,19 @@ export default function CollaborationApp() {
   const homeDMChatId = useMemo(() => getDMChatId(homeActiveDMUser), [currentUser?.id, homeActiveDMUser])
   const homeDMMessages = useMemo(() => (homeDMChatId ? messages[homeDMChatId] || [] : []), [messages, homeDMChatId])
 
+  const refreshHomeMail = () => {
+    if (!googleAccessToken) return
+    loadGoogleDocs(googleAccessToken, 'gmail').catch(error => console.warn("Failed to refresh home mail", error))
+  }
+
   const handleHomeSectionChange = nextSection => {
     setActiveView("home")
     setHomeSection(nextSection)
     if (nextSection === "files" && googleAccessToken) {
       loadGoogleDocs(googleAccessToken).catch(error => console.warn("Failed to refresh home files", error))
+    }
+    if (nextSection === "mail") {
+      refreshHomeMail()
     }
   }
 
@@ -10810,6 +10818,8 @@ export default function CollaborationApp() {
           onRejectRequest={notificationId => handleRejectNotification(notificationId, "friend_request")}
           onOpenFile={openHomeFile}
           onOpenDocumentsHub={handleDocsClick}
+          onConnectMail={handleConnectGoogleDocs}
+          onRefreshMail={refreshHomeMail}
           onOpenNotifications={() => setShowNotificationsModal(true)}
           onOpenProfile={() => {
             setAvatarPreview(currentUser?.avatar_url || null)
@@ -10825,6 +10835,8 @@ export default function CollaborationApp() {
           isDarkMode={isDarkMode}
           isMobile={isMobile}
           apiBase={API_BASE}
+          gmailAttachments={dedupedGmailAttachments}
+          googleAccessToken={googleAccessToken}
           resolveProtectedFileUrl={fetchProtectedUrlAndCreateObjectURL}
           onThemeChange={setIsDarkMode}
         />
