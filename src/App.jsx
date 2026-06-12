@@ -50,7 +50,9 @@ import {
   Lock,
   ExternalLink,
   ShieldAlert,
+  Files,
   Grid3x3,
+  LayoutGrid,
   FileText,
   ClipboardList,
   Download,
@@ -155,6 +157,42 @@ try {
 const CONTEXT_ROUTE_STATE_KEY = "spacexyz_context_route_state"
 const NAVIGATION_STATE_KEY = "spacexyz_navigation_state"
 const READ_MESSAGE_COUNTS_KEY = "spacexyz_read_message_counts"
+
+const getTopNavIconButtonClass = (isDarkMode, isActive = false) => [
+  "workspace-top-icon-button inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40",
+  isActive
+    ? isDarkMode
+      ? "bg-blue-500/15 text-blue-300"
+      : "bg-blue-100 text-sky-700"
+    : isDarkMode
+      ? "text-slate-400 hover:bg-white/10 hover:text-slate-100"
+      : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+].join(" ")
+
+const getChannelIconButtonClass = (isDarkMode, { active = false, disabled = false, hiddenOnMobile = false } = {}) => [
+  hiddenOnMobile ? "hidden md:inline-flex" : "inline-flex",
+  "liquid-glass-nav-item workspace-premium-icon-button group relative shrink-0 items-center justify-center rounded-xl p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40",
+  active
+    ? isDarkMode
+      ? "active text-blue-300"
+      : "active text-sky-700"
+    : isDarkMode
+      ? "text-slate-400 hover:text-slate-100"
+      : "text-slate-500 hover:text-slate-700",
+  disabled ? "disabled:cursor-not-allowed disabled:opacity-50" : ""
+].filter(Boolean).join(" ")
+
+const getMobileIconButtonClass = (isDarkMode, { active = false, disabled = false } = {}) => [
+  "workspace-mobile-action workspace-premium-mobile-action inline-flex shrink-0 items-center justify-center rounded-xl p-0 transition-colors duration-150 touch-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40",
+  active
+    ? isDarkMode
+      ? "bg-blue-500/15 text-blue-300"
+      : "bg-blue-100 text-sky-700"
+    : isDarkMode
+      ? "bg-white/[0.06] text-slate-400 hover:bg-white/10 hover:text-slate-100 active:bg-white/10"
+      : "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 active:bg-blue-50",
+  disabled ? "disabled:cursor-not-allowed disabled:opacity-50" : ""
+].filter(Boolean).join(" ")
 
 const getReadMessageCountsStorageKey = userId => `${READ_MESSAGE_COUNTS_KEY}_${userId || "anonymous"}`
 
@@ -10964,20 +11002,26 @@ export default function CollaborationApp() {
           <div className="flex gap-2 ml-auto">
             {isMobile && (
               <button
+                type="button"
                 onClick={() => { setActiveView("home"); setHomeSection("overview"); setMobileView("chat") }}
-                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={getTopNavIconButtonClass(isDarkMode, activeView === "home")}
                 title="Home"
+                aria-label="Home"
+                aria-current={activeView === "home" ? "page" : undefined}
               >
-                <HomeIcon className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <HomeIcon className="h-[19px] w-[19px]" strokeWidth={1.9} />
               </button>
             )}
             {isMobile && (
               <button
+                type="button"
                 onClick={() => { setActiveSpace(null); openTasksPage(); setMobileView('chat') }}
-                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={getTopNavIconButtonClass(isDarkMode, activeView === "tasks")}
                 title="Tasks"
+                aria-label="Tasks"
+                aria-current={activeView === "tasks" ? "page" : undefined}
               >
-                <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <ClipboardList className="h-[19px] w-[19px]" strokeWidth={1.9} />
               </button>
             )}
             {isMobile && (
@@ -11007,20 +11051,26 @@ export default function CollaborationApp() {
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
+                type="button"
                 onClick={() => { setActiveView("home"); setHomeSection("overview") }}
-                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={getTopNavIconButtonClass(isDarkMode, activeView === "home")}
                 title="Home"
+                aria-label="Home"
+                aria-current={activeView === "home" ? "page" : undefined}
               >
-                <HomeIcon className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <HomeIcon className="h-[19px] w-[19px]" strokeWidth={1.9} />
               </button>
             )}
             {!sidebarCollapsed && !isMobile && (
               <button
+                type="button"
                 onClick={() => { setActiveSpace(null); openTasksPage() }}
-                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
+                className={getTopNavIconButtonClass(isDarkMode, activeView === "tasks")}
                 title="Tasks"
+                aria-label="Tasks"
+                aria-current={activeView === "tasks" ? "page" : undefined}
               >
-                <ClipboardList className={`w-4 h-4 ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                <ClipboardList className="h-[19px] w-[19px]" strokeWidth={1.9} />
               </button>
             )}
             {/* Admin dashboard access - visible to company admins/owners of verified orgs */}
@@ -11035,8 +11085,11 @@ export default function CollaborationApp() {
             )}
             {!isMobile && (
               <button
+                type="button"
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                title="Menu"
+                aria-label="Menu"
               >
                 <Menu className="w-4 h-4" />
               </button>
@@ -12059,13 +12112,16 @@ export default function CollaborationApp() {
                 {/* Docs Icon */}
                 <div className="relative">
                   <button
+                    type="button"
                     onClick={handleDocsClick}
-                    className={`liquid-glass-nav-item p-2 transition-all relative group`}
-                    title="Documents"
+                    className={getChannelIconButtonClass(isDarkMode, { active: showDocsModal })}
+                    title="Files"
+                    aria-label="Files"
+                    aria-pressed={showDocsModal}
                   >
-                    <FileText className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-[#c9d3df]' : 'text-[#475569]'}`} />
+                    <Files className="h-[19px] w-[19px]" strokeWidth={1.9} />
                     {googleAccessToken && (
-                      <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border-2 border-white shadow-md animate-pulse"></span>
+                      <span className={`absolute right-2 top-2 h-2 w-2 rounded-full border-2 bg-green-500 shadow-md animate-pulse ${isDarkMode ? 'border-[#0d0001]' : 'border-white'}`}></span>
                     )}
                   </button>
                 </div>
@@ -12073,11 +12129,15 @@ export default function CollaborationApp() {
                 {/* Google Apps Grid Icon */}
                 <div className="relative">
                   <button
+                    type="button"
                     onClick={() => setShowGoogleAppsMenu(!showGoogleAppsMenu)}
-                    className={`liquid-glass-nav-item p-2 transition-all group`}
-                    title="Google Apps"
+                    className={getChannelIconButtonClass(isDarkMode, { active: showGoogleAppsMenu })}
+                    title="Apps"
+                    aria-label="Apps"
+                    aria-haspopup="menu"
+                    aria-expanded={showGoogleAppsMenu}
                   >
-                    <Grid3x3 className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                    <LayoutGrid className="h-[19px] w-[19px]" strokeWidth={1.9} />
                   </button>
 
                   {showGoogleAppsMenu && (
@@ -12124,6 +12184,7 @@ export default function CollaborationApp() {
                 {VIDEO_ENABLED && (
                   <div className="relative">
                     <button
+                      type="button"
                       onClick={() => {
                         if (activeView === 'dm' && activeDMUser) {
                           // Start WebRTC call for DMs
@@ -12140,10 +12201,12 @@ export default function CollaborationApp() {
                           setShowVideoModal(true)
                         }
                       }}
-                      className={`liquid-glass-nav-item p-2 transition-all group`}
-                      title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                      className={getChannelIconButtonClass(isDarkMode, { active: showWebRTCCall })}
+                      title="Video call"
+                      aria-label="Video call"
+                      aria-pressed={showWebRTCCall}
                     >
-                      <Video className={`w-[17px] h-[17px] group-hover:scale-110 transition-transform ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <Video className="h-[19px] w-[19px]" strokeWidth={1.9} />
                     </button>
                     {/* In Call Indicator */}
                     {showWebRTCCall && (
@@ -12157,8 +12220,9 @@ export default function CollaborationApp() {
                   const canInvite = role === 'owner' || role === 'admin'
                   return (
                     <button
-                      title="Add people"
-                      aria-label="Add people to this channel"
+                      type="button"
+                      title="Invite people"
+                      aria-label="Invite people"
                       onClick={() => {
                         if (!canInvite) return
                         setInviteSearchQuery("")
@@ -12166,13 +12230,9 @@ export default function CollaborationApp() {
                         setShowAddToSpaceModal(true)
                       }}
                       disabled={!canInvite}
-                      className={`hidden md:flex liquid-glass-nav-item p-2.5 transition-all group ${
-                        canInvite ? '' : 'opacity-60 cursor-not-allowed'
-                      }`}
+                      className={getChannelIconButtonClass(isDarkMode, { disabled: !canInvite, hiddenOnMobile: true })}
                     >
-                      <UserPlus className={`w-[18px] h-[18px] transition-transform ${
-                        canInvite ? 'group-hover:scale-110' : ''
-                      } ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <UserPlus className="h-[19px] w-[19px]" strokeWidth={1.9} />
                     </button>
                   )
                 })()}
@@ -12371,15 +12431,14 @@ export default function CollaborationApp() {
                 <div className="workspace-mobile-actions flex items-center gap-1 flex-shrink-0 relative z-10">
                   {/* Docs Icon */}
                   <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); handleDocsClick(); }}
-                    className={`workspace-mobile-action p-2.5 rounded-xl transition-all relative touch-active ${
-                      isDarkMode 
-                        ? 'bg-slate-800 text-[#c9d3df] active:bg-slate-700' 
-                        : 'bg-slate-50 text-[#475569] active:bg-sky-50'
-                    }`}
-                    title="Documents"
+                    className={`${getMobileIconButtonClass(isDarkMode, { active: showDocsModal })} relative`}
+                    title="Files"
+                    aria-label="Files"
+                    aria-pressed={showDocsModal}
                   >
-                    <FileText className="w-5 h-5" />
+                    <Files className="h-5 w-5" strokeWidth={1.9} />
                     {googleAccessToken && (
                       <span className={`absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
                     )}
@@ -12389,6 +12448,7 @@ export default function CollaborationApp() {
                   {VIDEO_ENABLED && (
                     <div className="relative">
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (activeView === 'dm' && activeDMUser) {
@@ -12406,14 +12466,12 @@ export default function CollaborationApp() {
                             setShowVideoModal(true)
                           }
                         }}
-                        className={`workspace-mobile-action p-2.5 rounded-xl transition-all touch-active ${
-                          isDarkMode 
-                            ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
-                            : 'bg-slate-50 text-slate-500 active:bg-sky-50'
-                        }`}
-                        title={activeView === 'dm' ? 'Start video call' : 'Start group call'}
+                        className={getMobileIconButtonClass(isDarkMode, { active: showWebRTCCall })}
+                        title="Video call"
+                        aria-label="Video call"
+                        aria-pressed={showWebRTCCall}
                       >
-                        <Video className="w-5 h-5" />
+                        <Video className="h-5 w-5" strokeWidth={1.9} />
                       </button>
                       {/* In Call Indicator */}
                       {showWebRTCCall && (
@@ -12428,6 +12486,7 @@ export default function CollaborationApp() {
                     const canInvite = role === 'owner' || role === 'admin'
                     return (
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (!canInvite) return
@@ -12436,11 +12495,11 @@ export default function CollaborationApp() {
                           setShowAddToSpaceModal(true)
                         }}
                         disabled={!canInvite}
-                        className={`workspace-mobile-action p-2.5 rounded-xl transition-all shadow-md touch-active ${canInvite ? (isDarkMode ? 'text-white bg-gradient-to-r from-sky-600 to-cyan-600 shadow-sky-500/30 active:from-sky-500 active:to-cyan-500' : 'text-white bg-gradient-to-r from-sky-500 to-cyan-500 shadow-sky-200/50 active:from-sky-600 active:to-cyan-600') : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'}`}
-                        title="Add people"
-                        aria-label="Add people to this channel"
+                        className={getMobileIconButtonClass(isDarkMode, { disabled: !canInvite })}
+                        title="Invite people"
+                        aria-label="Invite people"
                       >
-                        <UserPlus className="w-5 h-5" />
+                        <UserPlus className="h-5 w-5" strokeWidth={1.9} />
                       </button>
                     )
                   })()}
@@ -12457,6 +12516,7 @@ export default function CollaborationApp() {
                       }`}
                       style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                       title="Menu"
+                      aria-label="Menu"
                     >
                       <Menu className="w-5 h-5" />
                     </button>

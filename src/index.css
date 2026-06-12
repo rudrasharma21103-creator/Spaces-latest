@@ -11039,9 +11039,46 @@ body:has(.workspace-topbar) .workspace-chat-panel {
   box-shadow: none !important;
 }
 
+.workspace-navbar-actions .workspace-premium-icon-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px !important;
+  color: #64748b;
+  padding: 0 !important;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease !important;
+}
+
+.workspace-navbar-actions .workspace-premium-icon-button svg,
+.workspace-top-icon-button svg,
+.workspace-premium-mobile-action svg {
+  stroke-width: 1.9;
+}
+
 .workspace-navbar-actions .liquid-glass-nav-item:hover {
   background: #f1f5f9 !important;
   border: 0 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.workspace-navbar-actions .workspace-premium-icon-button:hover {
+  color: #334155 !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12) !important;
+}
+
+.workspace-navbar-actions .workspace-premium-icon-button.active {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16) !important;
+}
+
+.workspace-navbar-actions .workspace-premium-icon-button:disabled,
+.workspace-navbar-actions .workspace-premium-icon-button:disabled:hover {
+  background: transparent !important;
+  color: #94a3b8 !important;
   box-shadow: none !important;
   transform: none !important;
 }
@@ -11126,6 +11163,34 @@ body.dark .workspace-navbar-actions .liquid-glass-nav-item {
 html.dark .workspace-navbar-actions .liquid-glass-nav-item:hover,
 body.dark .workspace-navbar-actions .liquid-glass-nav-item:hover {
   background: #2C2C2C !important;
+}
+
+html.dark .workspace-navbar-actions .workspace-premium-icon-button,
+body.dark .workspace-navbar-actions .workspace-premium-icon-button {
+  color: #94a3b8;
+}
+
+html.dark .workspace-navbar-actions .workspace-premium-icon-button:hover,
+body.dark .workspace-navbar-actions .workspace-premium-icon-button:hover {
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #e2e8f0 !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .workspace-navbar-actions .workspace-premium-icon-button.active,
+body.dark .workspace-navbar-actions .workspace-premium-icon-button.active {
+  background: rgba(59, 130, 246, 0.16) !important;
+  color: #93c5fd !important;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.14) !important;
+}
+
+html.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled,
+html.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled:hover,
+body.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled,
+body.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled:hover {
+  background: transparent !important;
+  color: #64748b !important;
+  box-shadow: none !important;
 }
 
 /* Mobile workspace polish: keep chat controls visible and stop header crowding. */
