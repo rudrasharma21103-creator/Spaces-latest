@@ -6,6 +6,16 @@ from app.ws_manager import manager
 
 router = APIRouter(prefix="/spaces")
 
+def _space_id_candidates(space_id):
+    candidates = [space_id]
+    try:
+        parsed = int(space_id)
+        if parsed not in candidates:
+            candidates.append(parsed)
+    except (TypeError, ValueError):
+        pass
+    return candidates
+
 @router.get("/")
 def get_spaces(request: Request):
     user_id = _get_user_id_from_request(request)
@@ -256,6 +266,55 @@ def save_space(request: Request, space: dict):
             pass
 
     return space
+
+@router.delete("/{space_id}")
+async def delete_space(request: Request, space_id: str):
+    user_id = _get_user_id_from_request(request)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    space_ids = _space_id_candidates(space_id)
+    space = spaces_collection.find_one({"id": {"$in": space_ids}}, {"_id": 0})
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+
+    owner_id = space.get("ownerId") or space.get("createdBy")
+    if str(owner_id) != str(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the space owner can delete this space")
+
+    stored_space_id = space.get("id")
+    if stored_space_id not in space_ids:
+        space_ids.append(stored_space_id)
+
+    result = spaces_collection.delete_one({"id": stored_space_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Space not found")
+
+    users_collection.update_many(
+        {"spaces": {"$in": space_ids}},
+        {"$pull": {"spaces": {"$in": space_ids}}}
+    )
+
+    member_ids = set()
+    for member_id in space.get("members") or []:
+        if member_id is not None:
+            member_ids.add(str(member_id))
+    for channel in space.get("channels") or []:
+        for member_id in channel.get("members") or []:
+            if member_id is not None:
+                member_ids.add(str(member_id))
+
+    for member_id in member_ids:
+        try:
+            await manager.send_to_user(member_id, {
+                "type": "sync_spaces",
+                "spaceId": stored_space_id,
+                "action": "deleted"
+            })
+        except Exception:
+            pass
+
+    return {"status": "deleted", "spaceId": stored_space_id}
 
 @router.post("/by-ids")
 def get_spaces_for_user(request: Request, space_ids: list[int]):

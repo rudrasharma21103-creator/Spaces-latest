@@ -1,22 +1,97 @@
-import React, { useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import {
-  ArrowLeft,
-  CalendarDays,
   Check,
   CheckCircle,
-  ClipboardList,
-  Clock,
+  ChevronRight,
+  Circle,
   Hash,
-  ListFilter,
-  PenTool,
-  Search,
-  UserPlus,
-  Users,
+  Menu,
+  MoreVertical,
+  PencilLine,
+  Plus,
+  Star,
+  UserCheck,
 } from "lucide-react"
 
 const cx = (...classes) => classes.filter(Boolean).join(" ")
-const fastTransition = "motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none"
-const colorTransition = "motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none"
+
+const DEFAULT_TASK_LIST_ID = "my-tasks"
+const DEFAULT_TASK_LIST = {
+  id: DEFAULT_TASK_LIST_ID,
+  title: "My Tasks",
+  system: true,
+}
+
+const getTaskListsStorageKey = userId => `spaces_task_lists_${userId || "guest"}`
+const getHiddenListsStorageKey = userId => `spaces_hidden_task_lists_${userId || "guest"}`
+
+const sanitizeListTitle = value => {
+  const title = String(value || "").trim().replace(/\s+/g, " ")
+  return title || "Untitled list"
+}
+
+const slugifyListTitle = title =>
+  sanitizeListTitle(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42) || "list"
+
+const createListId = (title, existingIds = new Set()) => {
+  const base = `list-${slugifyListTitle(title)}`
+  if (!existingIds.has(base)) return base
+  let index = 2
+  while (existingIds.has(`${base}-${index}`)) index += 1
+  return `${base}-${index}`
+}
+
+const normalizeStoredList = list => {
+  if (!list || typeof list !== "object") return null
+  const id = getEntityId(list.id || list.list_id || list.listId)
+  if (!id) return null
+  return {
+    id,
+    title: sanitizeListTitle(list.title || list.name || list.listName || "Untitled list"),
+    system: id === DEFAULT_TASK_LIST_ID || Boolean(list.system),
+    createdAt: list.createdAt || null,
+  }
+}
+
+const readStoredLists = storageKey => {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.map(normalizeStoredList).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+const writeStoredLists = (storageKey, lists) => {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(Array.isArray(lists) ? lists : []))
+  } catch {
+    // Local list order is a convenience; ignore storage failures.
+  }
+}
+
+const readHiddenListIds = storageKey => {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+const writeHiddenListIds = (storageKey, ids) => {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(Array.isArray(ids) ? ids : []))
+  } catch {
+    // Best effort only.
+  }
+}
 
 const getEntityId = value => {
   if (value === undefined || value === null) return ""
@@ -32,58 +107,42 @@ const getEntityId = value => {
 
 const normalizeStatus = status => (status === "completed" ? "completed" : "pending")
 
-const formatTaskTimestamp = value => {
-  if (!value) return "No timestamp"
+const getTaskDueValue = task =>
+  task?.dueDate || task?.due_at || task?.dueAt || task?.deadline || task?.deadlineAt || null
+
+const formatDueLabel = task => {
+  const value = getTaskDueValue(task)
+  if (!value) return ""
 
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return String(value)
 
-  return parsed.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
+  const today = new Date()
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+
+  const sameDay = (left, right) =>
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+
+  const hasTime = parsed.getHours() !== 0 || parsed.getMinutes() !== 0
+  const time = hasTime
+    ? parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : ""
+
+  if (sameDay(parsed, today)) return time ? `Today, ${time}` : "Today"
+  if (sameDay(parsed, tomorrow)) return time ? `Tomorrow, ${time}` : "Tomorrow"
+
+  const date = parsed.toLocaleDateString([], { month: "short", day: "numeric" })
+  return time ? `${date}, ${time}` : date
 }
 
-const isSameDay = (left, right) =>
-  left.getFullYear() === right.getFullYear() &&
-  left.getMonth() === right.getMonth() &&
-  left.getDate() === right.getDate()
-
-const isInCurrentWeek = date => {
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const dayOfWeek = today.getDay()
-  const weekStart = new Date(today)
-  weekStart.setDate(today.getDate() - dayOfWeek)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekStart.getDate() + 7)
-  return date >= weekStart && date < weekEnd
-}
-
-const isInCurrentMonth = date => {
-  const now = new Date()
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
-}
-
-const matchesDateFilter = (timestamp, filterValue) => {
-  if (filterValue === "all") return true
-  if (!timestamp) return false
-
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return false
-
-  const now = new Date()
-
-  if (filterValue === "today") return isSameDay(date, now)
-  if (filterValue === "week") return isInCurrentWeek(date)
-  if (filterValue === "month") return isInCurrentMonth(date)
-  if (filterValue === "recent") {
-    const diff = now.getTime() - date.getTime()
-    return diff <= 1000 * 60 * 60 * 24 * 30
-  }
-  return true
+const isTaskOverdue = task => {
+  const value = getTaskDueValue(task)
+  if (!value || task.status === "completed") return false
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) && parsed < Date.now()
 }
 
 const sortTasks = tasks =>
@@ -91,6 +150,11 @@ const sortTasks = tasks =>
     const leftRank = left.status === "completed" ? 1 : 0
     const rightRank = right.status === "completed" ? 1 : 0
     if (leftRank !== rightRank) return leftRank - rightRank
+
+    const leftDue = new Date(getTaskDueValue(left) || 0).getTime() || 0
+    const rightDue = new Date(getTaskDueValue(right) || 0).getTime() || 0
+    if (leftDue && rightDue && leftDue !== rightDue) return leftDue - rightDue
+    if (leftDue !== rightDue) return rightDue - leftDue
 
     const leftTime = new Date(left.timestamp || 0).getTime() || 0
     const rightTime = new Date(right.timestamp || 0).getTime() || 0
@@ -108,6 +172,27 @@ const normalizeTask = (task, source = "task") => {
 
   const assigneeIds = rawAssigned.map(item => getEntityId(item)).filter(Boolean)
   const createdById = getEntityId(task.created_by || task.createdBy || task.userId)
+  const rawAssigneeStatuses = task.assignee_statuses || task.assigneeStatuses || {}
+  const hiddenForIds = (Array.isArray(task.hidden_for)
+    ? task.hidden_for
+    : Array.isArray(task.hiddenFor)
+      ? task.hiddenFor
+      : []
+  ).map(item => getEntityId(item)).filter(Boolean)
+  const assigneeStatuses = Object.fromEntries(
+    assigneeIds.map(assigneeId => {
+      const existing = rawAssigneeStatuses?.[assigneeId] || rawAssigneeStatuses?.[String(assigneeId)] || {}
+      const status = existing?.status === "completed" || task.status === "completed" ? "completed" : "pending"
+      return [
+        assigneeId,
+        {
+          ...existing,
+          status,
+          completedAt: existing?.completedAt || existing?.completed_at || (status === "completed" ? task.completedAt || task.completed_at || null : null),
+        },
+      ]
+    })
+  )
   const id =
     getEntityId(task.id || task.taskId || task._id) ||
     getEntityId(task.sourceMessageId) ||
@@ -120,7 +205,15 @@ const normalizeTask = (task, source = "task") => {
     timestamp: task.timestamp || task.createdAt || task.updatedAt || null,
     status: normalizeStatus(task.status),
     channel_id: task.channel_id || task.channelId || null,
+    channelName: task.channelName || task.channel_name || null,
+    spaceId: task.spaceId || task.space_id || null,
+    spaceName: task.spaceName || task.space_name || null,
+    list_id: task.list_id || task.listId || null,
+    listName: task.listName || task.list || null,
     sourceMessageId: task.sourceMessageId || null,
+    assignee_statuses: assigneeStatuses,
+    hidden_for: hiddenForIds,
+    hiddenForIds,
     assigneeIds,
     createdById,
     source,
@@ -137,375 +230,596 @@ const taskFromMessage = message => {
       message: message.text || message.message,
       timestamp: message.timestamp,
       assigned_to: message.assigned_to || [],
+      assignee_statuses: message.assignee_statuses || message.assigneeStatuses || {},
       created_by: message.userId,
       status: message.taskStatus || message.status || "pending",
+      hidden_for: message.hidden_for || message.hiddenFor || [],
       channel_id: message.channel_id || message.channelId || null,
+      channelName: message.channelName || message.channel_name || null,
+      spaceId: message.spaceId || message.space_id || null,
+      spaceName: message.spaceName || message.space_name || null,
+      list_id: message.list_id || message.listId || null,
+      listName: message.listName || message.list || null,
       sourceMessageId: message.id,
     },
     "message"
   )
 }
 
-function SurfaceCard({ children, className = "", isDarkMode = false }) {
+const getTaskSubtasks = task => {
+  const candidates = task?.subtasks || task?.children || task?.steps || []
+  return Array.isArray(candidates) ? candidates : []
+}
+
+const isTaskStarred = task => Boolean(task?.starred || task?.isStarred || task?.starred_at || task?.starredAt)
+
+const getAssigneeStatuses = task => {
+  const raw = task?.assignee_statuses || task?.assigneeStatuses || task?.assigneeStatus || {}
+  return raw && typeof raw === "object" ? raw : {}
+}
+
+const getAssigneeStatus = (task, userId) => {
+  const key = getEntityId(userId)
+  const item = getAssigneeStatuses(task)[key] || {}
+  return item?.status === "completed" ? "completed" : "pending"
+}
+
+const areAllAssigneesComplete = task => {
+  const assigned = Array.isArray(task?.assigneeIds) ? task.assigneeIds : []
+  if (assigned.length === 0) return task?.status === "completed"
+  return assigned.every(userId => getAssigneeStatus(task, userId) === "completed")
+}
+
+const getViewerTaskStatus = (task, viewerId) => {
+  const currentUserId = getEntityId(viewerId)
+  if (!task) return "pending"
+  if (task.createdById === currentUserId && task.assigneeIds?.length > 0) {
+    return areAllAssigneesComplete(task) ? "completed" : "pending"
+  }
+  if (task.assigneeIds?.includes(currentUserId)) return getAssigneeStatus(task, currentUserId)
+  return task.status === "completed" ? "completed" : "pending"
+}
+
+const canViewerCompleteTask = (task, viewerId) => {
+  const currentUserId = getEntityId(viewerId)
+  if (!currentUserId || !task || getViewerTaskStatus(task, currentUserId) === "completed") return false
+  if (task.assigneeIds?.length > 0) return task.assigneeIds.includes(currentUserId)
+  return task.createdById === currentUserId
+}
+
+const getTaskListId = task => {
+  const rawId = getEntityId(task?.list_id || task?.listId)
+  if (rawId) return rawId
+  return DEFAULT_TASK_LIST_ID
+}
+
+const getTaskListTitle = task => sanitizeListTitle(task?.listName || task?.list || "Untitled list")
+
+const sortTasksForList = (tasks, mode = "my-order", viewerId = "") => {
+  const base = [...tasks]
+  const incompleteRank = task => (getViewerTaskStatus(task, viewerId) === "completed" ? 1 : 0)
+
+  if (mode === "title") {
+    return base.sort((left, right) => {
+      const statusDiff = incompleteRank(left) - incompleteRank(right)
+      if (statusDiff) return statusDiff
+      return String(left.message || "").localeCompare(String(right.message || ""))
+    })
+  }
+
+  if (mode === "date") {
+    return base.sort((left, right) => {
+      const statusDiff = incompleteRank(left) - incompleteRank(right)
+      if (statusDiff) return statusDiff
+      const leftTime = new Date(left.timestamp || left.createdAt || 0).getTime() || 0
+      const rightTime = new Date(right.timestamp || right.createdAt || 0).getTime() || 0
+      return rightTime - leftTime
+    })
+  }
+
+  if (mode === "deadline") {
+    return base.sort((left, right) => {
+      const statusDiff = incompleteRank(left) - incompleteRank(right)
+      if (statusDiff) return statusDiff
+      const leftDue = new Date(getTaskDueValue(left) || 0).getTime() || Number.MAX_SAFE_INTEGER
+      const rightDue = new Date(getTaskDueValue(right) || 0).getTime() || Number.MAX_SAFE_INTEGER
+      if (leftDue !== rightDue) return leftDue - rightDue
+      return String(left.message || "").localeCompare(String(right.message || ""))
+    })
+  }
+
+  if (mode === "starred") {
+    return base.sort((left, right) => {
+      const statusDiff = incompleteRank(left) - incompleteRank(right)
+      if (statusDiff) return statusDiff
+      const leftStarred = new Date(left.starred_at || left.starredAt || 0).getTime() || (isTaskStarred(left) ? 1 : 0)
+      const rightStarred = new Date(right.starred_at || right.starredAt || 0).getTime() || (isTaskStarred(right) ? 1 : 0)
+      if (leftStarred !== rightStarred) return rightStarred - leftStarred
+      return String(left.message || "").localeCompare(String(right.message || ""))
+    })
+  }
+
+  return sortTasks(base)
+}
+
+function SidebarButton({ icon, label, count, active, indicatorCount = 0, onClick }) {
   return (
-    <section
-      className={cx(
-        "overflow-hidden rounded-2xl border",
-        isDarkMode ? "border-[#2a313a] bg-[#171b21]" : "border-slate-200 bg-white",
-        fastTransition,
-        className
-      )}
+    <button type="button" onClick={onClick} className={cx("tasks-sidebar-nav-button", active && "is-active")}>
+      <span className="tasks-sidebar-nav-icon">{icon}</span>
+      <span className="tasks-sidebar-nav-label">{label}</span>
+      {indicatorCount > 0 && <span className="tasks-sidebar-new-dot" title={`${indicatorCount} new`} />}
+      {Number.isFinite(count) && <span className="tasks-sidebar-count">{count}</span>}
+    </button>
+  )
+}
+
+function TaskSidebar({
+  activeScope,
+  listGroups,
+  totalCount,
+  starredCount,
+  assignedCount,
+  assignedNewCount = 0,
+  createdCount,
+  onBackHome,
+  onCreateTask,
+  onCreateList,
+  onScopeChange,
+}) {
+  const listOptions = listGroups.map(group => ({ id: group.id, title: group.title }))
+  return (
+    <aside className="tasks-workspace-sidebar">
+      <div className="tasks-sidebar-header">
+        {typeof onBackHome === "function" && (
+          <button type="button" className="tasks-sidebar-menu-button" onClick={onBackHome} title="Back" aria-label="Back">
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
+        <div className="tasks-sidebar-title-wrap">
+          <span className="tasks-sidebar-app-icon">
+            <Check className="h-5 w-5" />
+          </span>
+          <h1>Tasks</h1>
+        </div>
+      </div>
+
+      <button type="button" className="tasks-sidebar-create" onClick={() => onCreateTask?.(DEFAULT_TASK_LIST, listOptions)}>
+        <Plus className="h-5 w-5" />
+        <span>Create</span>
+      </button>
+
+      <nav className="tasks-sidebar-nav" aria-label="Task views">
+        <SidebarButton
+          icon={<CheckCircle className="h-4 w-4" />}
+          label="All tasks"
+          count={totalCount}
+          active={activeScope === "all"}
+          onClick={() => onScopeChange("all")}
+        />
+        <SidebarButton
+          icon={<Star className="h-4 w-4" />}
+          label="Starred"
+          count={starredCount}
+          active={activeScope === "starred"}
+          onClick={() => onScopeChange("starred")}
+        />
+        <SidebarButton
+          icon={<UserCheck className="h-4 w-4" />}
+          label="Assigned"
+          count={assignedCount}
+          indicatorCount={assignedNewCount}
+          active={activeScope === "assigned"}
+          onClick={() => onScopeChange("assigned")}
+        />
+        <SidebarButton
+          icon={<PencilLine className="h-4 w-4" />}
+          label="Created"
+          count={createdCount}
+          active={activeScope === "created"}
+          onClick={() => onScopeChange("created")}
+        />
+      </nav>
+
+      <div className="tasks-sidebar-section">
+        <div className="tasks-sidebar-section-title">
+          <span>Lists</span>
+          <ChevronRight className="h-4 w-4 rotate-90" />
+        </div>
+        <div className="tasks-sidebar-list">
+          {listGroups.map(group => (
+            <button
+              type="button"
+              key={group.id}
+              className={cx("tasks-sidebar-list-button", activeScope === `list:${group.id}` && "is-active")}
+              onClick={() => onScopeChange(`list:${group.id}`)}
+            >
+              <span className="tasks-sidebar-list-icon">
+                <Check className="h-4 w-4" />
+              </span>
+              <span className="tasks-sidebar-list-name">{group.title}</span>
+              <span className="tasks-sidebar-list-count">{group.tasks.length}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button type="button" className="tasks-sidebar-new-list" onClick={onCreateList}>
+        <Plus className="h-4 w-4" />
+        <span>Create new list</span>
+      </button>
+    </aside>
+  )
+}
+
+function TaskRow({
+  task,
+  channelName,
+  currentUserId,
+  membersById,
+  isWorking,
+  onComplete,
+  onOpen,
+}) {
+  const isCompleted = getViewerTaskStatus(task, currentUserId) === "completed"
+  const canComplete = canViewerCompleteTask(task, currentUserId)
+  const dueLabel = formatDueLabel(task)
+  const subtasks = getTaskSubtasks(task)
+  const assigneeNames = (task.assigneeIds || []).map(userId => {
+    const member = membersById.get(String(userId))
+    return member?.name || member?.email || (String(userId) === String(currentUserId) ? "You" : String(userId))
+  })
+  const openTask = () => onOpen?.(task)
+  const handleKeyDown = event => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    openTask()
+  }
+
+  return (
+    <div
+      className={cx("tasks-card-task", isCompleted && "is-completed")}
+      onClick={openTask}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
     >
-      {children}
+      <button
+        type="button"
+        className={cx("tasks-card-task-check", isCompleted && "is-completed", isWorking && "is-working")}
+        disabled={!canComplete || isWorking}
+        onClick={event => {
+          event.stopPropagation()
+          onComplete?.(task)
+        }}
+        aria-label={isCompleted ? "Task completed" : canComplete ? "Mark task complete" : "Only assigned members can complete this task"}
+        title={isCompleted ? "Task completed" : canComplete ? "Mark task complete" : "Only assigned members can complete this task"}
+      >
+        {isCompleted && <Check className="h-3.5 w-3.5" />}
+      </button>
+
+      <div className="tasks-card-task-body">
+        <div className="tasks-card-task-title">{task.message}</div>
+        <div className="tasks-card-task-meta">
+          {dueLabel && (
+            <span className={cx("tasks-card-due-pill", isTaskOverdue(task) && "is-overdue")}>
+              {dueLabel}
+            </span>
+          )}
+          {channelName && (
+            <span className="tasks-card-channel-pill">
+              <Hash className="h-3 w-3" />
+              {channelName}
+            </span>
+          )}
+          {assigneeNames.length > 0 && (
+            <span className="tasks-card-assignee-pill">
+              <UserCheck className="h-3 w-3" />
+              {assigneeNames.length === 1 ? assigneeNames[0] : `${assigneeNames.length} assigned`}
+            </span>
+          )}
+        </div>
+
+        {subtasks.length > 0 && (
+          <div className="tasks-card-subtasks">
+            {subtasks.slice(0, 3).map((subtask, index) => (
+              <div key={subtask.id || subtask.text || index} className="tasks-card-subtask">
+                <Circle className="h-4 w-4" />
+                <span>{subtask.text || subtask.message || subtask.title || "Subtask"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TaskEmptyState() {
+  return (
+    <div className="tasks-list-empty-state">
+      <div className="tasks-list-empty-art" aria-hidden="true">
+        <span className="tasks-list-empty-check" />
+        <span className="tasks-list-empty-dot" />
+        <span className="tasks-list-empty-line" />
+        <span className="tasks-list-empty-paper" />
+      </div>
+      <div className="tasks-list-empty-title">No tasks yet</div>
+      <div className="tasks-list-empty-copy">Add your to-dos and keep track of them across Google Workspace</div>
+    </div>
+  )
+}
+
+function TaskListMenu({
+  group,
+  sortMode,
+  onSortChange,
+  onRename,
+  onDelete,
+  onMoveFirst,
+  onPrint,
+  onDeleteCompleted,
+}) {
+  const sortOptions = [
+    ["my-order", "My order"],
+    ["date", "Date"],
+    ["deadline", "Deadline"],
+    ["starred", "Starred recently"],
+    ["title", "Title"],
+  ]
+  const isDefaultList = group.id === DEFAULT_TASK_LIST_ID
+  const completedCount = group.tasks.filter(task => getViewerTaskStatus(task, group.viewerId) === "completed").length
+
+  return (
+    <div className="tasks-list-menu" role="menu" aria-label={`${group.title} list actions`}>
+      <div className="tasks-list-menu-label">Sort by</div>
+      {sortOptions.map(([value, label]) => (
+        <button
+          type="button"
+          key={value}
+          className="tasks-list-menu-item"
+          onClick={() => onSortChange(value)}
+          role="menuitem"
+        >
+          <span className="tasks-list-menu-check">{sortMode === value && <Check className="h-4 w-4" />}</span>
+          <span>{label}</span>
+        </button>
+      ))}
+
+      <div className="tasks-list-menu-separator" />
+
+      <button type="button" className="tasks-list-menu-item" onClick={onRename} role="menuitem">
+        <span>Rename list</span>
+      </button>
+      <button
+        type="button"
+        className="tasks-list-menu-item"
+        disabled={isDefaultList}
+        onClick={onDelete}
+        role="menuitem"
+      >
+        <span className="tasks-list-menu-item-text">
+          <span>Delete list</span>
+          {isDefaultList && <small>The default list can't be deleted</small>}
+        </span>
+      </button>
+      <button type="button" className="tasks-list-menu-item" onClick={onMoveFirst} role="menuitem">
+        <span>Move list to first position</span>
+      </button>
+
+      <div className="tasks-list-menu-separator" />
+
+      <button type="button" className="tasks-list-menu-item" onClick={onPrint} role="menuitem">
+        <span>Print list</span>
+      </button>
+      <button
+        type="button"
+        className="tasks-list-menu-item"
+        disabled={completedCount === 0}
+        onClick={onDeleteCompleted}
+        role="menuitem"
+      >
+        <span>Delete all completed tasks</span>
+      </button>
+      <button type="button" className="tasks-list-menu-item" disabled role="menuitem">
+        <span>Clean up old tasks</span>
+      </button>
+    </div>
+  )
+}
+
+function TaskListCard({
+  group,
+  channelNames,
+  currentUserId,
+  membersById,
+  listOptions,
+  completingTaskId,
+  menuOpen,
+  sortMode,
+  completedOpen,
+  onCreateTask,
+  onMarkTaskComplete,
+  onOpenTask,
+  onToggleMenu,
+  onToggleCompleted,
+  onSortChange,
+  onRenameList,
+  onDeleteList,
+  onMoveListFirst,
+  onPrintList,
+  onDeleteCompleted,
+}) {
+  const pendingTasks = group.tasks.filter(task => getViewerTaskStatus(task, currentUserId) !== "completed")
+  const completedTasks = group.tasks.filter(task => getViewerTaskStatus(task, currentUserId) === "completed")
+  const canManageList = !group.virtual
+  const createTargetList = group.sourceList || (group.virtual ? DEFAULT_TASK_LIST : group)
+
+  return (
+    <section className="tasks-list-card">
+      <div className="tasks-list-card-header">
+        <h2>{group.title}</h2>
+        {canManageList && (
+          <button
+            type="button"
+            className="tasks-list-more"
+            aria-label={`${group.title} actions`}
+            aria-expanded={menuOpen}
+            title={`${group.title} actions`}
+            onClick={onToggleMenu}
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
+        )}
+        {canManageList && menuOpen && (
+          <TaskListMenu
+            group={group}
+            sortMode={sortMode}
+            onSortChange={onSortChange}
+            onRename={onRenameList}
+            onDelete={onDeleteList}
+            onMoveFirst={onMoveListFirst}
+            onPrint={onPrintList}
+            onDeleteCompleted={onDeleteCompleted}
+          />
+        )}
+      </div>
+
+      <button type="button" className="tasks-list-add-task" onClick={() => onCreateTask?.(createTargetList, listOptions)}>
+        <span className="tasks-list-add-icon">
+          <CheckCircle className="h-4 w-4" />
+        </span>
+        <span>Add a task</span>
+      </button>
+
+      <div className="tasks-list-items">
+        {pendingTasks.length === 0 && completedTasks.length === 0 ? (
+          <TaskEmptyState />
+        ) : (
+          pendingTasks.map(task => {
+            const taskId = String(task.id || task.timestamp || "")
+            return (
+              <TaskRow
+                key={taskId || `${group.id}-${task.message}`}
+                task={task}
+                currentUserId={currentUserId}
+                membersById={membersById}
+                channelName={channelNames.get(String(task.channel_id))}
+                isWorking={completingTaskId === taskId}
+                onComplete={onMarkTaskComplete}
+                onOpen={onOpenTask}
+              />
+            )
+          })
+        )}
+      </div>
+
+      {completedTasks.length > 0 && (
+        <button
+          type="button"
+          className={cx("tasks-list-completed", completedOpen && "is-open")}
+          aria-expanded={completedOpen}
+          onClick={onToggleCompleted}
+        >
+          <ChevronRight className="h-4 w-4" />
+          <span>Completed ({completedTasks.length})</span>
+        </button>
+      )}
+
+      {completedOpen && completedTasks.length > 0 && (
+        <div className="tasks-list-items tasks-list-completed-items">
+          {completedTasks.map(task => {
+            const taskId = String(task.id || task.timestamp || "")
+            return (
+              <TaskRow
+                key={taskId || `${group.id}-completed-${task.message}`}
+                task={task}
+                currentUserId={currentUserId}
+                membersById={membersById}
+                channelName={channelNames.get(String(task.channel_id))}
+                isWorking={completingTaskId === taskId}
+                onComplete={onMarkTaskComplete}
+                onOpen={onOpenTask}
+              />
+            )
+          })}
+        </div>
+      )}
     </section>
   )
 }
 
-function SummaryMetric({ label, value, tone = "neutral", isDarkMode = false }) {
-  const toneClass =
-    tone === "success"
-      ? isDarkMode
-        ? "text-emerald-300"
-        : "text-emerald-700"
-      : tone === "warning"
-        ? isDarkMode
-          ? "text-amber-300"
-          : "text-amber-700"
-        : isDarkMode
-          ? "text-slate-100"
-          : "text-slate-900"
+function TaskDetailsSidebar({ task, currentUserId, membersById, channelDetails, onClose }) {
+  if (!task) return null
+  const creator = membersById.get(String(task.createdById))
+  const listTitle = task.listName || "My Tasks"
+  const channel = channelDetails.get(String(task.channel_id))
+  const resolvedSpaceName = task.spaceName || channel?.spaceName || ""
+  const resolvedChannelName = task.channelName || channel?.name || ""
+  const channelLabel = resolvedChannelName
+    ? resolvedChannelName === "Direct message" || resolvedChannelName.startsWith("#")
+      ? resolvedChannelName
+      : `#${resolvedChannelName}`
+    : "No linked channel"
+  const createdDate = task.timestamp
+    ? new Date(task.timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : ""
 
   return (
-    <div
-      className={cx(
-        "rounded-[18px] border px-3.5 py-3",
-        isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50/90"
-      )}
-    >
-      <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-        {label}
-      </div>
-      <div className={cx("mt-1.5 text-[1.15rem] font-semibold tracking-[-0.03em]", toneClass)}>{value}</div>
-    </div>
-  )
-}
-
-function MobileMetricCard({ label, value, tone = "neutral", isDarkMode = false }) {
-  const toneClass =
-    tone === "success"
-      ? isDarkMode
-        ? "text-emerald-300"
-        : "text-emerald-700"
-      : tone === "warning"
-        ? isDarkMode
-          ? "text-amber-300"
-          : "text-amber-700"
-        : isDarkMode
-          ? "text-white"
-          : "text-slate-950"
-
-  return (
-    <div
-      className={cx(
-        "min-w-[120px] rounded-[22px] border px-4 py-3.5",
-        isDarkMode
-          ? "border-white/10 bg-white/[0.05] backdrop-blur"
-          : "border-white/80 bg-white/90 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
-      )}
-    >
-      <div className={cx("text-[10px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-        {label}
-      </div>
-      <div className={cx("mt-2 text-[1.4rem] font-semibold tracking-[-0.04em]", toneClass)}>{value}</div>
-    </div>
-  )
-}
-
-function InsightRow({ label, value, note, isDarkMode = false }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <div className={cx("text-sm font-medium", isDarkMode ? "text-slate-200" : "text-slate-800")}>
-          {label}
+    <aside className="tasks-detail-sidebar">
+      <div className="tasks-detail-header">
+        <div>
+          <div className="tasks-detail-eyebrow">{listTitle}</div>
+          <h2>{task.message}</h2>
         </div>
-        <div className={cx("mt-1 text-xs", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-          {note}
-        </div>
-      </div>
-      <div className={cx("shrink-0 text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function FilterChipGroup({ label, value, onChange, options, isDarkMode = false }) {
-  return (
-    <div>
-      <div className={cx("mb-2 text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-        {label}
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {options.map(option => {
-          const isSelected = value === option.value
-
-          return (
-            <button
-              key={option.value}
-              onClick={() => onChange(option.value)}
-              className={cx(
-                "shrink-0 rounded-full border px-3.5 py-2 text-xs font-semibold",
-                isSelected
-                  ? isDarkMode
-                    ? "border-sky-400/40 bg-sky-400/15 text-sky-100"
-                    : "border-sky-200 bg-sky-600 text-white"
-                  : isDarkMode
-                    ? "border-white/10 bg-white/[0.05] text-slate-300"
-                    : "border-slate-200 bg-white text-slate-600",
-                colorTransition
-              )}
-            >
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function FilterField({
-  icon,
-  label,
-  value,
-  onChange,
-  options,
-  isDarkMode = false,
-}) {
-  return (
-    <label className="min-w-0">
-      <div className={cx("mb-1.5 text-xs font-medium", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-        {label}
-      </div>
-      <div
-        className={cx(
-          "flex items-center gap-2 rounded-xl border px-3",
-          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50",
-          colorTransition
-        )}
-      >
-        <span className={cx(isDarkMode ? "text-slate-400" : "text-slate-500")}>{icon}</span>
-        <select
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          className={cx(
-            "h-11 w-full bg-transparent text-sm outline-none",
-            isDarkMode ? "text-slate-100" : "text-slate-900"
-          )}
-        >
-          {options.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    </label>
-  )
-}
-
-function SearchField({ value, onChange, isDarkMode = false }) {
-  return (
-    <label className="block min-w-0">
-      <div className={cx("mb-1.5 text-xs font-medium", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-        Search
-      </div>
-      <div
-        className={cx(
-          "flex items-center gap-2 rounded-xl border px-3",
-          isDarkMode ? "border-[#2a313a] bg-[#14181d]" : "border-slate-200 bg-slate-50",
-          colorTransition
-        )}
-      >
-        <Search className={cx("h-4 w-4", isDarkMode ? "text-slate-400" : "text-slate-500")} />
-        <input
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder="Search tasks or channels"
-          className={cx(
-            "h-11 w-full bg-transparent text-sm outline-none placeholder:text-slate-400",
-            isDarkMode ? "text-slate-100" : "text-slate-900"
-          )}
-        />
-      </div>
-    </label>
-  )
-}
-
-function EmptyState({ title, description, isDarkMode = false }) {
-  return (
-    <div
-      className={cx(
-        "flex min-h-[260px] items-center justify-center rounded-xl border border-dashed px-6 py-12 text-center",
-        isDarkMode ? "border-[#303641] bg-[#14181d]" : "border-slate-200 bg-slate-50/70"
-      )}
-    >
-      <div className="max-w-sm">
-        <div
-          className={cx(
-            "mx-auto flex h-14 w-14 items-center justify-center rounded-xl",
-            isDarkMode ? "bg-[#1f242b] text-slate-300" : "bg-white text-slate-500"
-          )}
-        >
-          <ClipboardList className="h-7 w-7" />
-        </div>
-        <h3 className={cx("mt-4 text-lg font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-          {title}
-        </h3>
-        <p className={cx("mt-2 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-          {description}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function TaskItem({
-  task,
-  channelName,
-  currentUserId,
-  isDarkMode = false,
-  isWorking = false,
-  isCompact = false,
-  onComplete,
-}) {
-  const isCompleted = task.status === "completed"
-  const isAssignedToCurrentUser = task.assigneeIds.includes(currentUserId)
-  const isCreatedByCurrentUser = task.createdById === currentUserId
-
-  return (
-    <article
-      className={cx(
-        isCompact ? "rounded-[24px] border px-4 py-4" : "rounded-xl border px-4 py-4",
-        isCompleted
-          ? isDarkMode
-            ? "border-emerald-900/40 bg-emerald-950/20"
-            : "border-emerald-100 bg-emerald-50/60"
-          : isDarkMode
-            ? "border-[#2c333c] bg-[#14181d] hover:border-[#39414c] hover:bg-[#171c22]"
-            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70",
-        fastTransition
-      )}
-    >
-      <div className={cx("flex items-start gap-3", isCompact ? "gap-3.5" : "gap-3")}>
-        <button
-          onClick={() => onComplete?.(task)}
-          disabled={isCompleted || isWorking}
-          className={cx(
-            isCompact ? "mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border" : "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
-            isCompleted
-              ? "border-emerald-500 bg-emerald-500 text-white"
-              : isDarkMode
-                ? "border-[#343b45] bg-[#1c2128] text-slate-300 hover:border-[#4b5563] hover:text-white"
-                : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700",
-            isWorking ? "cursor-wait opacity-80" : "",
-            fastTransition
-          )}
-          title={isCompleted ? "Task completed" : "Mark task as complete"}
-        >
-          {isCompleted ? <Check className="h-4.5 w-4.5" /> : <CheckCircle className="h-4.5 w-4.5" />}
+        <button type="button" className="tasks-detail-close" onClick={onClose} aria-label="Close task details">
+          ×
         </button>
+      </div>
 
-        <div className="min-w-0 flex-1">
-          <div className={cx("flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between", isCompact ? "gap-2.5" : "gap-3")}>
-            <div className="min-w-0">
-              <h3
-                className={cx(
-                  isCompact ? "text-[15px] font-semibold leading-6" : "text-[15px] font-semibold leading-6",
-                  isCompleted ? "line-through opacity-70" : "",
-                  isDarkMode ? "text-slate-100" : "text-slate-900"
-                )}
-              >
-                {task.message}
-              </h3>
+      <section className="tasks-detail-section">
+        <h3>Assigned</h3>
+        <div className="tasks-detail-people">
+          {(task.assigneeIds || []).length > 0 ? (
+            task.assigneeIds.map(userId => {
+              const member = membersById.get(String(userId))
+              const status = getAssigneeStatus(task, userId)
+              return (
+                <div key={userId} className="tasks-detail-person">
+                  <span className={cx("tasks-detail-status-dot", status === "completed" && "is-complete")} />
+                  <span>{String(userId) === String(currentUserId) ? "You" : member?.name || member?.email || userId}</span>
+                  <strong>{status === "completed" ? "Done" : "Not done"}</strong>
+                </div>
+              )
+            })
+          ) : (
+            <div className="tasks-detail-muted">No assignees</div>
+          )}
+        </div>
+      </section>
 
-              <div className={cx("mt-2 flex flex-wrap items-center gap-2", isCompact ? "mt-2.5" : "mt-2")}>
-                {isAssignedToCurrentUser && (
-                  <span
-                    className={cx(
-                      "inline-flex rounded-md px-2.5 py-1 text-[11px] font-medium",
-                      isDarkMode ? "bg-[#1d2938] text-slate-200" : "bg-slate-100 text-slate-700"
-                    )}
-                  >
-                    Assigned to you
-                  </span>
-                )}
-                {isCreatedByCurrentUser && (
-                  <span
-                    className={cx(
-                      "inline-flex rounded-md px-2.5 py-1 text-[11px] font-medium",
-                      isDarkMode ? "bg-[#232931] text-slate-300" : "bg-slate-100 text-slate-600"
-                    )}
-                  >
-                    Created by you
-                  </span>
-                )}
-                {channelName && (
-                  <span
-                    className={cx(
-                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium",
-                      isDarkMode ? "bg-[#232931] text-slate-300" : "bg-slate-100 text-slate-600"
-                    )}
-                  >
-                    <Hash className="h-3.5 w-3.5" />
-                    {channelName}
-                  </span>
-                )}
-                {task.assigneeIds.length > 0 && (
-                  <span
-                    className={cx(
-                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium",
-                      isDarkMode ? "bg-[#232931] text-slate-300" : "bg-slate-100 text-slate-600"
-                    )}
-                  >
-                    <Users className="h-3.5 w-3.5" />
-                    {task.assigneeIds.length} assignee{task.assigneeIds.length > 1 ? "s" : ""}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <span
-              className={cx(
-                "inline-flex w-fit rounded-md px-2.5 py-1 text-[11px] font-semibold",
-                isCompleted
-                  ? isDarkMode
-                    ? "bg-emerald-950/40 text-emerald-300"
-                    : "bg-emerald-100 text-emerald-700"
-                  : isDarkMode
-                    ? "bg-amber-950/40 text-amber-300"
-                    : "bg-amber-100 text-amber-700"
-              )}
-            >
-              {isWorking && !isCompleted ? "Updating" : isCompleted ? "Completed" : "Pending"}
-            </span>
+      <section className="tasks-detail-section">
+        <h3>Location</h3>
+        <div className="tasks-detail-location-list">
+          <div className="tasks-detail-location-row">
+            <span>Space</span>
+            <strong>{resolvedSpaceName || "No linked space"}</strong>
           </div>
-
-          <div className={cx("mt-3 flex flex-wrap items-center gap-3 text-xs", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-            <span className="inline-flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5" />
-              {formatTaskTimestamp(task.timestamp)}
-            </span>
-            {task.createdById && (
-              <span className="inline-flex items-center gap-1.5">
-                <PenTool className="h-3.5 w-3.5" />
-                Owner tracked
-              </span>
-            )}
+          <div className="tasks-detail-location-row">
+            <span>Channel</span>
+            <strong>{channelLabel}</strong>
           </div>
         </div>
-      </div>
-    </article>
+      </section>
+
+      <section className="tasks-detail-section">
+        <h3>Created</h3>
+        <div className="tasks-detail-person">
+          <span className="tasks-detail-status-dot is-created" />
+          <span>{String(task.createdById) === String(currentUserId) ? "You" : creator?.name || creator?.email || task.createdById || "Unknown"}</span>
+          <strong>{createdDate}</strong>
+        </div>
+      </section>
+    </aside>
   )
 }
 
@@ -514,16 +828,93 @@ export default function TasksHub({
   tasks = [],
   messages = {},
   currentUser,
+  members = [],
   channels = [],
   completingTaskId = null,
   onBackHome,
+  onCreateTask,
   onMarkTaskComplete,
+  onDeleteCompletedTasks,
+  assignedNewCount = 0,
+  onAssignedScopeOpen,
+  focusTaskId = null,
 }) {
   const currentUserId = getEntityId(currentUser?.id || currentUser?._id || currentUser?.userId)
-  const [ownershipFilter, setOwnershipFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [dateFilter, setDateFilter] = useState("all")
-  const [searchQuery, setSearchQuery] = useState("")
+  const listStorageKey = useMemo(() => getTaskListsStorageKey(currentUserId), [currentUserId])
+  const hiddenListsStorageKey = useMemo(() => getHiddenListsStorageKey(currentUserId), [currentUserId])
+  const [activeScope, setActiveScope] = useState("all")
+  const [storedLists, setStoredLists] = useState(() => readStoredLists(listStorageKey))
+  const [hiddenListIds, setHiddenListIds] = useState(() => readHiddenListIds(hiddenListsStorageKey))
+  const [hiddenCompletedTaskIds, setHiddenCompletedTaskIds] = useState([])
+  const [listSorts, setListSorts] = useState({})
+  const [completedOpenByList, setCompletedOpenByList] = useState({})
+  const [openListMenuId, setOpenListMenuId] = useState(null)
+  const boardRef = useRef(null)
+  const dragStateRef = useRef(null)
+  const draggedBoardRef = useRef(false)
+  const [selectedTaskId, setSelectedTaskId] = useState(null)
+
+  useEffect(() => {
+    if (!focusTaskId) return
+    setSelectedTaskId(String(focusTaskId))
+    setActiveScope("assigned")
+  }, [focusTaskId])
+
+  const membersById = useMemo(() => {
+    const lookup = new Map()
+    ;(members || []).forEach(member => {
+      const id = getEntityId(member?.id || member?._id || member?.userId)
+      if (!id) return
+      lookup.set(id, { ...(lookup.get(id) || {}), ...member, id })
+    })
+    if (currentUserId) lookup.set(currentUserId, { ...(lookup.get(currentUserId) || {}), ...(currentUser || {}), id: currentUserId })
+    return lookup
+  }, [currentUser, currentUserId, members])
+
+  useEffect(() => {
+    setStoredLists(readStoredLists(listStorageKey))
+  }, [listStorageKey])
+
+  useEffect(() => {
+    setHiddenListIds(readHiddenListIds(hiddenListsStorageKey))
+  }, [hiddenListsStorageKey])
+
+  useEffect(() => {
+    if (!openListMenuId || typeof document === "undefined") return undefined
+
+    const closeMenu = event => {
+      if (event.target?.closest?.(".tasks-list-menu, .tasks-list-more")) return
+      setOpenListMenuId(null)
+    }
+
+    document.addEventListener("pointerdown", closeMenu)
+    return () => document.removeEventListener("pointerdown", closeMenu)
+  }, [openListMenuId])
+
+  const persistStoredLists = updater => {
+    setStoredLists(prev => {
+      const nextValue = typeof updater === "function" ? updater(prev) : updater
+      const seen = new Set()
+      const next = (Array.isArray(nextValue) ? nextValue : [])
+        .map(normalizeStoredList)
+        .filter(list => {
+          if (!list || seen.has(list.id)) return false
+          seen.add(list.id)
+          return true
+        })
+      writeStoredLists(listStorageKey, next)
+      return next
+    })
+  }
+
+  const persistHiddenListIds = updater => {
+    setHiddenListIds(prev => {
+      const nextValue = typeof updater === "function" ? updater(prev) : updater
+      const next = Array.from(new Set((Array.isArray(nextValue) ? nextValue : []).map(String).filter(Boolean)))
+      writeHiddenListIds(hiddenListsStorageKey, next)
+      return next
+    })
+  }
 
   const allTasks = useMemo(() => {
     const directTasks = (Array.isArray(tasks) ? tasks : [])
@@ -550,386 +941,391 @@ export default function TasksHub({
     return sortTasks(Array.from(deduped.values()))
   }, [messages, tasks])
 
-  const assignedTasks = useMemo(
-    () => allTasks.filter(task => task.assigneeIds.includes(currentUserId)),
-    [allTasks, currentUserId]
-  )
-
-  const createdTasks = useMemo(
-    () => allTasks.filter(task => task.createdById === currentUserId),
-    [allTasks, currentUserId]
-  )
-
-  const scopedTasks = useMemo(
-    () =>
-      allTasks.filter(task =>
-        task.assigneeIds.includes(currentUserId) || task.createdById === currentUserId
-      ),
-    [allTasks, currentUserId]
-  )
-
-  const workspaceFallback = scopedTasks.length === 0
-  const baseTasks = workspaceFallback ? allTasks : scopedTasks
-
-  const filteredTasks = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-
-    return baseTasks.filter(task => {
-      const matchesOwnership =
-        ownershipFilter === "all"
-          ? true
-          : ownershipFilter === "assigned"
-            ? task.assigneeIds.includes(currentUserId)
-            : task.createdById === currentUserId
-
-      const matchesStatus =
-        statusFilter === "all" ? true : task.status === statusFilter
-
-      const matchesDate = matchesDateFilter(task.timestamp, dateFilter)
-
-      const channelName = channels.find(channel => String(channel?.id) === String(task.channel_id))?.name || ""
-      const matchesQuery =
-        !query ||
-        `${task.message || ""} ${channelName}`.toLowerCase().includes(query)
-
-      return matchesOwnership && matchesStatus && matchesDate && matchesQuery
-    })
-  }, [baseTasks, channels, currentUserId, dateFilter, ownershipFilter, searchQuery, statusFilter])
-
-  const channelNames = useMemo(
-    () => new Map((channels || []).map(channel => [String(channel?.id), channel?.name || "channel"])),
+  const channelDetails = useMemo(
+    () => new Map((channels || []).map(channel => [String(channel?.id), {
+      id: channel?.id,
+      name: channel?.name || "channel",
+      spaceId: channel?.spaceId || channel?.space_id || null,
+      spaceName: channel?.spaceName || channel?.space_name || channel?.space?.name || "",
+    }])),
     [channels]
   )
+  const channelNames = useMemo(
+    () => new Map(Array.from(channelDetails.entries()).map(([id, channel]) => [id, channel.name])),
+    [channelDetails]
+  )
 
-  const totalCount = baseTasks.length
-  const completedCount = baseTasks.filter(task => task.status === "completed").length
-  const pendingCount = totalCount - completedCount
-  const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+  const scopedTasks = useMemo(() => {
+    const mine = allTasks.filter(task =>
+      task.assigneeIds.includes(currentUserId) || task.createdById === currentUserId
+    )
+    return currentUserId ? mine : allTasks
+  }, [allTasks, currentUserId])
 
-  const ownershipOptions = [
-    { value: "all", label: workspaceFallback ? "All visible tasks" : "All my tasks" },
-    { value: "assigned", label: "Assigned to me" },
-    { value: "created", label: "Created by me" },
-  ]
+  const visibleScopedTasks = useMemo(() => {
+    const hiddenTaskSet = new Set(hiddenCompletedTaskIds)
+    return scopedTasks.filter(task => {
+      const taskId = String(task.id || task.timestamp || "")
+      if (currentUserId && (task.hiddenForIds || []).includes(currentUserId)) return false
+      return !taskId || !hiddenTaskSet.has(taskId)
+    })
+  }, [currentUserId, hiddenCompletedTaskIds, scopedTasks])
 
-  const statusOptions = [
-    { value: "all", label: "All statuses" },
-    { value: "pending", label: "Pending" },
-    { value: "completed", label: "Completed" },
-  ]
+  const assignedTasks = useMemo(
+    () => visibleScopedTasks.filter(task => task.assigneeIds.includes(currentUserId)),
+    [currentUserId, visibleScopedTasks]
+  )
+  const createdTasks = useMemo(
+    () => visibleScopedTasks.filter(task => task.createdById === currentUserId),
+    [currentUserId, visibleScopedTasks]
+  )
 
-  const dateOptions = [
-    { value: "all", label: "Any time" },
-    { value: "today", label: "Today" },
-    { value: "week", label: "This week" },
-    { value: "month", label: "This month" },
-    { value: "recent", label: "Last 30 days" },
-  ]
+  const taskLists = useMemo(() => {
+    const hiddenSet = new Set(hiddenListIds)
+    const defsById = new Map()
+    const addList = list => {
+      const normalized = normalizeStoredList(list)
+      if (!normalized || hiddenSet.has(normalized.id)) return
+      defsById.set(normalized.id, {
+        ...normalized,
+        system: normalized.id === DEFAULT_TASK_LIST_ID || normalized.system,
+      })
+    }
+
+    if (storedLists.length > 0) {
+      storedLists.forEach(addList)
+    } else {
+      addList(DEFAULT_TASK_LIST)
+    }
+
+    if (!defsById.has(DEFAULT_TASK_LIST_ID)) {
+      addList(DEFAULT_TASK_LIST)
+    }
+
+    visibleScopedTasks.forEach(task => {
+      const listId = getTaskListId(task)
+      if (listId === DEFAULT_TASK_LIST_ID || hiddenSet.has(listId) || defsById.has(listId)) return
+      defsById.set(listId, {
+        id: listId,
+        title: getTaskListTitle(task),
+        system: false,
+        createdAt: task.timestamp || null,
+      })
+    })
+
+    return Array.from(defsById.values())
+  }, [hiddenListIds, storedLists, visibleScopedTasks])
+
+  const listGroups = useMemo(() => {
+    const groupsById = new Map(taskLists.map(list => [list.id, { ...list, tasks: [] }]))
+    const knownListIds = new Set(taskLists.map(list => list.id))
+
+    visibleScopedTasks.forEach(task => {
+      const listId = getTaskListId(task)
+      const targetId = knownListIds.has(listId) ? listId : DEFAULT_TASK_LIST_ID
+      const targetGroup = groupsById.get(targetId)
+      if (targetGroup) targetGroup.tasks.push(task)
+    })
+
+    return taskLists.map(list => {
+      const group = groupsById.get(list.id) || { ...list, tasks: [] }
+      return {
+        ...group,
+        viewerId: currentUserId,
+        tasks: sortTasksForList(group.tasks, listSorts[group.id] || "my-order", currentUserId),
+      }
+    })
+  }, [currentUserId, listSorts, taskLists, visibleScopedTasks])
+
+  const starredTasks = useMemo(() => visibleScopedTasks.filter(isTaskStarred), [visibleScopedTasks])
+  const selectedTask = useMemo(
+    () => visibleScopedTasks.find(task => String(task.id || task.timestamp || "") === String(selectedTaskId)) || null,
+    [selectedTaskId, visibleScopedTasks]
+  )
+  const selectedGroup = activeScope.startsWith("list:")
+    ? listGroups.find(group => `list:${group.id}` === activeScope)
+    : null
+
+  const buildScopedListGroups = (scope, fallbackTitle, predicate) => {
+    const scopedGroups = listGroups
+      .map(group => ({
+        ...group,
+        id: `${scope}:${group.id}`,
+        sourceList: group,
+        virtual: true,
+        tasks: group.tasks.filter(predicate),
+      }))
+      .filter(group => group.tasks.length > 0)
+
+    return scopedGroups.length > 0
+      ? scopedGroups
+      : [{ id: scope, title: fallbackTitle, tasks: [], virtual: true }]
+  }
+
+  const visibleGroups =
+    activeScope === "starred"
+      ? [{ id: "starred", title: "Starred", tasks: starredTasks, virtual: true }]
+      : activeScope === "assigned"
+        ? buildScopedListGroups("assigned", "Assigned", task => task.assigneeIds.includes(currentUserId))
+        : activeScope === "created"
+          ? buildScopedListGroups("created", "Created", task => task.createdById === currentUserId)
+      : selectedGroup
+        ? [selectedGroup]
+        : listGroups
+  const taskListOptions = taskLists.map(list => ({ id: list.id, title: list.title }))
+
+  useEffect(() => {
+    if (activeScope.startsWith("list:") && !selectedGroup) {
+      setActiveScope("all")
+    }
+  }, [activeScope, selectedGroup])
+
+  const handleCreateList = () => {
+    const suggestedName = "Untitled list"
+    const title = typeof window !== "undefined" ? window.prompt("List name", suggestedName) : suggestedName
+    if (title === null) return
+
+    const cleanTitle = sanitizeListTitle(title)
+    const existingIds = new Set(taskLists.map(list => list.id))
+    const nextList = {
+      id: createListId(cleanTitle, existingIds),
+      title: cleanTitle,
+      system: false,
+      createdAt: new Date().toISOString(),
+    }
+
+    persistStoredLists(prev => {
+      const base = prev.length > 0 ? prev : [DEFAULT_TASK_LIST]
+      return [...base, nextList]
+    })
+    persistHiddenListIds(prev => prev.filter(id => id !== nextList.id))
+    setActiveScope("all")
+    setOpenListMenuId(null)
+
+    if (typeof window !== "undefined") window.requestAnimationFrame?.(() => {
+      if (boardRef.current) {
+        boardRef.current.scrollLeft = boardRef.current.scrollWidth
+      }
+    })
+  }
+
+  const ensureListInStoredOrder = group => {
+    const source = storedLists.length > 0 ? storedLists : taskLists
+    const hasGroup = source.some(list => list.id === group.id)
+    return (hasGroup ? source : [...source, group]).map(list => ({
+      id: list.id,
+      title: list.title,
+      system: list.id === DEFAULT_TASK_LIST_ID || Boolean(list.system),
+      createdAt: list.createdAt || null,
+    }))
+  }
+
+  const handleRenameList = group => {
+    const title = typeof window !== "undefined" ? window.prompt("Rename list", group.title) : group.title
+    if (title === null) return
+    const cleanTitle = sanitizeListTitle(title)
+    persistStoredLists(prev => {
+      const source = prev.length > 0 ? prev : ensureListInStoredOrder(group)
+      const exists = source.some(list => list.id === group.id)
+      const renamed = { ...group, title: cleanTitle, system: group.id === DEFAULT_TASK_LIST_ID || group.system }
+      return exists
+        ? source.map(list => (list.id === group.id ? { ...list, title: cleanTitle } : list))
+        : [...source, renamed]
+    })
+    setOpenListMenuId(null)
+  }
+
+  const handleDeleteList = group => {
+    if (group.id === DEFAULT_TASK_LIST_ID) return
+    const confirmed = typeof window === "undefined" || window.confirm(`Delete "${group.title}"? Tasks in it will move back to My Tasks.`)
+    if (!confirmed) return
+    persistStoredLists(prev => prev.filter(list => list.id !== group.id))
+    persistHiddenListIds(prev => [...prev, group.id])
+    if (activeScope === `list:${group.id}`) setActiveScope("all")
+    setOpenListMenuId(null)
+  }
+
+  const handleMoveListFirst = group => {
+    persistStoredLists(() => {
+      const source = ensureListInStoredOrder(group)
+      return [group, ...source.filter(list => list.id !== group.id)]
+    })
+    setOpenListMenuId(null)
+  }
+
+  const handleSortChange = (group, mode) => {
+    setListSorts(prev => ({ ...prev, [group.id]: mode }))
+    setOpenListMenuId(null)
+  }
+
+  const handlePrintList = group => {
+    if (typeof window === "undefined") return
+    const printWindow = window.open("", "_blank", "width=760,height=840")
+    if (!printWindow) {
+      window.print()
+      setOpenListMenuId(null)
+      return
+    }
+
+    const rows = group.tasks
+      .map(task => `<li>${String(task.message || "Untitled task").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;",
+      }[char]))}</li>`)
+      .join("")
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${group.title}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #202124; padding: 28px; }
+            h1 { font-size: 22px; margin: 0 0 18px; }
+            li { margin: 10px 0; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <h1>${group.title}</h1>
+          <ul>${rows || "<li>No tasks yet</li>"}</ul>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+    setOpenListMenuId(null)
+  }
+
+  const handleDeleteCompleted = async group => {
+    const completedTasks = group.tasks.filter(task => getViewerTaskStatus(task, currentUserId) === "completed")
+    const completedIds = completedTasks
+      .map(task => String(task.id || task.taskId || task._id || task.timestamp || ""))
+      .filter(Boolean)
+    if (completedIds.length === 0) return
+    setHiddenCompletedTaskIds(prev => Array.from(new Set([...prev, ...completedIds])))
+    setCompletedOpenByList(prev => ({ ...prev, [group.id]: false }))
+    setOpenListMenuId(null)
+    await onDeleteCompletedTasks?.(completedTasks)
+  }
+
+  const handleBoardPointerDown = event => {
+    if (event.button !== 0) return
+    if (event.target?.closest?.("button, input, textarea, select, a, [role='menu'], [contenteditable='true']")) return
+    const board = boardRef.current
+    if (!board) return
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: board.scrollLeft,
+      dragging: false,
+    }
+    board.setPointerCapture?.(event.pointerId)
+  }
+
+  const handleBoardPointerMove = event => {
+    const state = dragStateRef.current
+    const board = boardRef.current
+    if (!state || !board) return
+
+    const deltaX = event.clientX - state.startX
+    if (!state.dragging && Math.abs(deltaX) > 4) {
+      state.dragging = true
+      draggedBoardRef.current = true
+      board.classList.add("is-dragging")
+    }
+    if (!state.dragging) return
+
+    board.scrollLeft = state.scrollLeft - deltaX
+    event.preventDefault()
+  }
+
+  const endBoardDrag = event => {
+    const board = boardRef.current
+    if (board && dragStateRef.current) {
+      board.releasePointerCapture?.(dragStateRef.current.pointerId || event.pointerId)
+      board.classList.remove("is-dragging")
+    }
+    dragStateRef.current = null
+  }
+
+  const handleBoardClickCapture = event => {
+    if (!draggedBoardRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    draggedBoardRef.current = false
+  }
+
+  const handleScopeChange = scope => {
+    setActiveScope(scope)
+    if (scope === "assigned") onAssignedScopeOpen?.()
+  }
 
   return (
-    <div className={cx("min-h-[100dvh] w-full overflow-y-auto", isDarkMode ? "bg-[#0b0f14] text-slate-100" : "bg-[#edf3f8] text-slate-900")}>
-      <div className="flex min-h-[100dvh] w-full flex-col px-4 py-4 sm:px-6 sm:py-6 xl:px-8 xl:py-8">
-        <section className="md:hidden">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-            <div
-              className={cx(
-                "overflow-hidden rounded-[30px] border px-4 py-4",
-                isDarkMode
-                  ? "border-white/10 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),_transparent_52%),linear-gradient(180deg,#101720_0%,#0d131a_100%)]"
-                  : "border-white/80 bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.14),_transparent_52%),linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] shadow-[0_24px_60px_rgba(15,23,42,0.08)]"
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-3">
-                  {typeof onBackHome === "function" && (
-                    <button
-                      onClick={onBackHome}
-                      className={cx(
-                        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border backdrop-blur",
-                        isDarkMode ? "border-white/10 bg-white/[0.06] text-slate-100" : "border-white/90 bg-white/90 text-slate-700"
-                      )}
-                      title="Back"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                  )}
+    <div className={cx("tasks-workspace-page", isDarkMode && "is-dark")}>
+      <TaskSidebar
+        activeScope={activeScope}
+        listGroups={listGroups}
+        totalCount={scopedTasks.length}
+        starredCount={starredTasks.length}
+        assignedCount={assignedTasks.length}
+        assignedNewCount={assignedNewCount}
+        createdCount={createdTasks.length}
+        onBackHome={onBackHome}
+        onCreateTask={onCreateTask}
+        onCreateList={handleCreateList}
+        onScopeChange={handleScopeChange}
+      />
 
-                  <div className="min-w-0">
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.24em]", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                      Mobile Queue
-                    </div>
-                    <h1 className={cx("mt-2 text-[1.7rem] font-semibold tracking-[-0.05em]", isDarkMode ? "text-white" : "text-slate-950")}>
-                      Tasks
-                    </h1>
-                    <p className={cx("mt-2 max-w-md text-sm leading-6", isDarkMode ? "text-slate-300" : "text-slate-600")}>
-                      See what needs attention, filter fast, and close work from one thumb-friendly view.
-                    </p>
-                  </div>
-                </div>
-
-                <div className={cx("shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.08] text-slate-100" : "bg-slate-900 text-white")}>
-                  {filteredTasks.length} live
-                </div>
-              </div>
-
-              {workspaceFallback && (
-                <div className={cx("mt-4 rounded-[20px] px-3.5 py-3 text-xs leading-5", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100/90 text-slate-600")}>
-                  Showing all visible workspace tasks until profile-linked ownership is available.
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <MobileMetricCard label="Total" value={totalCount} isDarkMode={isDarkMode} />
-              <MobileMetricCard label="Done" value={completedCount} tone="success" isDarkMode={isDarkMode} />
-              <MobileMetricCard label="Open" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
-              <MobileMetricCard label="Rate" value={`${completionRate}%`} isDarkMode={isDarkMode} />
-            </div>
-
-            <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#101720]/95" : "bg-white/95")}>
-              <div className="px-4 py-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                      Refine
-                    </div>
-                    <h2 className={cx("mt-2 text-lg font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                      Focus your queue
-                    </h2>
-                  </div>
-                  <div className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>
-                    {assignedTasks.length} assigned
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  <FilterChipGroup label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                  <FilterChipGroup label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                  <FilterChipGroup label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                </div>
-
-                <div className="mt-5 grid grid-cols-3 gap-2.5">
-                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
-                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Assigned</div>
-                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{assignedTasks.length}</div>
-                  </div>
-                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
-                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Created</div>
-                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{createdTasks.length}</div>
-                  </div>
-                  <div className={cx("rounded-[18px] border px-3 py-3", isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}>
-                    <div className={cx("text-[10px] font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>Visible</div>
-                    <div className={cx("mt-1.5 text-lg font-semibold tracking-[-0.04em]", isDarkMode ? "text-white" : "text-slate-900")}>{filteredTasks.length}</div>
-                  </div>
-                </div>
-              </div>
-            </SurfaceCard>
-
-            <SurfaceCard isDarkMode={isDarkMode} className={cx("overflow-visible", isDarkMode ? "bg-[#101720]/95" : "bg-white/95")}>
-              <div className={cx("border-b px-4 py-4", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                      Task Feed
-                    </div>
-                    <h2 className={cx("mt-1.5 text-[1.15rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                      Swipe-friendly list
-                    </h2>
-                  </div>
-                  <div className={cx("rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.06] text-slate-200" : "bg-slate-100 text-slate-700")}>
-                    {filteredTasks.length} visible
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-4 py-4">
-                {filteredTasks.length === 0 ? (
-                  <EmptyState
-                    title="No tasks match these filters"
-                    description="Try broadening the ownership or date filters to bring more work back into view."
-                    isDarkMode={isDarkMode}
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {filteredTasks.map(task => {
-                      const taskId = String(task.id || task.timestamp || "")
-                      return (
-                        <TaskItem
-                          key={taskId || `${task.message}-${task.timestamp}`}
-                          task={task}
-                          channelName={channelNames.get(String(task.channel_id))}
-                          currentUserId={currentUserId}
-                          isDarkMode={isDarkMode}
-                          isWorking={completingTaskId === taskId}
-                          isCompact
-                          onComplete={onMarkTaskComplete}
-                        />
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </SurfaceCard>
+      <main
+        ref={boardRef}
+        className="tasks-board-shell"
+        onPointerDown={handleBoardPointerDown}
+        onPointerMove={handleBoardPointerMove}
+        onPointerUp={endBoardDrag}
+        onPointerCancel={endBoardDrag}
+        onClickCapture={handleBoardClickCapture}
+      >
+        <div className="tasks-board-panel">
+          <div className="tasks-board-grid">
+            {visibleGroups.map(group => (
+              <TaskListCard
+                key={group.id}
+                group={group}
+                channelNames={channelNames}
+                currentUserId={currentUserId}
+                membersById={membersById}
+                listOptions={taskListOptions}
+                completingTaskId={completingTaskId}
+                menuOpen={openListMenuId === group.id}
+                sortMode={listSorts[group.sourceList?.id || group.id] || "my-order"}
+                completedOpen={Boolean(completedOpenByList[group.id])}
+                onCreateTask={onCreateTask}
+                onMarkTaskComplete={onMarkTaskComplete}
+                onOpenTask={task => setSelectedTaskId(task.id || task.timestamp || null)}
+                onToggleMenu={() => setOpenListMenuId(prev => (prev === group.id ? null : group.id))}
+                onToggleCompleted={() => setCompletedOpenByList(prev => ({ ...prev, [group.id]: !prev[group.id] }))}
+                onSortChange={mode => handleSortChange(group.sourceList || group, mode)}
+                onRenameList={() => handleRenameList(group.sourceList || group)}
+                onDeleteList={() => handleDeleteList(group.sourceList || group)}
+                onMoveListFirst={() => handleMoveListFirst(group.sourceList || group)}
+                onPrintList={() => handlePrintList(group)}
+                onDeleteCompleted={() => handleDeleteCompleted(group)}
+              />
+            ))}
           </div>
-        </section>
-
-        <section
-          className={cx(
-            "hidden min-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[28px] border md:flex",
-            isDarkMode ? "border-white/10 bg-[#101720]" : "border-white/70 bg-white/88 shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
-          )}
-        >
-          <div className={cx("border-b px-4 py-4 sm:px-5 lg:px-6", isDarkMode ? "border-white/10" : "border-slate-200/80")}>
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-start gap-3">
-                  {typeof onBackHome === "function" && (
-                    <button
-                      onClick={onBackHome}
-                      className={cx(
-                        "mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
-                        isDarkMode ? "border-[#2d323a] bg-[#121821] text-slate-200 hover:bg-[#17202a]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-                        fastTransition
-                      )}
-                      title="Back"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                  )}
-
-                  <div className="min-w-0">
-                    <div className={cx("text-[11px] font-semibold uppercase tracking-[0.22em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                      Workspace Tasks
-                    </div>
-                    <h1 className={cx("mt-1.5 text-[1.45rem] font-semibold tracking-[-0.04em] sm:text-[1.6rem]", isDarkMode ? "text-white" : "text-slate-950")}>
-                      Tasks
-                    </h1>
-                    <p className={cx("mt-1.5 max-w-2xl text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-600")}>
-                      Track assignments, delegated work, and follow-ups across the workspace in one focused queue.
-                    </p>
-                    {workspaceFallback && (
-                      <div className={cx("mt-3 inline-flex rounded-full px-3 py-1.5 text-xs font-medium", isDarkMode ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600")}>
-                        Showing visible workspace tasks because none are mapped directly to your profile yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-2.5 sm:grid-cols-2 xl:min-w-[520px] xl:grid-cols-4">
-                <SummaryMetric label="Total" value={totalCount} isDarkMode={isDarkMode} />
-                <SummaryMetric label="Completed" value={completedCount} tone="success" isDarkMode={isDarkMode} />
-                <SummaryMetric label="Pending" value={pendingCount} tone="warning" isDarkMode={isDarkMode} />
-                <SummaryMetric label="Completion" value={`${completionRate}%`} isDarkMode={isDarkMode} />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid min-h-0 flex-1 gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:px-6 xl:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-              <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#111922]" : "bg-white")}>
-                <div className="px-4 py-4">
-                  <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                    Controls
-                  </div>
-                  <h2 className={cx("mt-2 text-lg font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                    Refine the queue
-                  </h2>
-                  <div className="mt-4 space-y-3.5">
-                    <FilterField icon={<ListFilter className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                  </div>
-                </div>
-              </SurfaceCard>
-
-              <SurfaceCard isDarkMode={isDarkMode} className={cx(isDarkMode ? "bg-[#111922]" : "bg-white")}>
-                <div className="px-4 py-4">
-                  <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                    Overview
-                  </div>
-                  <div className="mt-4 space-y-4">
-                    <InsightRow label="Assigned to me" value={assignedTasks.length} note="Tasks where you are an assignee." isDarkMode={isDarkMode} />
-                    <InsightRow label="Created by me" value={createdTasks.length} note="Items you opened or delegated." isDarkMode={isDarkMode} />
-                    <InsightRow label="Visible now" value={filteredTasks.length} note="Tasks matching the active filters." isDarkMode={isDarkMode} />
-                  </div>
-
-                  <div className="mt-5 rounded-[18px] border px-3.5 py-3.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>Completion</div>
-                      <div className={cx("text-sm font-semibold", isDarkMode ? "text-slate-100" : "text-slate-900")}>{completionRate}%</div>
-                    </div>
-                    <div className={cx("mt-3 h-2 overflow-hidden rounded-full", isDarkMode ? "bg-[#232931]" : "bg-slate-200")}>
-                      <div className={cx("h-full rounded-full", isDarkMode ? "bg-slate-100" : "bg-slate-900", fastTransition)} style={{ width: `${completionRate}%` }} />
-                    </div>
-                  </div>
-                </div>
-              </SurfaceCard>
-            </aside>
-
-            <main className="min-h-0">
-              <SurfaceCard isDarkMode={isDarkMode} className={cx("flex min-h-full flex-col", isDarkMode ? "bg-[#111922]" : "bg-white")}>
-                <div className={cx("border-b px-4 py-4 sm:px-5", isDarkMode ? "border-[#2a313a]" : "border-slate-200/80")}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="min-w-0">
-                      <div className={cx("text-[11px] font-semibold uppercase tracking-[0.2em]", isDarkMode ? "text-slate-500" : "text-slate-500")}>
-                        Task Feed
-                      </div>
-                      <h2 className={cx("mt-1.5 text-[1.2rem] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white" : "text-slate-900")}>
-                        Full workspace list
-                      </h2>
-                      <p className={cx("mt-1.5 text-sm leading-6", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                        Search, filter, and close out work without leaving the main queue.
-                      </p>
-                    </div>
-                    <div className={cx("inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-semibold", isDarkMode ? "bg-white/[0.05] text-slate-200" : "bg-slate-100 text-slate-700")}>
-                      {filteredTasks.length} visible
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(160px,1fr))]">
-                    <SearchField value={searchQuery} onChange={setSearchQuery} isDarkMode={isDarkMode} />
-                    <FilterField icon={<UserPlus className="h-4 w-4" />} label="Ownership" value={ownershipFilter} onChange={setOwnershipFilter} options={ownershipOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CheckCircle className="h-4 w-4" />} label="Status" value={statusFilter} onChange={setStatusFilter} options={statusOptions} isDarkMode={isDarkMode} />
-                    <FilterField icon={<CalendarDays className="h-4 w-4" />} label="Date" value={dateFilter} onChange={setDateFilter} options={dateOptions} isDarkMode={isDarkMode} />
-                  </div>
-                </div>
-
-                <div className="flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-5 sm:py-5">
-                  {filteredTasks.length === 0 ? (
-                    <EmptyState
-                      title="No tasks match these filters"
-                      description="Try clearing one of the filters or widen the date range to surface more work."
-                      isDarkMode={isDarkMode}
-                    />
-                  ) : (
-                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                      {filteredTasks.map(task => {
-                        const taskId = String(task.id || task.timestamp || "")
-                        return (
-                          <TaskItem
-                            key={taskId || `${task.message}-${task.timestamp}`}
-                            task={task}
-                            channelName={channelNames.get(String(task.channel_id))}
-                            currentUserId={currentUserId}
-                            isDarkMode={isDarkMode}
-                            isWorking={completingTaskId === taskId}
-                            onComplete={onMarkTaskComplete}
-                          />
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </SurfaceCard>
-            </main>
-          </div>
-        </section>
-      </div>
+        </div>
+      </main>
+      <TaskDetailsSidebar
+        task={selectedTask}
+        currentUserId={currentUserId}
+        membersById={membersById}
+        channelDetails={channelDetails}
+        onClose={() => setSelectedTaskId(null)}
+      />
     </div>
   )
 }

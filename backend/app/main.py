@@ -29,6 +29,7 @@ from app.routes.contexts import router as contexts_router
 from app.routes.drafts import router as drafts_router
 from app.routes.gmail_docs import router as gmail_docs_router
 from app.routes.timesavers import router as timesavers_router
+from app.routes.notifications import router as notifications_router
 from app.core import drive as drive_core
 from googleapiclient.errors import HttpError
 
@@ -68,6 +69,7 @@ app.include_router(contexts_router)
 app.include_router(drafts_router)
 app.include_router(gmail_docs_router)
 app.include_router(timesavers_router)
+app.include_router(notifications_router)
 
 logger = logging.getLogger("app.main")
 

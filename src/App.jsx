@@ -50,7 +50,6 @@ import {
   Lock,
   ExternalLink,
   ShieldAlert,
-  Files,
   Grid3x3,
   LayoutGrid,
   FileText,
@@ -81,6 +80,7 @@ import ProductLandingPage from "./components/ProductLandingPage"
 import TasksHub from "./components/TasksHub"
 import ContextsHub from "./components/ContextsHub"
 import DocumentsHub from "./components/DocumentsHub"
+import ConnectHub from "./components/ConnectHub"
 import {
   AddToContextPopover,
   ChannelFilesGallery,
@@ -158,17 +158,6 @@ const CONTEXT_ROUTE_STATE_KEY = "spacexyz_context_route_state"
 const NAVIGATION_STATE_KEY = "spacexyz_navigation_state"
 const READ_MESSAGE_COUNTS_KEY = "spacexyz_read_message_counts"
 
-const getTopNavIconButtonClass = (isDarkMode, isActive = false) => [
-  "workspace-top-icon-button inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40",
-  isActive
-    ? isDarkMode
-      ? "bg-blue-500/15 text-blue-300"
-      : "bg-blue-100 text-sky-700"
-    : isDarkMode
-      ? "text-slate-400 hover:bg-white/10 hover:text-slate-100"
-      : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-].join(" ")
-
 const getChannelIconButtonClass = (isDarkMode, { active = false, disabled = false, hiddenOnMobile = false } = {}) => [
   hiddenOnMobile ? "hidden md:inline-flex" : "inline-flex",
   "liquid-glass-nav-item workspace-premium-icon-button group relative shrink-0 items-center justify-center rounded-xl p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40",
@@ -235,10 +224,76 @@ const routePartMatches = (routePart, ...values) => {
   })
 }
 
+const normalizeWorkspaceSearchValue = value =>
+  String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+
+const getWorkspaceSearchTokens = value =>
+  normalizeWorkspaceSearchValue(value).split(" ").filter(Boolean)
+
+const workspaceSearchMatches = (searchText, tokens) => {
+  if (!tokens.length) return false
+  const haystack = normalizeWorkspaceSearchValue(searchText)
+  return tokens.every(token => haystack.includes(token))
+}
+
+const scoreWorkspaceSearchItem = (item, tokens) => {
+  const title = normalizeWorkspaceSearchValue(item?.title)
+  const context = normalizeWorkspaceSearchValue(item?.contextPath || item?.sourceLabel || "")
+  const text = normalizeWorkspaceSearchValue(item?.subtitle || item?.searchText || "")
+  let score = 0
+
+  tokens.forEach(token => {
+    if (title === token) score += 80
+    else if (title.startsWith(token)) score += 48
+    else if (title.includes(token)) score += 28
+
+    if (context.includes(token)) score += 14
+    if (text.includes(token)) score += 8
+  })
+
+  const timestamp = item?.timestamp ? new Date(item.timestamp).getTime() : 0
+  return score + (Number.isFinite(timestamp) ? Math.min(timestamp / 10000000000000, 1) : 0)
+}
+
+const getWorkspaceSearchDateMs = item => {
+  if (!item?.timestamp) return 0
+  const dateMs = new Date(item.timestamp).getTime()
+  return Number.isFinite(dateMs) ? dateMs : 0
+}
+
+const passesWorkspaceSearchDateFilter = (item, filter, now = Date.now()) => {
+  if (!filter || filter === "all") return true
+  const dateMs = getWorkspaceSearchDateMs(item)
+  if (!dateMs) return false
+
+  const oneDay = 24 * 60 * 60 * 1000
+  if (filter === "today") {
+    const itemDate = new Date(dateMs)
+    const today = new Date(now)
+    return (
+      itemDate.getFullYear() === today.getFullYear() &&
+      itemDate.getMonth() === today.getMonth() &&
+      itemDate.getDate() === today.getDate()
+    )
+  }
+  if (filter === "week") return now - dateMs <= 7 * oneDay
+  if (filter === "month") return now - dateMs <= 30 * oneDay
+  return true
+}
+
+const getStarredItemKey = item =>
+  `${item?.chatId || item?.channelId || item?.spaceId || "starred"}:${item?.messageId || item?.id || "message"}`
+
 const isProtectedAppPath = pathname => {
   const normalized = String(pathname || "/").replace(/\/+$/, "") || "/"
   return (
+    normalized === "/documents" ||
+    normalized === "/connect" ||
     normalized === "/tasks" ||
+    normalized === "/notifications" ||
     normalized === "/starred" ||
     normalized === "/contexts" ||
     normalized.startsWith("/contexts/") ||
@@ -294,18 +349,40 @@ const getInitialAuthBootState = () => {
   }
 }
 
+const SPACE_IMAGE_ICON_NUMBERS = [2, 3, 4, 5, 6, 7, 8]
+
+const getSpaceImageIconType = index => `image-${SPACE_IMAGE_ICON_NUMBERS[index % SPACE_IMAGE_ICON_NUMBERS.length]}`
+
+const getSpaceImageIconSrc = (space, index = 0) => {
+  const iconType = String(space?.iconType || "")
+  const match = iconType.match(/^image-([2-8])$/)
+  const imageNumber = match
+    ? Number(match[1])
+    : SPACE_IMAGE_ICON_NUMBERS[index % SPACE_IMAGE_ICON_NUMBERS.length]
+
+  return `/image%20${imageNumber}.png`
+}
+
 const createSpaceIconElement = iconType => {
+  const imageMatch = String(iconType || "").match(/^image-([2-8])$/)
+  if (imageMatch) {
+    return (
+      <SmartImage
+        src={`/image%20${imageMatch[1]}.png`}
+        alt="Space icon"
+        className="h-5 w-5 object-contain"
+      />
+    )
+  }
   if (iconType === "graduation") return <GraduationCap className="w-5 h-5" />
   if (iconType === "briefcase") return <Briefcase className="w-5 h-5" />
   return <UserIcon className="w-5 h-5" />
 }
 
-const getSpaceVectorIconSrc = isDarkMode => (isDarkMode ? "/Vector%20dark.png" : "/Vector%20light.png")
-
-const SpaceFolderIcon = ({ src = getSpaceVectorIconSrc(false), className = "h-5 w-5" }) => (
+const SpaceImageIcon = ({ space, index = 0, className = "h-6 w-6" }) => (
   <SmartImage
-    src={src}
-    alt="Space folder"
+    src={getSpaceImageIconSrc(space, index)}
+    alt={`${space?.name || "Space"} icon`}
     className={`${className} object-contain`}
   />
 )
@@ -513,8 +590,13 @@ export default function CollaborationApp() {
   const [drafts, setDrafts] = useState(() => initialAuthBoot.cachedDrafts || [])
   const [activeDraftId, setActiveDraftId] = useState(null)
   const [starredMessages, setStarredMessages] = useState([])
+  const [activeStarredMessageId, setActiveStarredMessageId] = useState(null)
+  const [activeNotificationId, setActiveNotificationId] = useState(null)
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [notificationsError, setNotificationsError] = useState("")
+  const [focusedTaskId, setFocusedTaskId] = useState(null)
   const [pinnedChannels, setPinnedChannels] = useState([])
-  const [timesaversLoading, setTimesaversLoading] = useState(false)
+  const [, setTimesaversLoading] = useState(false)
   const authResolvedAtRef = useRef(0)
   const authLookupCacheRef = useRef(new Map())
   const googleAuthInFlightRef = useRef(false)
@@ -643,18 +725,25 @@ export default function CollaborationApp() {
     setUnreadChannels([])
   }, [currentUser?.id])
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed] = useState(false)
   const [friendsSidebarCollapsed, setFriendsSidebarCollapsed] = useState(true)
   const [collapsedSpaceMenu, setCollapsedSpaceMenu] = useState(null)
+  const [sidebarSectionOpen, setSidebarSectionOpen] = useState({
+    spaces: true,
+    dms: true
+  })
 
   // Search State
-  const [searchQuery, setSearchQuery] = useState("") // Spaces Search Input
+  const [searchQuery, setSearchQuery] = useState("") // Sidebar Search Input
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
   const [spaceSearchResults, setSpaceSearchResults] = useState([])
-
-  const [dmSearchQuery, setDmSearchQuery] = useState("") // DMs Search Input
-  const [debouncedDmSearchQuery, setDebouncedDmSearchQuery] = useState("")
   const [dmSearchResults, setDmSearchResults] = useState([])
+  const [fileSearchResults, setFileSearchResults] = useState([])
+  const [workspaceSearchTab, setWorkspaceSearchTab] = useState("messages")
+  const [workspaceSearchFromFilter, setWorkspaceSearchFromFilter] = useState("all")
+  const [workspaceSearchDateFilter, setWorkspaceSearchDateFilter] = useState("all")
+  const [workspaceSearchDismissed, setWorkspaceSearchDismissed] = useState(false)
+  const [channelActionMenu, setChannelActionMenu] = useState(null)
 
   // Search Highlighting & Navigation
   const [highlightTerm, setHighlightTerm] = useState("")
@@ -736,6 +825,17 @@ export default function CollaborationApp() {
       setActiveView("tasks")
       return "/tasks"
     }
+    if (allowDedicated && dedicatedPageReturn?.view === "documents") {
+      setOpenContextId(null)
+      setActiveView("documents")
+      return "/documents"
+    }
+    if (allowDedicated && dedicatedPageReturn?.view === "connect") {
+      setOpenContextId(null)
+      setHomeSection("connect")
+      setActiveView("connect")
+      return "/connect"
+    }
     if (allowDedicated && dedicatedPageReturn?.view === "contexts") {
       const targetContextId = dedicatedPageReturn.openContextId || null
       setContextsSourceView(dedicatedPageReturn.contextsSourceView || "channel")
@@ -752,6 +852,8 @@ export default function CollaborationApp() {
 
   const openTasksPage = React.useCallback(() => {
     if (typeof window !== "undefined" && activeView === "tasks" && window.location.pathname === "/tasks") return
+    setCollapsedSpaceMenu(null)
+    setFocusedTaskId(null)
     setDedicatedPageReturn({
       view: activeView,
       channelTab: activeChannelTab,
@@ -816,7 +918,7 @@ export default function CollaborationApp() {
       if (savedState.homeSection) setHomeSection(savedState.homeSection)
       if (savedState.contextsSourceView) setContextsSourceView(savedState.contextsSourceView)
       if (savedState.openContextId !== undefined) setOpenContextId(savedState.openContextId)
-      if (["home", "channel", "dm", "tasks", "contexts", "starred"].includes(savedState.activeView)) {
+      if (["home", "channel", "dm", "tasks", "documents", "connect", "contexts", "starred", "notifications"].includes(savedState.activeView)) {
         setActiveView(savedState.activeView)
       }
     }
@@ -840,10 +942,34 @@ export default function CollaborationApp() {
         return true
       }
 
+      if (pathname === "/documents") {
+        applySavedNavigation(savedState)
+        setOpenContextId(null)
+        setShowDocsModal(false)
+        setActiveView("documents")
+        return true
+      }
+
+      if (pathname === "/connect") {
+        applySavedNavigation(savedState)
+        setOpenContextId(null)
+        setHomeSection("connect")
+        setActiveView("connect")
+        return true
+      }
+
       if (pathname === "/starred") {
         applySavedNavigation(savedState)
         setOpenContextId(null)
         setActiveView("starred")
+        return true
+      }
+
+      if (pathname === "/notifications") {
+        applySavedNavigation(savedState)
+        setOpenContextId(null)
+        setShowNotificationsModal(false)
+        setActiveView("notifications")
         return true
       }
 
@@ -936,7 +1062,7 @@ export default function CollaborationApp() {
         return true
       }
 
-      if (activeView === "tasks" || activeView === "contexts") {
+      if (activeView === "tasks" || activeView === "documents" || activeView === "connect" || activeView === "contexts") {
         restoreFromDedicatedPage({ allowDedicated: false })
       }
       return true
@@ -1000,17 +1126,23 @@ export default function CollaborationApp() {
     const targetPath =
       activeView === "tasks"
         ? "/tasks"
-        : activeView === "starred"
-          ? "/starred"
-          : activeView === "contexts"
-            ? openContextId
-              ? `/contexts/${encodeURIComponent(String(openContextId))}`
-              : "/contexts"
-            : activeView === "channel" && currentSpace && currentChannel
-              ? `/space/${encodeURIComponent(slugifyRoutePart(currentSpace.name) || String(currentSpace.id))}/${encodeURIComponent(slugifyRoutePart(currentChannel.name) || String(currentChannel.id))}`
-              : activeView === "dm" && activeDMUser
-                ? `/dm/${encodeURIComponent(slugifyRoutePart(dmUser?.name) || String(activeDMUser))}`
-                : "/"
+        : activeView === "documents"
+          ? "/documents"
+          : activeView === "connect"
+            ? "/connect"
+            : activeView === "starred"
+              ? "/starred"
+              : activeView === "notifications"
+                ? "/notifications"
+                : activeView === "contexts"
+                ? openContextId
+                  ? `/contexts/${encodeURIComponent(String(openContextId))}`
+                  : "/contexts"
+                : activeView === "channel" && currentSpace && currentChannel
+                  ? `/space/${encodeURIComponent(slugifyRoutePart(currentSpace.name) || String(currentSpace.id))}/${encodeURIComponent(slugifyRoutePart(currentChannel.name) || String(currentChannel.id))}`
+                  : activeView === "dm" && activeDMUser
+                    ? `/dm/${encodeURIComponent(slugifyRoutePart(dmUser?.name) || String(activeDMUser))}`
+                    : "/"
 
     const currentIsEquivalentChannel =
       activeView === "channel" &&
@@ -1488,6 +1620,7 @@ export default function CollaborationApp() {
   const userSocketRef = useRef(null)
   const callTimerRef = useRef(null)
   const callerCountdownRef = useRef(null)
+  const workspaceSearchHydratedChatsRef = useRef(new Set())
   const currentUserRef = useRef(currentUser)
   const orgInfoRef = useRef(orgInfo)
   const orgFormRef = useRef(orgForm)
@@ -1647,6 +1780,7 @@ export default function CollaborationApp() {
     if (savedToken) {
       setGoogleAccessToken(savedToken)
     }
+    loadCachedGoogleWorkspaceDocs()
     
     // Check if user already has Google Calendar token
     const savedCalendarToken = GoogleService.getGoogleCalendarToken()
@@ -1989,161 +2123,21 @@ export default function CollaborationApp() {
 
   useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedDmSearchQuery(dmSearchQuery)
-    }, 150)
-    return () => clearTimeout(handler)
-  }, [dmSearchQuery])
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
       setDebouncedInviteSearchQuery(inviteSearchQuery)
     }, 100)
     return () => clearTimeout(handler)
   }, [inviteSearchQuery])
 
 
-  // --- Search Logic: Spaces ---
   useEffect(() => {
-    if (!debouncedSearchQuery.trim()) {
-      setSpaceSearchResults([])
-      // Clear any search highlights / pinned result when the search box is empty
-      setHighlightTerm("")
-      setPinnedMessageId(null)
-      return
-    }
-
-    ;(async () => {
-      const query = debouncedSearchQuery.toLowerCase()
-      const results = []
-
-      for (const space of spaces) {
-        // 1. Space Match
-        if (space.name.toLowerCase().includes(query)) {
-          results.push({
-            id: `space-${space.id}`,
-            type: "space",
-            title: space.name,
-            subtitle: "Space",
-            spaceId: space.id,
-            icon: space.icon
-          })
-        }
-
-        for (const channel of space.channels) {
-          // 2. Channel Match
-          if (channel.name.toLowerCase().includes(query)) {
-            results.push({
-              id: `channel-${channel.id}`,
-              type: "channel",
-              title: `# ${channel.name}`,
-              subtitle: `Channel in ${space.name}`,
-              spaceId: space.id,
-              channelId: channel.id
-            })
-          }
-
-          // 3. Message Match (Full scan via Storage)
-          try {
-            const msgs = await Storage.getMessages(channel.id)
-            const users = await Storage.getUsers()
-            for (const msg of msgs || []) {
-              if (msg.text && msg.text.toLowerCase().includes(query)) {
-                const user = users.find(u => u.id === msg.userId)
-                results.push({
-                  id: `msg-${msg.id}`,
-                  type: "message",
-                  title: user?.name || "Unknown",
-                  subtitle: msg.text,
-                  timestamp: msg.timestamp,
-                  spaceId: space.id,
-                  channelId: channel.id,
-                  messageId: msg.id
-                })
-              }
-            }
-          } catch (e) {
-            // If channel is restricted, ignore during search (don't spam modal)
-            if (e && e.status === 403) {
-              // silently ignore
-            } else {
-              console.error("Space search failed to load messages", e)
-            }
-          }
-        }
-      }
-
-      // Sort by relevance (Messages recently first)
-      results.sort((a, b) => {
-        if (a.timestamp && b.timestamp)
-          return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        return 0
-      })
-
-      setSpaceSearchResults(results)
-    })()
-  }, [debouncedSearchQuery, spaces])
-
-  // --- Search Logic: DMs ---
-  useEffect(() => {
-    if (!debouncedDmSearchQuery.trim() || !currentUser) {
-      setDmSearchResults([])
-      // Clear any search highlights / pinned result when the DM search box is empty or no user
-      setHighlightTerm("")
-      setPinnedMessageId(null)
-      return
-    }
-
-    ;(async () => {
-      const query = debouncedDmSearchQuery.toLowerCase()
-      const results = []
-
-      for (const friend of friends) {
-        // 1. Friend Name Match
-        if (friend.name.toLowerCase().includes(query)) {
-            results.push({
-              id: `friend-${friend.id}`,
-              type: "user",
-              title: friend.name,
-              subtitle: friend.status === "online" ? "Online" : "Offline",
-              userId: friend.id,
-              icon: renderAvatar(friend, 32)
-            })
-        }
-
-        // 2. Message Match
-        const chatId = getDMChatId(friend.id)
-        try {
-          const msgs = await Storage.getMessages(chatId)
-          for (const msg of msgs || []) {
-            if (msg.text && msg.text.toLowerCase().includes(query)) {
-              const isMe = msg.userId === currentUser.id
-              results.push({
-                id: `dm-msg-${msg.id}`,
-                type: "message",
-                title: isMe ? "You" : friend.name,
-                subtitle: msg.text,
-                userId: friend.id,
-                messageId: msg.id,
-                timestamp: msg.timestamp,
-                icon: renderAvatar(friend, 28)
-              })
-            }
-          }
-        } catch (e) {
-          console.error("DM search failed to load messages", e)
-        }
-      }
-
-      // Sort by relevance
-      results.sort((a, b) => {
-        if (a.timestamp && b.timestamp)
-          return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        return 0
-      })
-
-      setDmSearchResults(results)
-    })()
-  }, [debouncedDmSearchQuery, friends, currentUser])
+    if (debouncedSearchQuery.trim()) return
+    setSpaceSearchResults([])
+    setDmSearchResults([])
+    setFileSearchResults([])
+    setHighlightTerm("")
+    setPinnedMessageId(null)
+    setTargetMessageId(null)
+  }, [debouncedSearchQuery])
 
   // --- Initialization & Data Loading ---
 
@@ -2716,6 +2710,32 @@ export default function CollaborationApp() {
                     return [t, ...(prev || [])]
                   } catch (e) { return prev }
                 })
+              }
+            }
+            if (data.type === 'task_deleted') {
+              const deletedTaskId = String(data.taskId || data.id || "")
+              if (deletedTaskId) {
+                setTasksList(prev =>
+                  (prev || []).filter(task => String(task?.id || task?.taskId || task?._id || task?.timestamp || "") !== deletedTaskId)
+                )
+                setMessages(prev =>
+                  Object.fromEntries(
+                    Object.entries(prev || {}).map(([chatId, list]) => [
+                      chatId,
+                      Array.isArray(list)
+                        ? list.flatMap(message => {
+                            const messageTaskId = String(message?.taskId || (message?.type === "task" ? message?.id : "") || "")
+                            if (messageTaskId !== deletedTaskId) return [message]
+                            if (message?.type === "task") return []
+                            const rest = { ...message }
+                            delete rest.taskId
+                            delete rest.taskStatus
+                            return [rest]
+                          })
+                        : list,
+                    ])
+                  )
+                )
               }
             }
 
@@ -3543,7 +3563,6 @@ export default function CollaborationApp() {
     setAuthBootError("")
     setAuthPending(false)
     setGoogleAuthPending(false)
-    setDmSearchQuery("")
     setSearchQuery("")
     
     // Clear Google data
@@ -3693,25 +3712,30 @@ export default function CollaborationApp() {
     )
   }
 
+  function loadCachedGoogleWorkspaceDocs() {
+    try {
+      const cachedDrive = JSON.parse(localStorage.getItem('google_drive_cache') || 'null')
+      if (cachedDrive && Array.isArray(cachedDrive.files)) {
+        setGoogleDocs(cachedDrive.files)
+      }
+      const cachedGmail = JSON.parse(localStorage.getItem('google_gmail_cache') || 'null')
+      if (cachedGmail && Array.isArray(cachedGmail.attachments)) {
+        setGmailAttachments(GoogleService.dedupeGmailAttachmentsByFilename(cachedGmail.attachments))
+        if (cachedGmail.time) setGmailLastCheckTime(cachedGmail.time)
+      }
+    } catch (e) {
+      // Cached Google Workspace data is optional.
+    }
+  }
+
   const handleConnectGoogleDocs = () => {
     GoogleService.requestGoogleDocsAccess(
       (accessToken) => {
         setGoogleAccessToken(accessToken)
         GoogleService.setGoogleAccessToken(accessToken)
-        // Mark initial apps as connected
-        setConnectedApps(['drive', 'gmail'])
+        setConnectedApps(['drive', 'docs', 'sheets', 'slides', 'gmail'])
         // Load cached docs quickly for immediate UI responsiveness
-        try {
-          const cachedDrive = JSON.parse(localStorage.getItem('google_drive_cache') || 'null')
-          if (cachedDrive && Array.isArray(cachedDrive.files)) {
-            setGoogleDocs(cachedDrive.files)
-          }
-          const cachedGmail = JSON.parse(localStorage.getItem('google_gmail_cache') || 'null')
-          if (cachedGmail && Array.isArray(cachedGmail.attachments) && cachedGmail.attachments.length > 0) {
-            setGmailAttachments(GoogleService.dedupeGmailAttachmentsByFilename(cachedGmail.attachments))
-            setGmailLastCheckTime(cachedGmail.time || Date.now())
-          }
-        } catch (e) {}
+        loadCachedGoogleWorkspaceDocs()
         // Automatically load fresh docs after connection (background)
         loadGoogleDocs(accessToken)
       },
@@ -3733,7 +3757,7 @@ export default function CollaborationApp() {
     }
     
     setShowConnectAppsModal(false)
-    loadGoogleDocs(googleAccessToken, appType)
+    loadGoogleDocs(googleAccessToken)
   }
 
   const loadGoogleDocs = async (token, specificApp = null) => {
@@ -3809,25 +3833,38 @@ export default function CollaborationApp() {
     })
   }
 
-  const handleDocsClick = () => {
-    setShowDocsModal(true)
-    
+  const openDocumentsPage = () => {
+    setActiveDraftId(null)
+    setCollapsedSpaceMenu(null)
+    setShowDocsModal(false)
+    setShowGoogleAppsMenu(false)
+    setOpenContextId(null)
+    setActiveView("documents")
+    setSharedChatDocs(extractSharedChatDocs(messages))
+    loadCachedGoogleWorkspaceDocs()
     if (googleAccessToken) {
       loadGoogleDocs(googleAccessToken)
     }
-    // Populate shared chat docs from currently loaded messages
-    setSharedChatDocs(extractSharedChatDocs(messages))
+    pushAppRoute("/documents")
+    if (isMobile) setMobileView("chat")
   }
 
-  // Keep shared chat docs up-to-date while the modal is open
+  const closeDocumentsPage = () => {
+    setOpenContextId(null)
+    setActiveView("home")
+    setHomeSection("overview")
+    pushAppRoute("/")
+  }
+
+  // Keep shared chat docs up-to-date while the document surface is open
   useEffect(() => {
-    if (!showDocsModal) return
+    if (!showDocsModal && activeView !== "documents") return
     setSharedChatDocs(extractSharedChatDocs(messages))
-  }, [showDocsModal, messages])
+  }, [activeView, showDocsModal, messages])
 
   // Real-time Gmail sync - periodically check for new attachments
   useEffect(() => {
-    if (!googleAccessToken || !showDocsModal) return
+    if (!googleAccessToken || (!showDocsModal && activeView !== "documents")) return
     
     const checkNewGmail = async () => {
       try {
@@ -3858,7 +3895,7 @@ export default function CollaborationApp() {
     const interval = setInterval(checkNewGmail, 30000)
     
     return () => clearInterval(interval)
-  }, [googleAccessToken, showDocsModal, gmailLastCheckTime])
+  }, [activeView, googleAccessToken, showDocsModal, gmailLastCheckTime])
 
   // Add document as attachment to message input
   const addDocumentAsAttachment = (doc) => {
@@ -4022,18 +4059,21 @@ export default function CollaborationApp() {
   }
 
   const handleDocumentsRefresh = () => {
-    if (!googleAccessToken) return
-    if (selectedAppFilter === "shared") {
-      setSharedChatDocs(extractSharedChatDocs(messages))
+    setSharedChatDocs(extractSharedChatDocs(messages))
+    if (!googleAccessToken) {
+      loadCachedGoogleWorkspaceDocs()
       return
     }
-    loadGoogleDocs(googleAccessToken, selectedAppFilter === "all" ? null : selectedAppFilter)
+    loadGoogleDocs(googleAccessToken)
   }
 
   const handleDocumentsFilterSelect = filter => {
     setSelectedAppFilter(filter)
-    if (!googleAccessToken || filter === "shared") return
-    loadGoogleDocs(googleAccessToken, filter === "all" ? null : filter)
+    if (!googleAccessToken) {
+      loadCachedGoogleWorkspaceDocs()
+      return
+    }
+    loadGoogleDocs(googleAccessToken)
   }
 
   const handleHubAddDocument = async doc => {
@@ -4093,34 +4133,139 @@ export default function CollaborationApp() {
   const handleMarkTaskComplete = async task => {
     if (!task) return
 
-    const taskId = String(task.id || task.timestamp || "")
+    const taskId = String(task.id || task.taskId || task._id || task.timestamp || "")
     if (!taskId || task.status === "completed" || completingTaskId === taskId) return
+    const currentUserId = String(getUserIdValue(currentUser) || "")
+    const assignedIds = (task.assigned_to || task.assigneeIds || []).map(String)
+    if (assignedIds.length > 0 && !assignedIds.includes(currentUserId)) return
+    if (assignedIds.length === 0 && String(task.created_by || task.createdBy || "") !== currentUserId) return
+
+    const completeTaskForUser = item => {
+      const itemAssignedIds = (item.assigned_to || item.assigneeIds || []).map(String)
+      const assigneeStatuses = { ...(item.assignee_statuses || item.assigneeStatuses || {}) }
+      if (itemAssignedIds.length > 0) {
+        assigneeStatuses[currentUserId] = {
+          ...(assigneeStatuses[currentUserId] || {}),
+          status: "completed",
+          completedAt: new Date().toISOString(),
+        }
+      }
+      const allComplete = itemAssignedIds.length === 0
+        ? true
+        : itemAssignedIds.every(id => (assigneeStatuses[id] || {}).status === "completed")
+      return {
+        ...item,
+        assignee_statuses: assigneeStatuses,
+        status: allComplete ? "completed" : "pending",
+      }
+    }
 
     let didUpdateLocalTask = false
     setCompletingTaskId(taskId)
     setTasksList(prev =>
       (prev || []).map(item => {
-        const itemId = String(item?.id || item?.timestamp || "")
+        const itemId = String(item?.id || item?.taskId || item?._id || item?.timestamp || "")
         if (itemId !== taskId) return item
         didUpdateLocalTask = true
-        return { ...item, status: "completed" }
+        return completeTaskForUser(item)
       })
+    )
+    setMessages(prev =>
+      Object.fromEntries(
+        Object.entries(prev || {}).map(([chatId, list]) => [
+          chatId,
+          Array.isArray(list)
+            ? list.map(message => {
+                const messageTaskId = String(message?.taskId || (message?.type === "task" ? message?.id : "") || "")
+                if (messageTaskId !== taskId) return message
+                const updated = completeTaskForUser(message)
+                return { ...updated, taskStatus: updated.status }
+              })
+            : list,
+        ])
+      )
     )
 
     try {
-      await TasksService.updateTask(task.id || task.timestamp, { status: "completed" })
+      await TasksService.updateTask(task.id || task.taskId || task._id || task.timestamp, { status: "completed" })
     } catch (error) {
       console.warn("task update failed", error)
       if (didUpdateLocalTask) {
         setTasksList(prev =>
           (prev || []).map(item => {
-            const itemId = String(item?.id || item?.timestamp || "")
-            return itemId === taskId ? { ...item, status: task.status || "pending" } : item
+            const itemId = String(item?.id || item?.taskId || item?._id || item?.timestamp || "")
+            return itemId === taskId
+              ? {
+                  ...item,
+                  status: task.status || "pending",
+                  assignee_statuses: task.assignee_statuses || task.assigneeStatuses || {},
+                }
+              : item
           })
         )
       }
+      setMessages(prev =>
+        Object.fromEntries(
+          Object.entries(prev || {}).map(([chatId, list]) => [
+            chatId,
+            Array.isArray(list)
+              ? list.map(message => {
+                  const messageTaskId = String(message?.taskId || (message?.type === "task" ? message?.id : "") || "")
+                  return messageTaskId === taskId
+                    ? {
+                        ...message,
+                        status: task.status || "pending",
+                        taskStatus: task.status || "pending",
+                        assignee_statuses: task.assignee_statuses || task.assigneeStatuses || {},
+                      }
+                    : message
+                })
+              : list,
+          ])
+        )
+      )
     } finally {
       setCompletingTaskId(null)
+    }
+  }
+
+  const handleDeleteCompletedTasks = async completedTasks => {
+    const ids = Array.from(
+      new Set(
+        (Array.isArray(completedTasks) ? completedTasks : [])
+          .map(task => String(task?.id || task?.taskId || task?._id || task?.timestamp || ""))
+          .filter(Boolean)
+      )
+    )
+    if (ids.length === 0) return
+
+    const idSet = new Set(ids)
+    setTasksList(prev =>
+      (prev || []).filter(task => !idSet.has(String(task?.id || task?.taskId || task?._id || task?.timestamp || "")))
+    )
+    setMessages(prev =>
+      Object.fromEntries(
+        Object.entries(prev || {}).map(([chatId, list]) => [
+          chatId,
+          Array.isArray(list)
+            ? list.flatMap(message => {
+                const messageTaskId = String(message?.taskId || (message?.type === "task" ? message?.id : "") || "")
+                if (!idSet.has(messageTaskId)) return [message]
+                if (message?.type === "task") return []
+                const rest = { ...message }
+                delete rest.taskId
+                delete rest.taskStatus
+                return [rest]
+              })
+            : list,
+        ])
+      )
+    )
+
+    const results = await Promise.allSettled(ids.map(taskId => TasksService.deleteTask(taskId)))
+    const failed = results.filter(result => result.status === "rejected")
+    if (failed.length > 0) {
+      console.warn("failed to delete completed tasks", failed)
     }
   }
 
@@ -4151,6 +4296,360 @@ export default function CollaborationApp() {
 
     return [...sharedFiles, ...driveFiles, ...gmailFiles]
   }, [messages, sortedGoogleDocs, dedupedGmailAttachments])
+
+  const workspaceSearchChatTargets = useMemo(() => {
+    const targets = []
+    const seen = new Set()
+    const userSpaceIds = new Set((currentUser?.spaces || []).map(id => String(id)))
+
+    const addTarget = chatId => {
+      if (chatId === undefined || chatId === null || chatId === "") return
+      const key = String(chatId)
+      if (seen.has(key)) return
+      seen.add(key)
+      targets.push({ chatId, key })
+    }
+
+    const canReadChannel = (space, channel) => {
+      if (!space || !channel || !currentUser) return false
+      const userId = String(currentUser.id)
+      const ownsSpace = String(space.ownerId) === userId
+      const hasSpace = userSpaceIds.has(String(space.id))
+      const inSpace = (space.members || []).some(memberId => String(memberId) === userId)
+      const channelMembers = channel.members || []
+
+      if (channelMembers.length > 0) {
+        return ownsSpace || channelMembers.some(memberId => String(memberId) === userId)
+      }
+
+      return ownsSpace || hasSpace || inSpace
+    }
+
+    ;(spaces || []).forEach(space => {
+      ;(space.channels || []).forEach(channel => {
+        if (canReadChannel(space, channel)) addTarget(channel.id)
+      })
+    })
+
+    ;(friends || []).forEach(friend => addTarget(getDMChatId(friend?.id)))
+
+    return targets
+  }, [spaces, friends, currentUser])
+
+  useEffect(() => {
+    workspaceSearchHydratedChatsRef.current = new Set()
+  }, [currentUser?.id])
+
+  useEffect(() => {
+    if (!debouncedSearchQuery.trim() || !currentUser) return undefined
+
+    const pendingTargets = workspaceSearchChatTargets.filter(target => {
+      if (workspaceSearchHydratedChatsRef.current.has(target.key)) return false
+      workspaceSearchHydratedChatsRef.current.add(target.key)
+      return true
+    })
+
+    if (!pendingTargets.length) return undefined
+
+    let cancelled = false
+    ;(async () => {
+      const loadedEntries = await Promise.all(
+        pendingTargets.map(async target => {
+          try {
+            const loadedMessages = await Storage.getMessages(target.chatId, { cacheTtl: 60000 })
+            return { ...target, messages: Array.isArray(loadedMessages) ? loadedMessages : [] }
+          } catch (error) {
+            if (error && error.status !== 403) {
+              console.warn("Workspace search message hydration failed", error)
+            }
+            return { ...target, messages: [] }
+          }
+        })
+      )
+
+      if (cancelled) return
+
+      setMessages(prev => {
+        let changed = false
+        const next = { ...(prev || {}) }
+
+        loadedEntries.forEach(entry => {
+          if (!Array.isArray(entry.messages) || entry.messages.length === 0) return
+          const existing = Array.isArray(next[entry.chatId])
+            ? next[entry.chatId]
+            : Array.isArray(next[entry.key])
+              ? next[entry.key]
+              : []
+          const optimisticOnly = existing.filter(message => message?.optimistic)
+          const normalized = entry.messages.map(message => ({
+            ...message,
+            status: message.status || "sent",
+            optimistic: Boolean(message.optimistic && !message.status),
+          }))
+          const merged = dedupeMessagesById([...normalized, ...optimisticOnly])
+          const previousIds = existing.map(message => String(message?.id)).join("|")
+          const nextIds = merged.map(message => String(message?.id)).join("|")
+          if (previousIds !== nextIds || existing.length !== merged.length) {
+            next[entry.chatId] = merged
+            changed = true
+          }
+        })
+
+        return changed ? next : prev
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedSearchQuery, workspaceSearchChatTargets, currentUser])
+
+  const workspaceSearchCatalog = useMemo(() => {
+    const userLookup = new Map()
+    ;[currentUser, ...(users || []), ...(friends || [])].forEach(user => {
+      if (user?.id === undefined || user?.id === null) return
+      userLookup.set(String(user.id), user)
+    })
+
+    const messageResults = []
+    const spaceResults = []
+    const filesByKey = new Map()
+    const currentUserId = currentUser?.id === undefined || currentUser?.id === null ? "" : String(currentUser.id)
+    const userSpaceIds = new Set((currentUser?.spaces || []).map(id => String(id)))
+
+    const canReadChannel = (space, channel) => {
+      if (!space || !channel || !currentUser) return false
+      const ownsSpace = String(space.ownerId) === currentUserId
+      const hasSpace = userSpaceIds.has(String(space.id))
+      const inSpace = (space.members || []).some(memberId => String(memberId) === currentUserId)
+      const channelMembers = channel.members || []
+
+      if (channelMembers.length > 0) {
+        return ownsSpace || channelMembers.some(memberId => String(memberId) === currentUserId)
+      }
+
+      return ownsSpace || hasSpace || inSpace
+    }
+
+    const readSearchMessages = chatId => {
+      if (chatId === undefined || chatId === null || chatId === "") return []
+      const key = String(chatId)
+      const activeMessages = Array.isArray(messages?.[chatId])
+        ? messages[chatId]
+        : Array.isArray(messages?.[key])
+          ? messages[key]
+          : []
+      const cachedMessages = Storage.peekMessages(chatId)
+      return dedupeMessagesById([...(cachedMessages || []), ...(activeMessages || [])])
+    }
+
+    const addFileResult = (file, defaults = {}) => {
+      if (!file) return
+      const title = file.name || file.filename || defaults.title || "Untitled file"
+      const key = String(
+        file.webViewLink ||
+        file.url ||
+        file.public_url ||
+        file.drive_file_id ||
+        file.fileId ||
+        file.id ||
+        `${title}-${file.size || ""}-${defaults.contextPath || ""}`
+      )
+      if (!key || filesByKey.has(key)) return
+
+      const mimeType = file.mimeType || file.type || ""
+      const appType = GoogleService.getAppTypeFromMime(mimeType)
+      const appIcon = GoogleService.getAppIcon(appType)
+      const sourceLabel =
+        defaults.sourceLabel ||
+        (file.source === "gmail" ? "Gmail" : file.source === "drive" ? "Drive" : file.source === "chat" ? "Chat" : "File")
+      const timestamp = file.modifiedTime || file.timestamp || file.internalDate || file.emailDate || defaults.timestamp || null
+      const sizeLabel = file.size ? formatDocsSize(file.size) : ""
+      const dateLabel = timestamp ? formatDocsDate(timestamp) : ""
+      const subtitle = [sourceLabel, sizeLabel, dateLabel, defaults.contextPath].filter(Boolean).join(" | ")
+
+      filesByKey.set(key, {
+        id: `file-${key}`,
+        type: "file",
+        title,
+        subtitle: subtitle || sourceLabel,
+        sourceLabel,
+        timestamp,
+        file: { ...file, name: title, mimeType },
+        icon: file.iconLink || appIcon.iconUrl,
+        emoji: appIcon.emoji,
+        contextPath: defaults.contextPath || "",
+        searchText: [
+          title,
+          sourceLabel,
+          mimeType,
+          file.senderName,
+          file.senderEmail,
+          file.subject,
+          defaults.contextPath,
+        ].filter(Boolean).join(" "),
+      })
+    }
+
+    const addMessageResult = ({ chatId, message, contextPath, spaceId, channelId, userId, friend }) => {
+      if (!message) return
+      const text = String(message.text || "").replace(/\s+/g, " ").trim()
+      const attachments = Array.isArray(message.attachments) ? message.attachments : []
+      if (!text && attachments.length === 0) return
+
+      const senderId = message.userId === undefined || message.userId === null ? "" : String(message.userId)
+      const isCurrentUser = senderId && senderId === currentUserId
+      const sender = userLookup.get(senderId) || (isCurrentUser ? currentUser : null) || friend || null
+      const senderName = isCurrentUser ? `${currentUser?.name || "You"} (You)` : sender?.name || "Unknown"
+      const preview = text || `${attachments.length} attachment${attachments.length === 1 ? "" : "s"}`
+
+      messageResults.push({
+        id: `${chatId}-${message.id || message.timestamp || preview}`,
+        type: "message",
+        title: senderName,
+        subtitle: preview,
+        contextPath,
+        timestamp: message.timestamp || message.date || null,
+        messageId: message.id,
+        chatId,
+        spaceId,
+        channelId,
+        userId,
+        senderId,
+        avatarUser: sender,
+        isCurrentUser,
+        searchText: [senderName, preview, contextPath].filter(Boolean).join(" "),
+        resultScope: channelId ? "channel" : "dm",
+      })
+
+      attachments.forEach(attachment => {
+        addFileResult(attachment, {
+          sourceLabel: attachment.source === "gmail" ? "Gmail" : "Chat",
+          timestamp: message.timestamp || message.date || null,
+          contextPath,
+        })
+      })
+    }
+
+    ;(homeFiles || []).forEach(file => {
+      addFileResult(file, {
+        sourceLabel: file.source === "gmail" ? "Gmail" : file.source === "drive" ? "Drive" : file.source === "chat" ? "Chat" : "File",
+        timestamp: file.modifiedTime || file.timestamp || file.internalDate || null,
+      })
+    })
+
+    ;(spaces || []).forEach((space, spaceIndex) => {
+      if (!space) return
+      const spaceName = space.name || "Untitled space"
+      const channels = (space.channels || []).filter(channel => canReadChannel(space, channel))
+
+      spaceResults.push({
+        id: `space-${space.id}`,
+        type: "space",
+        title: spaceName,
+        subtitle: `${channels.length} channel${channels.length === 1 ? "" : "s"}`,
+        contextPath: "Space",
+        spaceId: space.id,
+        space,
+        spaceIndex,
+        searchText: [spaceName, "space"].join(" "),
+      })
+
+      channels.forEach(channel => {
+        const channelName = channel.name || "channel"
+        const contextPath = `${spaceName} > #${channelName}`
+
+        spaceResults.push({
+          id: `channel-${channel.id}`,
+          type: "channel",
+          title: `# ${channelName}`,
+          subtitle: `Channel in ${spaceName}`,
+          contextPath: spaceName,
+          spaceId: space.id,
+          channelId: channel.id,
+          space,
+          channel,
+          spaceIndex,
+          searchText: [channelName, spaceName, "channel"].join(" "),
+        })
+
+        readSearchMessages(channel.id).forEach(message => {
+          addMessageResult({
+            chatId: channel.id,
+            message,
+            contextPath,
+            spaceId: space.id,
+            channelId: channel.id,
+          })
+        })
+      })
+    })
+
+    ;(friends || []).forEach(friend => {
+      if (!friend?.id) return
+      const chatId = getDMChatId(friend.id)
+      const contextPath = `Direct message > ${friend.name || "Contact"}`
+      readSearchMessages(chatId).forEach(message => {
+        addMessageResult({
+          chatId,
+          message,
+          contextPath,
+          userId: friend.id,
+          friend,
+        })
+      })
+    })
+
+    return {
+      messages: messageResults,
+      files: Array.from(filesByKey.values()),
+      spaces: spaceResults,
+    }
+  }, [currentUser, users, friends, spaces, messages, homeFiles])
+
+  useEffect(() => {
+    const tokens = getWorkspaceSearchTokens(debouncedSearchQuery)
+    if (!tokens.length) return
+
+    const buildResults = items =>
+      (items || [])
+        .filter(item => workspaceSearchMatches(item.searchText || `${item.title || ""} ${item.subtitle || ""}`, tokens))
+        .map(item => ({ ...item, searchScore: scoreWorkspaceSearchItem(item, tokens) }))
+        .sort((a, b) => {
+          if (b.searchScore !== a.searchScore) return b.searchScore - a.searchScore
+          return getWorkspaceSearchDateMs(b) - getWorkspaceSearchDateMs(a)
+        })
+        .slice(0, 80)
+
+    setDmSearchResults(buildResults(workspaceSearchCatalog.messages))
+    setFileSearchResults(buildResults(workspaceSearchCatalog.files))
+    setSpaceSearchResults(buildResults(workspaceSearchCatalog.spaces))
+  }, [debouncedSearchQuery, workspaceSearchCatalog])
+
+  const filteredMessageSearchResults = useMemo(() => {
+    return (dmSearchResults || [])
+      .filter(result => {
+        if (workspaceSearchFromFilter === "you") return result.isCurrentUser
+        if (workspaceSearchFromFilter === "others") return !result.isCurrentUser
+        return true
+      })
+      .filter(result => passesWorkspaceSearchDateFilter(result, workspaceSearchDateFilter, Date.now()))
+  }, [dmSearchResults, workspaceSearchFromFilter, workspaceSearchDateFilter])
+
+  const filteredFileSearchResults = useMemo(() => {
+    return (fileSearchResults || []).filter(result =>
+      passesWorkspaceSearchDateFilter(result, workspaceSearchDateFilter, Date.now())
+    )
+  }, [fileSearchResults, workspaceSearchDateFilter])
+
+  const workspaceSearchCounts = useMemo(
+    () => ({
+      messages: filteredMessageSearchResults.length,
+      files: filteredFileSearchResults.length,
+      spaces: spaceSearchResults.length,
+    }),
+    [filteredMessageSearchResults.length, filteredFileSearchResults.length, spaceSearchResults.length]
+  )
 
   const homeDMChatId = useMemo(() => getDMChatId(homeActiveDMUser), [currentUser?.id, homeActiveDMUser])
   const homeDMMessages = useMemo(() => (homeDMChatId ? messages[homeDMChatId] || [] : []), [messages, homeDMChatId])
@@ -5203,7 +5702,11 @@ export default function CollaborationApp() {
     ;(spaces || []).forEach(space => {
       ;(space?.channels || []).forEach(channel => {
         if (!channel?.id) return
-        channelMap.set(String(channel.id), channel)
+        channelMap.set(String(channel.id), {
+          ...channel,
+          spaceId: space.id,
+          spaceName: space.name,
+        })
       })
     })
 
@@ -5213,10 +5716,167 @@ export default function CollaborationApp() {
   const getCurrentSpace = () => currentSpace
   const getCurrentChannels = () => currentChannels
 
+  const usersById = useMemo(() => {
+    const lookup = {}
+    ;[...friends, ...users].forEach(user => {
+      if (!user?.id && user?.id !== 0) return
+      lookup[String(user.id)] = {
+        ...(lookup[String(user.id)] || {}),
+        ...user,
+      }
+    })
+    if (currentUser?.id !== undefined && currentUser?.id !== null) {
+      lookup[String(currentUser.id)] = {
+        ...(lookup[String(currentUser.id)] || {}),
+        ...currentUser,
+      }
+    }
+    return lookup
+  }, [currentUser, users, friends])
+
+  const getUser = userId => {
+    if (userId === undefined || userId === null) return undefined
+    return usersById[String(userId)]
+  }
+
   const pendingFriendRequests = useMemo(
-    () => (currentUser?.notifications || []).filter(notification => notification.type === "friend_request"),
+    () => (currentUser?.notifications || []).filter(notification =>
+      ["friend_request", "connection_invite"].includes(notification.type) &&
+      (notification.actionStatus || notification.status) !== "accepted" &&
+      (notification.actionStatus || notification.status) !== "declined"
+    ),
     [currentUser?.notifications]
   )
+
+  const normalizedNotifications = useMemo(() => {
+    const list = Array.isArray(currentUser?.notifications) ? currentUser.notifications : []
+    return list
+      .map(notification => {
+        if (!notification) return null
+        const legacyType = notification.type
+        const type = legacyType === "friend_request" ? "connection_invite" : (legacyType || "info")
+        const metadata = notification.metadata && typeof notification.metadata === "object" ? notification.metadata : {}
+        const senderId = notification.senderId ?? notification.fromId ?? notification.from
+        const sender = getUser(senderId)
+        const createdAt = notification.createdAt || (() => {
+          const timestamp = notification.timestamp
+          if (!timestamp) return null
+          if (typeof timestamp === "number") {
+            return timestamp < 100000000000 ? new Date(timestamp * 1000).toISOString() : new Date(timestamp).toISOString()
+          }
+          return timestamp
+        })()
+        const actionStatus =
+          notification.actionStatus ??
+          (legacyType === "friend_request" ? "pending" : null)
+        const status = notification.status === "read" ? "read" : "unread"
+
+        return {
+          ...notification,
+          id: String(notification.id || notification._id || `${type}-${createdAt || Date.now()}`),
+          type,
+          status,
+          actionStatus,
+          senderId: senderId === undefined || senderId === null ? null : String(senderId),
+          sender,
+          senderName:
+            metadata.senderName ||
+            notification.fromName ||
+            notification.from ||
+            sender?.name ||
+            sender?.email ||
+            "Someone",
+          message: notification.message || "",
+          metadata,
+          createdAt: createdAt || new Date().toISOString(),
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+  }, [currentUser?.notifications, usersById])
+
+  const selectedNotification = useMemo(() => {
+    if (normalizedNotifications.length === 0) return null
+    return normalizedNotifications.find(notification => notification.id === activeNotificationId) || normalizedNotifications[0]
+  }, [activeNotificationId, normalizedNotifications])
+
+  const unreadNotifications = useMemo(
+    () => normalizedNotifications.filter(notification => notification.status !== "read"),
+    [normalizedNotifications]
+  )
+
+  const unreadAssignedTaskNotifications = useMemo(
+    () => unreadNotifications.filter(notification => notification.type === "task_assigned"),
+    [unreadNotifications]
+  )
+
+  useEffect(() => {
+    if (normalizedNotifications.length === 0) {
+      setActiveNotificationId(null)
+      return
+    }
+    setActiveNotificationId(currentId =>
+      currentId && normalizedNotifications.some(notification => notification.id === currentId)
+        ? currentId
+        : normalizedNotifications[0].id
+    )
+  }, [normalizedNotifications])
+
+  useEffect(() => {
+    if (!currentUser?.id || activeView !== "notifications") return
+    let cancelled = false
+    setNotificationsLoading(true)
+    setNotificationsError("")
+    Storage.getNotifications()
+      .then(items => {
+        if (cancelled) return
+        setCurrentUser(prev => prev ? { ...prev, notifications: Array.isArray(items) ? items : [] } : prev)
+      })
+      .catch(error => {
+        if (!cancelled) setNotificationsError(error?.message || "Could not load notifications")
+      })
+      .finally(() => {
+        if (!cancelled) setNotificationsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeView, currentUser?.id])
+
+  const markNotificationReadLocal = useCallback(async notificationId => {
+    if (!notificationId) return
+    setCurrentUser(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        notifications: (prev.notifications || []).map(notification =>
+          String(notification.id) === String(notificationId)
+            ? {
+                ...notification,
+                status: "read",
+                readAt: notification.readAt || new Date().toISOString(),
+              }
+            : notification
+        ),
+      }
+    })
+    try {
+      await Storage.markNotificationRead(notificationId)
+    } catch (error) {
+      console.warn("Failed to mark notification read", error)
+    }
+  }, [])
+
+  const markAssignedTaskNotificationsRead = useCallback(() => {
+    unreadAssignedTaskNotifications.forEach(notification => {
+      markNotificationReadLocal(notification.id)
+    })
+  }, [markNotificationReadLocal, unreadAssignedTaskNotifications])
+
+  useEffect(() => {
+    if (activeView !== "notifications" || !selectedNotification || selectedNotification.status === "read") return
+    markNotificationReadLocal(selectedNotification.id)
+  }, [activeView, markNotificationReadLocal, selectedNotification])
 
   function getDMChatId(partnerId) {
     if (!currentUser || partnerId === undefined || partnerId === null) return null
@@ -5280,6 +5940,38 @@ export default function CollaborationApp() {
     } catch (error) {
       console.warn("Failed to load DM messages", error)
     }
+  }
+
+  const openHomePage = () => {
+    setActiveDraftId(null)
+    setShowDocsModal(false)
+    setShowGoogleAppsMenu(false)
+    setOpenContextId(null)
+    setActiveView("home")
+    setHomeSection("overview")
+    pushAppRoute("/")
+    if (isMobile) setMobileView("chat")
+  }
+
+  const openDirectMessagesPage = () => {
+    setActiveDraftId(null)
+    setShowDocsModal(false)
+    setShowGoogleAppsMenu(false)
+    setOpenContextId(null)
+    const targetDMUser = homeActiveDMUser || activeDMUser || friends[0]?.id || null
+    if (targetDMUser) {
+      setActiveDMUser(targetDMUser)
+      setHomeActiveDMUser(targetDMUser)
+      setActiveChannelTab("messages")
+      setActiveView("dm")
+      pushAppRoute(`/dm/${encodeURIComponent(slugifyRoutePart(getUser(targetDMUser)?.name) || String(targetDMUser))}`)
+      loadDMMessagesForUser(targetDMUser)
+    } else {
+      setActiveView("home")
+      setHomeSection("dm")
+      pushAppRoute("/")
+    }
+    if (isMobile) setMobileView("chat")
   }
 
   const openWorkspaceHome = () => {
@@ -5354,12 +6046,15 @@ export default function CollaborationApp() {
 
   const openHomeConnect = () => {
     setActiveDraftId(null)
+    setCollapsedSpaceMenu(null)
     setInviteSearchQuery("")
     setSelectedFriendInvitees([])
     setShowAddFriendModal(false)
-    setActiveView("home")
+    setOpenContextId(null)
+    setActiveView("connect")
     setHomeSection("connect")
     setConnectPreferredPane("discover")
+    pushAppRoute("/connect")
     if (isMobile) setMobileView("chat")
   }
 
@@ -5370,7 +6065,6 @@ export default function CollaborationApp() {
     setActiveDMUser(partnerId)
     setHomeActiveDMUser(partnerId)
     setActiveView("dm")
-    setSidebarCollapsed(true)
     if (isMobile) setMobileView("chat")
     await loadDMMessagesForUser(partnerId)
   }
@@ -5722,29 +6416,6 @@ export default function CollaborationApp() {
     return currentMessages
   }
 
-  const usersById = useMemo(() => {
-    const lookup = {}
-    ;[...friends, ...users].forEach(user => {
-      if (!user?.id && user?.id !== 0) return
-      lookup[String(user.id)] = {
-        ...(lookup[String(user.id)] || {}),
-        ...user,
-      }
-    })
-    if (currentUser?.id !== undefined && currentUser?.id !== null) {
-      lookup[String(currentUser.id)] = {
-        ...(lookup[String(currentUser.id)] || {}),
-        ...currentUser,
-      }
-    }
-    return lookup
-  }, [currentUser, users, friends])
-
-  const getUser = userId => {
-    if (userId === undefined || userId === null) return undefined
-    return usersById[String(userId)]
-  }
-
   const homeFriends = useMemo(() => {
     if (!Array.isArray(friends)) return []
     return friends.map(friend => {
@@ -5759,12 +6430,12 @@ export default function CollaborationApp() {
   }, [friends, usersById])
 
   const activeChannelData = useMemo(
-    () => currentChannels.find(c => c.id === activeChannel) || null,
+    () => currentChannels.find(c => String(c.id) === String(activeChannel)) || null,
     [currentChannels, activeChannel]
   )
 
   const activeMembers = useMemo(() => {
-    if (activeView === "channel") {
+    if (activeView === "channel" || (activeView === "contexts" && contextsSourceView === "channel")) {
       if (!activeChannelData) return []
       return (activeChannelData.members || []).map(id => getUser(id)).filter(Boolean)
     }
@@ -5773,7 +6444,34 @@ export default function CollaborationApp() {
       return partner ? [currentUser, partner] : [currentUser]
     }
     return []
-  }, [activeView, activeChannelData, activeDMUser, currentUser, usersById])
+  }, [activeView, activeChannelData, activeDMUser, contextsSourceView, currentUser, usersById])
+
+  const taskCreationSource =
+    taskModalDraft?.source ||
+    (activeView === "channel" || (activeView === "contexts" && contextsSourceView === "channel")
+      ? "channel"
+      : "tasks_section")
+
+  const taskAssignableMembers = useMemo(() => {
+    const lookup = new Map()
+    const addUser = user => {
+      const id = getUserIdValue(user)
+      if (id === undefined || id === null || id === "") return
+      lookup.set(String(id), {
+        ...(lookup.get(String(id)) || {}),
+        ...user,
+        id,
+      })
+    }
+
+    addUser(currentUser)
+    ;(activeMembers || []).forEach(addUser)
+    if (taskCreationSource !== "channel") {
+      ;(friends || []).forEach(addUser)
+      ;(users || []).forEach(addUser)
+    }
+    return Array.from(lookup.values())
+  }, [activeMembers, currentUser, friends, taskCreationSource, users])
 
   const getActiveMembers = () => activeMembers
 
@@ -6302,6 +7000,27 @@ export default function CollaborationApp() {
     return () => document.removeEventListener("click", closeMenus)
   }, [messageActionMenu, messageContextPicker, composerAttachMenuOpen, composerContextPickerOpen])
 
+  useEffect(() => {
+    if (!channelActionMenu) return undefined
+
+    const closeMenu = () => setChannelActionMenu(null)
+    const closeOnEscape = event => {
+      if (event.key === "Escape") closeMenu()
+    }
+
+    document.addEventListener("click", closeMenu)
+    document.addEventListener("keydown", closeOnEscape)
+    window.addEventListener("resize", closeMenu)
+    window.addEventListener("scroll", closeMenu, true)
+
+    return () => {
+      document.removeEventListener("click", closeMenu)
+      document.removeEventListener("keydown", closeOnEscape)
+      window.removeEventListener("resize", closeMenu)
+      window.removeEventListener("scroll", closeMenu, true)
+    }
+  }, [channelActionMenu])
+
   const currentChannelContexts = useMemo(() => {
     const chatId = getActiveChatId()
     if (!chatId || !["channel", "dm", "contexts"].includes(activeView)) return []
@@ -6735,7 +7454,12 @@ export default function CollaborationApp() {
   }
 
   const openTaskFromMessage = message => {
+    const source = activeView === "channel" || (activeView === "contexts" && contextsSourceView === "channel") ? "channel" : "tasks_section"
     setTaskModalDraft({
+      source,
+      channelId: source === "channel" ? activeChannel : null,
+      channelName: source === "channel" ? activeChannelData?.name || "" : "",
+      spaceName: currentSpace?.name || "",
       sourceMessageId: message.id,
       initialTaskText: message.text || "",
       initialAssignees: [],
@@ -7079,6 +7803,7 @@ export default function CollaborationApp() {
     setActiveChannel(channelId)
     setActiveView("channel")
     setCollapsedSpaceMenu(null)
+    setChannelActionMenu(null)
     // When navigating to a channel, collapse the friends sidebar for focused view
     setFriendsSidebarCollapsed(true)
     if (isMobile) setMobileView("chat")
@@ -7091,6 +7816,26 @@ export default function CollaborationApp() {
     () => new Set((starredMessages || []).map(item => String(item?.messageId))),
     [starredMessages]
   )
+
+  const selectedStarredMessage = useMemo(() => {
+    const list = Array.isArray(starredMessages) ? starredMessages : []
+    if (list.length === 0) return null
+    return list.find(item => getStarredItemKey(item) === activeStarredMessageId) || list[0]
+  }, [activeStarredMessageId, starredMessages])
+
+  useEffect(() => {
+    const list = Array.isArray(starredMessages) ? starredMessages : []
+    if (list.length === 0) {
+      setActiveStarredMessageId(null)
+      return
+    }
+
+    setActiveStarredMessageId(currentKey =>
+      currentKey && list.some(item => getStarredItemKey(item) === currentKey)
+        ? currentKey
+        : getStarredItemKey(list[0])
+    )
+  }, [starredMessages])
 
   const pinnedChannelIdSet = useMemo(
     () => new Set((pinnedChannels || []).map(item => String(item?.channelId))),
@@ -7155,6 +7900,40 @@ export default function CollaborationApp() {
     }
   }, [findSpaceAndChannel])
 
+  const openChannelActionMenu = useCallback((event, space, channel) => {
+    if (!space || !channel) return
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    event?.nativeEvent?.stopImmediatePropagation?.()
+
+    const rect = event?.currentTarget?.getBoundingClientRect?.()
+    const menuWidth = 176
+    const maxLeft = Math.max(12, window.innerWidth - menuWidth - 12)
+    const left = rect
+      ? Math.min(maxLeft, Math.max(12, rect.right - menuWidth))
+      : 12
+    const top = rect ? Math.max(12, Math.min(window.innerHeight - 180, rect.bottom + 8)) : 72
+
+    setChannelActionMenu(prev => {
+      const sameTarget =
+        prev &&
+        String(prev.spaceId) === String(space.id) &&
+        String(prev.channelId) === String(channel.id)
+
+      if (sameTarget) return null
+
+      return {
+        spaceId: space.id,
+        spaceName: space.name,
+        channelId: channel.id,
+        channelName: channel.name,
+        canManageChannel: String(space.ownerId) === String(currentUser?.id),
+        top,
+        left,
+      }
+    })
+  }, [currentUser?.id])
+
   const loadTimesavers = useCallback(async () => {
     if (!currentUser?.id) return
     setTimesaversLoading(true)
@@ -7181,6 +7960,14 @@ export default function CollaborationApp() {
     setOpenContextId(null)
     setActiveView("starred")
     pushAppRoute("/starred")
+    if (isMobile) setMobileView("chat")
+  }, [isMobile])
+
+  const openNotificationsPage = useCallback(() => {
+    setOpenContextId(null)
+    setShowNotificationsModal(false)
+    setActiveView("notifications")
+    pushAppRoute("/notifications")
     if (isMobile) setMobileView("chat")
   }, [isMobile])
 
@@ -7242,6 +8029,7 @@ export default function CollaborationApp() {
 
   const toggleChannelPin = useCallback(async (channelId) => {
     if (!channelId) return
+    setChannelActionMenu(null)
     setMessageActionMenu(null)
     setMessageContextPicker(null)
     setComposerAttachMenuOpen(false)
@@ -7932,26 +8720,28 @@ export default function CollaborationApp() {
     }
   }
 
-  const createSpace = async () => {
-    if (!newSpaceName.trim() || !currentUser) return
+  const createSpace = () => {
+    const spaceName = newSpaceName.trim()
+    if (!spaceName || !currentUser) return
+    const createdAt = Date.now()
     const newSpace = {
-      id: Date.now(),
-      name: newSpaceName,
-      iconType: "user",
+      id: createdAt,
+      name: spaceName,
+      iconType: getSpaceImageIconType(spaces.length),
       members: [currentUser.id],
-      inviteCode: `${newSpaceName.substring(0, 4).toUpperCase()}-${Math.floor(
+      inviteCode: `${spaceName.substring(0, 4).toUpperCase()}-${Math.floor(
         1000 + Math.random() * 9000
       )}`,
       channels: [
         {
-          id: Date.now() + 1,
+          id: createdAt + 1,
           name: "general",
           type: "public",
           members: [currentUser.id],
           roles: { [String(currentUser.id)]: 'owner' }
         },
         {
-          id: Date.now() + 2,
+          id: createdAt + 2,
           name: "random",
           type: "public",
           members: [currentUser.id],
@@ -7961,20 +8751,51 @@ export default function CollaborationApp() {
       expanded: true,
       ownerId: currentUser.id
     }
-    await Storage.saveSpace(newSpace)
-    // Reflect owner role locally so creator sees Owner badge immediately
-    setSpaces(prev => {
-      const arr = Array.isArray(prev) ? [...prev] : []
-      return [...arr, newSpace]
-    })
+    const userSpaceIds = Array.isArray(currentUser.spaces) ? currentUser.spaces : []
     const updatedUser = {
       ...currentUser,
-      spaces: [...currentUser.spaces, newSpace.id]
+      spaces: [...userSpaceIds, newSpace.id]
     }
-    await Storage.saveUser(updatedUser)
+
+    setSpaces(prev => {
+      const arr = Array.isArray(prev) ? [...prev] : []
+      return [...arr, { ...newSpace, icon: getSpaceIconElement(newSpace.iconType) }]
+    })
     setCurrentUser(updatedUser)
     setShowCreateSpaceModal(false)
     setNewSpaceName("")
+
+    void Storage.saveSpace(newSpace)
+      .then(savedSpace => {
+        if (!savedSpace) return
+        setSpaces(prev =>
+          (Array.isArray(prev) ? prev : []).map(space =>
+            String(space.id) === String(newSpace.id)
+              ? {
+                  ...savedSpace,
+                  icon: getSpaceIconElement(savedSpace.iconType),
+                  expanded: space.expanded ?? savedSpace.expanded
+                }
+              : space
+          )
+        )
+      })
+      .catch(error => {
+        console.error("Failed to create space", error)
+        setSpaces(prev =>
+          (Array.isArray(prev) ? prev : []).filter(space => String(space.id) !== String(newSpace.id))
+        )
+        setCurrentUser(prev =>
+          prev
+            ? {
+                ...prev,
+                spaces: (Array.isArray(prev.spaces) ? prev.spaces : []).filter(
+                  spaceId => String(spaceId) !== String(newSpace.id)
+                )
+              }
+            : prev
+        )
+      })
   }
 
   const createChannel = async () => {
@@ -8017,18 +8838,34 @@ export default function CollaborationApp() {
           s.id === showRenameModal.id ? { ...s, name: newNameInput } : s
         )
       )
-    } else if (showRenameModal.type === "channel" && activeSpace) {
-      await Storage.renameChannel(activeSpace, showRenameModal.id, newNameInput)
+      setPinnedChannels(prev =>
+        (prev || []).map(item =>
+          String(item.spaceId) === String(showRenameModal.id)
+            ? { ...item, spaceName: newNameInput }
+            : item
+        )
+      )
+    } else if (showRenameModal.type === "channel") {
+      const targetSpaceId = showRenameModal.spaceId || activeSpace
+      if (!targetSpaceId) return
+      await Storage.renameChannel(targetSpaceId, showRenameModal.id, newNameInput)
       setSpaces(prev =>
         prev.map(s => {
-          if (s.id === activeSpace) {
+          if (String(s.id) === String(targetSpaceId)) {
             const newChannels = s.channels.map(c =>
-              c.id === showRenameModal.id ? { ...c, name: newNameInput } : c
+              String(c.id) === String(showRenameModal.id) ? { ...c, name: newNameInput } : c
             )
             return { ...s, channels: newChannels }
           }
           return s
         })
+      )
+      setPinnedChannels(prev =>
+        (prev || []).map(item =>
+          String(item.channelId) === String(showRenameModal.id)
+            ? { ...item, channelName: newNameInput }
+            : item
+        )
       )
     }
     setShowRenameModal(null)
@@ -8036,71 +8873,116 @@ export default function CollaborationApp() {
   }
 
   const handleDelete = async () => {
-    if (!showDeleteConfirm) return
-    if (showDeleteConfirm.type === "space") {
-      await Storage.deleteSpace(showDeleteConfirm.id)
-      setSpaces(prev => prev.filter(s => s.id !== showDeleteConfirm.id))
-      if (activeSpace === showDeleteConfirm.id) setActiveSpace(null)
-    } else if (showDeleteConfirm.type === "channel" && activeSpace) {
-      await Storage.deleteChannel(activeSpace, showDeleteConfirm.id)
+    const deleteTarget = showDeleteConfirm
+    if (!deleteTarget) return
+    if (deleteTarget.type === "space") {
+      const removedSpace = spaces.find(space => String(space.id) === String(deleteTarget.id))
+      const wasActiveSpace = String(activeSpace) === String(deleteTarget.id)
+
+      setShowDeleteConfirm(null)
+      setSpaces(prev =>
+        (Array.isArray(prev) ? prev : []).filter(space => String(space.id) !== String(deleteTarget.id))
+      )
+      setCurrentUser(prev =>
+        prev
+          ? {
+              ...prev,
+              spaces: (Array.isArray(prev.spaces) ? prev.spaces : []).filter(
+                spaceId => String(spaceId) !== String(deleteTarget.id)
+              )
+            }
+          : prev
+      )
+      if (wasActiveSpace) {
+        setActiveSpace(null)
+        setActiveChannel(null)
+      }
+
+      void Storage.deleteSpace(deleteTarget.id).catch(error => {
+        console.error("Failed to delete space", error)
+        if (removedSpace) {
+          setSpaces(prev => {
+            const arr = Array.isArray(prev) ? prev : []
+            if (arr.some(space => String(space.id) === String(deleteTarget.id))) return arr
+            return [{ ...removedSpace, icon: removedSpace.icon || getSpaceIconElement(removedSpace.iconType) }, ...arr]
+          })
+        }
+        setCurrentUser(prev => {
+          if (!prev) return prev
+          const existingSpaces = Array.isArray(prev.spaces) ? prev.spaces : []
+          if (existingSpaces.some(spaceId => String(spaceId) === String(deleteTarget.id))) return prev
+          return { ...prev, spaces: [...existingSpaces, deleteTarget.id] }
+        })
+        if (wasActiveSpace) {
+          setActiveSpace(deleteTarget.id)
+          setActiveChannel(removedSpace?.channels?.[0]?.id || null)
+        }
+      })
+      return
+    } else if (deleteTarget.type === "channel") {
+      const targetSpaceId = deleteTarget.spaceId || activeSpace
+      if (!targetSpaceId) return
+      const space = spaces.find(s => String(s.id) === String(targetSpaceId))
+      const firstRemaining = (space?.channels || []).find(
+        c => String(c.id) !== String(deleteTarget.id)
+      )
+
+      await Storage.deleteChannel(targetSpaceId, deleteTarget.id)
       setSpaces(prev =>
         prev.map(s => {
-          if (s.id === activeSpace) {
+          if (String(s.id) === String(targetSpaceId)) {
             return {
               ...s,
-              channels: s.channels.filter(c => c.id !== showDeleteConfirm.id)
+              channels: s.channels.filter(c => String(c.id) !== String(deleteTarget.id))
             }
           }
           return s
         })
       )
-      if (activeChannel === showDeleteConfirm.id) {
-        const space = spaces.find(s => s.id === activeSpace)
-        if (space && space.channels.length > 0) {
-          const firstRemaining = space.channels.find(
-            c => c.id !== showDeleteConfirm.id
-          )
-          if (firstRemaining) setActiveChannel(firstRemaining.id)
-          else setActiveChannel("")
-        }
+      setPinnedChannels(prev =>
+        (prev || []).filter(item => String(item.channelId) !== String(deleteTarget.id))
+      )
+      if (String(activeSpace) === String(targetSpaceId) && String(activeChannel) === String(deleteTarget.id)) {
+        if (firstRemaining) setActiveChannel(firstRemaining.id)
+        else setActiveChannel("")
       }
-    } else if (showDeleteConfirm.type === "message" && showDeleteConfirm.chatId) {
-      if (!showDeleteConfirm.optimistic) {
-        await Storage.deleteMessage(showDeleteConfirm.chatId, showDeleteConfirm.id)
+    } else if (deleteTarget.type === "message" && deleteTarget.chatId) {
+      if (!deleteTarget.optimistic) {
+        await Storage.deleteMessage(deleteTarget.chatId, deleteTarget.id)
       }
       setMessages(prev => ({
         ...prev,
-        [showDeleteConfirm.chatId]: (prev[showDeleteConfirm.chatId] || []).filter(
-          message => String(message.id) !== String(showDeleteConfirm.id)
+        [deleteTarget.chatId]: (prev[deleteTarget.chatId] || []).filter(
+          message => String(message.id) !== String(deleteTarget.id)
         )
       }))
-      if (editingMessageId === showDeleteConfirm.id) {
+      if (editingMessageId === deleteTarget.id) {
         cancelEditingMessage()
       }
-      if (pinnedMessageId === showDeleteConfirm.id) {
+      if (pinnedMessageId === deleteTarget.id) {
         setPinnedMessageId(null)
       }
-      if (targetMessageId === showDeleteConfirm.id) {
+      if (targetMessageId === deleteTarget.id) {
         setTargetMessageId(null)
       }
       setSelectedMessageIds(prev =>
-        prev.filter(messageId => String(messageId) !== String(showDeleteConfirm.id))
+        prev.filter(messageId => String(messageId) !== String(deleteTarget.id))
       )
-    } else if (showDeleteConfirm.type === "file" && showDeleteConfirm.chatId && showDeleteConfirm.messageId) {
+    } else if (deleteTarget.type === "file" && deleteTarget.chatId && deleteTarget.messageId) {
       const attachmentMatches = attachment =>
         [attachment?.id, attachment?.fileId, attachment?.drive_file_id, attachment?.driveId, attachment?.url, attachment?.public_url, attachment?.webViewLink, attachment?.name]
-          .some(value => value !== undefined && value !== null && String(value) === String(showDeleteConfirm.id))
+          .some(value => value !== undefined && value !== null && String(value) === String(deleteTarget.id))
 
       const result = await Storage.deleteMessageAttachment(
-        showDeleteConfirm.chatId,
-        showDeleteConfirm.messageId,
-        showDeleteConfirm.id
+        deleteTarget.chatId,
+        deleteTarget.messageId,
+        deleteTarget.id
       )
 
       setMessages(prev => ({
         ...prev,
-        [showDeleteConfirm.chatId]: (prev[showDeleteConfirm.chatId] || []).flatMap(message => {
-          if (String(message.id) !== String(showDeleteConfirm.messageId)) return [message]
+        [deleteTarget.chatId]: (prev[deleteTarget.chatId] || []).flatMap(message => {
+          if (String(message.id) !== String(deleteTarget.messageId)) return [message]
           const remaining = (message.attachments || []).filter(attachment => !attachmentMatches(attachment))
           if (result?.messageDeleted || (remaining.length === 0 && !String(message.text || "").trim())) return []
           return [{ ...message, attachments: remaining }]
@@ -8316,23 +9198,6 @@ export default function CollaborationApp() {
       setShowAddToSpaceModal(false)
       setSelectedInviteUsers([])
       setInviteSent(false)
-      const updatedSpace = Storage.getSpaces().find(s => s.id === activeSpace)
-      if (updatedSpace) {
-        setSpaces(prev =>
-          prev.map(s => {
-            if (s.id === activeSpace) {
-              // Preserve ReactNode icon and local UI state (expanded) from current state
-              // Fixes the white screen crash
-              return {
-                ...updatedSpace,
-                icon: s.icon,
-                expanded: s.expanded
-              }
-            }
-            return s
-          })
-        )
-      }
     }, 1500)
   }
 
@@ -8351,61 +9216,48 @@ export default function CollaborationApp() {
     pendingNotificationActionIdsRef.current.add(notificationId)
     setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
 
+    const previousNotifications = currentUser.notifications || []
     try {
-      // Find the notification object from currentUser's notifications
-      const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
+      const notif = (currentUser.notifications || []).find(n => String(n.id) === String(notificationId))
+      const normalizedType = type === "friend_request" ? "connection_invite" : (type || notif?.type)
 
-      if (type === "info") {
-        await Storage.deleteNotification(currentUser.id, notificationId)
-        await refreshRelationshipState(currentUser.id)
-      } else if (type === "friend_request") {
-        const friendId = notif?.fromId
-        if (!friendId) return
-
-        setCurrentUser(prev => {
-          if (!prev) return prev
-          const nextFriends = (prev.friends || []).some(id => String(id) === String(friendId))
-            ? (prev.friends || [])
-            : [...(prev.friends || []), friendId]
-          return {
-            ...prev,
-            friends: nextFriends,
-            notifications: (prev.notifications || []).filter(n => n.id !== notificationId)
-          }
-        })
-
-        const acceptedFriend = users.find(u => String(u.id) === String(friendId))
-        if (acceptedFriend) {
-          setFriends(prev => {
-            const safePrev = Array.isArray(prev) ? prev : []
-            if (safePrev.some(friend => String(friend.id) === String(friendId))) return safePrev
-            return [...safePrev, acceptedFriend]
-          })
-        }
-
-        await Storage.acceptFriendRequest(friendId, notificationId)
-        await refreshRelationshipState(currentUser.id)
-      } else {
-        const joinedSpace = await Storage.acceptInvite(currentUser.id, notificationId)
-        // Force refresh user regardless of joinedSpace result to ensure notification is gone
-        const updatedUser = await refreshRelationshipState(currentUser.id)
-        if (updatedUser) {
-          if (joinedSpace) {
-            setActiveSpace(joinedSpace.id)
-            setActiveView("channel")
-            if (joinedSpace.channels.length > 0) {
-              const firstChannel = joinedSpace.channels[0]
-              // User has access if they own the space OR have it in their spaces list
-              const userOwnsSpace = joinedSpace.ownerId === currentUser.id
-              const userHasSpace = (updatedUser.spaces || []).includes(joinedSpace.id)
-              const hasAccess = userOwnsSpace || userHasSpace
-              if (hasAccess) {
-                setActiveChannel(firstChannel.id)
-              }
-            }
-          }
-        }
+      if (normalizedType === "info" || normalizedType?.endsWith?.("_response")) {
+        await markNotificationReadLocal(notificationId)
+        return
       }
+
+      setCurrentUser(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          notifications: (prev.notifications || []).map(notification =>
+            String(notification.id) === String(notificationId)
+              ? { ...notification, status: "read", actionStatus: "accepted", readAt: new Date().toISOString() }
+              : notification
+          )
+        }
+      })
+
+      const result = await Storage.acceptNotification(notificationId)
+      await refreshRelationshipState(currentUser.id)
+
+      if (result?.space) {
+        const joinedSpace = result.space
+        setSpaces(prev => {
+          const existing = prev.some(space => String(space.id) === String(joinedSpace.id))
+          return existing
+            ? prev.map(space => String(space.id) === String(joinedSpace.id) ? { ...joinedSpace, icon: space.icon, expanded: space.expanded } : space)
+            : [{ ...joinedSpace, icon: createSpaceIconElement(joinedSpace.iconType), expanded: true }, ...prev]
+        })
+      }
+
+      setSuccessMessage("Notification accepted")
+      setShowSuccessToast(true)
+      setNotificationsError("")
+    } catch (error) {
+      console.error("Failed to accept notification", error)
+      setCurrentUser(prev => prev ? { ...prev, notifications: previousNotifications } : prev)
+      setNotificationsError(error?.message || "Could not update notification")
     } finally {
       pendingNotificationActionIdsRef.current.delete(notificationId)
       setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
@@ -8413,6 +9265,78 @@ export default function CollaborationApp() {
   }
 
   const handleRejectNotification = async (notificationId, type) => {
+    void type
+    if (!currentUser) return
+    if (pendingNotificationActionIdsRef.current.has(notificationId)) return
+
+    pendingNotificationActionIdsRef.current.add(notificationId)
+    setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
+
+    const previousNotifications = currentUser.notifications || []
+    try {
+      setCurrentUser(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          notifications: (prev.notifications || []).map(notification =>
+            String(notification.id) === String(notificationId)
+              ? { ...notification, status: "read", actionStatus: "declined", readAt: new Date().toISOString() }
+              : notification
+          )
+        }
+      })
+
+      await Storage.declineNotification(notificationId)
+      await refreshRelationshipState(currentUser.id)
+      setSuccessMessage("Notification declined")
+      setShowSuccessToast(true)
+      setNotificationsError("")
+    } catch (error) {
+      console.error("Failed to decline notification", error)
+      setCurrentUser(prev => prev ? { ...prev, notifications: previousNotifications } : prev)
+      setNotificationsError(error?.message || "Could not update notification")
+    } finally {
+      pendingNotificationActionIdsRef.current.delete(notificationId)
+      setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
+    }
+  }
+
+  const handleWithdrawNotification = async notificationId => {
+    if (!currentUser) return
+    if (pendingNotificationActionIdsRef.current.has(notificationId)) return
+
+    pendingNotificationActionIdsRef.current.add(notificationId)
+    setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
+
+    const previousNotifications = currentUser.notifications || []
+    try {
+      setCurrentUser(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          notifications: (prev.notifications || []).map(notification =>
+            String(notification.id) === String(notificationId)
+              ? { ...notification, status: "read", actionStatus: "withdrawn", readAt: new Date().toISOString() }
+              : notification
+          )
+        }
+      })
+
+      await Storage.withdrawNotification(notificationId)
+      setSuccessMessage("Invite withdrawn")
+      setShowSuccessToast(true)
+      setNotificationsError("")
+    } catch (error) {
+      console.error("Failed to withdraw notification", error)
+      setCurrentUser(prev => prev ? { ...prev, notifications: previousNotifications } : prev)
+      setNotificationsError(error?.message || "Could not withdraw invite")
+    } finally {
+      pendingNotificationActionIdsRef.current.delete(notificationId)
+      setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
+    }
+  }
+
+  const handleRemindNotification = async notificationId => {
     if (!currentUser) return
     if (pendingNotificationActionIdsRef.current.has(notificationId)) return
 
@@ -8420,26 +9344,13 @@ export default function CollaborationApp() {
     setPendingNotificationActionIds(prev => (prev.includes(notificationId) ? prev : [...prev, notificationId]))
 
     try {
-      // Find the notification to extract sender id
-      const notif = (currentUser.notifications || []).find(n => n.id === notificationId)
-
-      setCurrentUser(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          notifications: (prev.notifications || []).filter(n => n.id !== notificationId)
-        }
-      })
-
-      if (type === "friend_request") {
-        const friendId = notif?.fromId
-        if (!friendId) return
-        await Storage.rejectFriendRequest(friendId, notificationId)
-      } else {
-        await Storage.rejectInvite(currentUser.id, notificationId)
-      }
-
-      await refreshRelationshipState(currentUser.id)
+      await Storage.remindNotification(notificationId)
+      setSuccessMessage("Reminder sent")
+      setShowSuccessToast(true)
+      setNotificationsError("")
+    } catch (error) {
+      console.error("Failed to remind notification", error)
+      setNotificationsError(error?.message || "Could not send reminder")
     } finally {
       pendingNotificationActionIdsRef.current.delete(notificationId)
       setPendingNotificationActionIds(prev => prev.filter(id => id !== notificationId))
@@ -9648,6 +10559,846 @@ export default function CollaborationApp() {
 
   // --- Authenticated App UI ---
   const { daysInMonth, firstDay } = getDaysInMonth(currentDate)
+  const appRailNotificationCount = unreadNotifications.length
+  const appRailTaskAssignmentCount = unreadAssignedTaskNotifications.length
+  const calendarRailImageNumber = Math.min(47, Math.max(17, new Date().getDate() + 16))
+  const calendarRailIconSrc = `/image%20${calendarRailImageNumber}.png`
+  const isWorkspaceRailActive =
+    activeView === "channel" ||
+    activeView === "calendar" ||
+    activeView === "meeting" ||
+    (activeView === "contexts" && contextsSourceView !== "dm")
+  const appRailItems = [
+    { key: "home", label: "Home", title: "Home", icon: HomeIcon, imageSrc: "/Home.png", active: activeView === "home" && homeSection === "overview", action: openHomePage },
+    { key: "work", label: "Spaces", title: "Spaces", icon: Briefcase, imageSrc: "/Work.png", active: isWorkspaceRailActive, action: openWorkspaceHome },
+    { key: "dms", label: "DMs", title: "Direct Messages", icon: MessageSquare, active: (activeView === "home" && homeSection === "dm") || activeView === "dm", action: openDirectMessagesPage },
+    { key: "starred", label: "Starred", title: "Starred messages", icon: Star, imageSrc: "/Starred.png", active: activeView === "starred", badge: starredMessages.length, action: openStarredMessages },
+    { key: "notifications", label: "Notifications", title: "Notifications", icon: Bell, imageSrc: "/Activity.png", active: activeView === "notifications", badge: appRailNotificationCount, action: openNotificationsPage },
+    { key: "files", label: "Files", title: "Files", icon: FileText, imageSrc: "/Files.png", active: activeView === "documents" || showDocsModal, action: openDocumentsPage },
+    { key: "tasks", label: "Tasks", title: "Tasks", icon: ClipboardList, imageSrc: "/Tasks.png", active: activeView === "tasks", badge: appRailTaskAssignmentCount, action: openTasksPage },
+    { key: "calendar", label: "Calendar", title: "Calendar", icon: Calendar, imageSrc: calendarRailIconSrc, active: activeView === "calendar", action: () => {
+      if (!googleCalendarToken) {
+        setShowCalendarConnectModal(true)
+      } else {
+        setActiveView("calendar")
+        setActiveSpace(null)
+      }
+    } },
+    { key: "connect", label: "Connect", title: "Connect", icon: UserPlus, active: activeView === "connect" || (activeView === "home" && homeSection === "connect"), action: openHomeConnect },
+  ]
+  const renderChannelMembersView = () => {
+    const currentSpaceRecord = getCurrentSpace()
+    const ownerId = activeChannelData?.ownerId || currentSpaceRecord?.ownerId
+    let ownerMembers = activeMembers.filter(member => {
+      const role = getChannelRole(member.id)
+      return role === "owner" || (ownerId && String(member.id) === String(ownerId))
+    })
+
+    if (!ownerMembers.length && ownerId) {
+      const owner = getUser(ownerId)
+      if (owner) ownerMembers = [owner]
+    }
+
+    const ownerIds = new Set(ownerMembers.map(member => String(member.id)))
+    const regularMembers = activeMembers.filter(member => !ownerIds.has(String(member.id)))
+    const canEditRoles = String(currentUser?.id || "") === String(currentSpaceRecord?.ownerId || "")
+
+    const formatRole = member => {
+      if (ownerIds.has(String(member.id))) return "Owner"
+      const role = getChannelRole(member.id)
+      return role ? role.charAt(0).toUpperCase() + role.slice(1) : "Member"
+    }
+
+    const renderMemberRow = (member, section) => {
+      const isMe = String(member.id) === String(currentUser?.id)
+      const canManageMember = canEditRoles && !isMe && section !== "owners"
+
+      return (
+        <div key={`${section}-${member.id}`} className="workspace-channel-member-row">
+          <div className="workspace-channel-member-name">
+            <div className="workspace-channel-member-avatar">
+              {renderAvatar(member, 34)}
+            </div>
+            <div className="min-w-0">
+              <div className="workspace-channel-member-title">{member.name || member.email || "Member"}</div>
+              {section === "members" && (
+                <div className="workspace-channel-member-nickname">
+                  <Edit2 className="h-3.5 w-3.5" />
+                  <span>Set nickname</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="workspace-channel-member-role">
+            {canManageMember ? (
+              <select
+                value={getChannelRole(member.id)}
+                onChange={event => handleSetRole(member.id, event.target.value)}
+                className="workspace-channel-member-role-select"
+                aria-label={`Role for ${member.name || member.email || "member"}`}
+              >
+                <option value="owner">Owner</option>
+                <option value="admin">Admin</option>
+                <option value="member">Member</option>
+              </select>
+            ) : (
+              <span>{formatRole(member)}</span>
+            )}
+            {canManageMember && (
+              <button
+                type="button"
+                onClick={() => handleRemoveMember(member.id)}
+                className="workspace-channel-member-remove"
+                title="Remove member"
+                aria-label={`Remove ${member.name || member.email || "member"}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    const renderSection = (title, people, section) => (
+      <section className="workspace-channel-members-section">
+        <div className="workspace-channel-members-section-title">
+          <ChevronDown className="h-4 w-4" />
+          <span>{title} ({people.length})</span>
+        </div>
+        <div className="workspace-channel-members-header">
+          <span>Name</span>
+          <span>Role</span>
+        </div>
+        <div className="workspace-channel-members-list">
+          {people.length ? (
+            people.map(member => renderMemberRow(member, section))
+          ) : (
+            <div className="workspace-channel-members-empty">No {title.toLowerCase()} in this channel yet.</div>
+          )}
+        </div>
+      </section>
+    )
+
+    return (
+      <div className={`workspace-channel-details-view ${isDarkMode ? "is-dark" : ""}`}>
+        {renderSection("Owners", ownerMembers, "owners")}
+        {renderSection("Members", regularMembers, "members")}
+      </div>
+    )
+  }
+  const isDirectMessagesShell = activeView === "dm"
+  const shouldShowSpacesSidebar = !["tasks", "documents", "connect", "starred", "notifications"].includes(activeView)
+  const shouldShowWorkspaceSearch = !isMobile && ["channel", "dm", "calendar", "documents", "starred", "notifications"].includes(activeView)
+  const workspaceSearchOpen = debouncedSearchQuery.trim().length > 0 && !workspaceSearchDismissed
+  const showLegacySidebarControls = false
+  const showLegacySidebarSearch = false
+  const showLegacyFriendsSidebar = false
+
+  const openSpaceSearchResult = result => {
+    if (!result) return
+
+    if (result.spaceId && result.channelId) {
+      handleChannelNavigation(result.spaceId, result.channelId)
+      setHighlightTerm(debouncedSearchQuery)
+      if (result.messageId) {
+        setTargetMessageId(result.messageId)
+        setPinnedMessageId(result.messageId)
+      } else {
+        setTargetMessageId(null)
+        setPinnedMessageId(null)
+      }
+    } else if (result.spaceId) {
+      const matchedSpace = spaces.find(space => String(space.id) === String(result.spaceId))
+      const firstChannel = getAccessibleChannelsForSpace(matchedSpace)[0]
+      if (firstChannel) {
+        handleChannelNavigation(result.spaceId, firstChannel.id)
+      } else {
+        setActiveSpace(result.spaceId)
+        setActiveChannel(null)
+        setActiveView("channel")
+      }
+    }
+
+    setWorkspaceSearchDismissed(true)
+  }
+
+  const openDmSearchResult = result => {
+    if (!result?.userId) return
+    const user = getUser(result.userId)
+
+    setActiveDMUser(result.userId)
+    setHomeActiveDMUser(result.userId)
+    setActiveChannelTab("messages")
+    setActiveView("dm")
+    loadDMMessagesForUser(result.userId)
+    pushAppRoute(`/dm/${encodeURIComponent(slugifyRoutePart(user?.name || result.title) || String(result.userId))}`)
+
+    if (result.messageId) {
+      setHighlightTerm(debouncedSearchQuery)
+      setTargetMessageId(result.messageId)
+      setPinnedMessageId(result.messageId)
+    } else {
+      setTargetMessageId(null)
+      setPinnedMessageId(null)
+    }
+
+    if (isMobile) setMobileView("chat")
+    setWorkspaceSearchDismissed(true)
+  }
+
+  const openMessageSearchResult = result => {
+    if (!result) return
+    if (result.resultScope === "channel" || result.channelId) {
+      openSpaceSearchResult(result)
+      return
+    }
+    openDmSearchResult(result)
+  }
+
+  const openFileSearchResult = result => {
+    if (!result?.file) return
+    setWorkspaceSearchDismissed(true)
+    openHomeFile(result.file)
+  }
+
+  const getNotificationTitle = notification => {
+    if (!notification) return "Notification"
+    const metadata = notification.metadata || {}
+    if (notification.type === "connection_invite") return notification.senderName || "Connection invite"
+    if (notification.type === "connection_invite_response") return "Connection invite response"
+    if ((notification.type === "space_invite" || notification.type === "channel_invite") && metadata.senderCopy) {
+      return `Invite sent to ${metadata.recipientName || "member"}`
+    }
+    if (notification.type === "space_invite") return metadata.spaceName || notification.spaceName || "Space invite"
+    if (notification.type === "channel_invite") return metadata.channelName ? `#${metadata.channelName}` : "Channel invite"
+    if (notification.type === "space_invite_response" || notification.type === "channel_invite_response") return metadata.spaceName || "Invite response"
+    if (notification.type === "task_assigned") return metadata.taskTitle || notification.message || "Task assigned"
+    return "Notification"
+  }
+
+  const getNotificationPreview = notification => {
+    if (!notification) return ""
+    const metadata = notification.metadata || {}
+    if (notification.type === "connection_invite") return `${notification.senderName} wants to connect with you`
+    if ((notification.type === "space_invite" || notification.type === "channel_invite") && metadata.senderCopy) {
+      return notification.message || `Pending invite for ${metadata.spaceName || "space"}`
+    }
+    if (notification.type === "space_invite") return notification.message || `${notification.senderName} invited you to ${metadata.spaceName || "a space"}`
+    if (notification.type === "channel_invite") {
+      return notification.message || `${notification.senderName} invited you to #${metadata.channelName || "channel"}`
+    }
+    if (notification.type === "task_assigned") {
+      const source = metadata.sourceLabel || (metadata.source === "channel" ? `Assigned from #${metadata.channelName || "channel"}` : "Assigned from Tasks")
+      return `${source}${metadata.dueDate ? ` | Due ${metadata.dueDate}` : ""}`
+    }
+    return notification.message || "Workspace update"
+  }
+
+  const getNotificationStatusLabel = notification => {
+    if (!notification) return ""
+    if (notification.actionStatus === "pending") return "Pending"
+    if (notification.actionStatus && notification.actionStatus !== "pending") return notification.actionStatus
+    return notification.status === "read" ? "Read" : "Unread"
+  }
+
+  const getNotificationSpaceContext = notification => {
+    const metadata = notification?.metadata || {}
+    const space = spaces.find(item => String(item.id) === String(notification?.spaceId))
+    const channel = (space?.channels || []).find(item => String(item.id) === String(notification?.channelId))
+    return {
+      space,
+      channel,
+      spaceName: metadata.spaceName || notification?.spaceName || space?.name || "",
+      channelName: metadata.channelName || notification?.channelName || channel?.name || "",
+    }
+  }
+
+  const canManageNotificationContext = notification => {
+    if (!notification || !currentUser?.id) return false
+    const { space, channel } = getNotificationSpaceContext(notification)
+    if (!space) return false
+    if (String(space.ownerId || space.createdBy) === String(currentUser.id)) return true
+    const role = (channel?.roles || {})[String(currentUser.id)]
+    return role === "owner" || role === "admin"
+  }
+
+  const openTaskFromNotification = async notification => {
+    if (!notification) return
+    const taskId = notification.taskId || notification.metadata?.taskId
+    if (!taskId) return
+    await markNotificationReadLocal(notification.id)
+    setFocusedTaskId(String(taskId))
+    setActiveView("tasks")
+    pushAppRoute("/tasks")
+    if (isMobile) setMobileView("chat")
+  }
+
+  const renderNotificationDetail = notification => {
+    if (!notification) {
+      return (
+        <div className="workspace-notification-detail-empty">
+          <Bell className="h-10 w-10" />
+          <h3>No notification selected</h3>
+          <p>Select a notification to see the details and available actions.</p>
+        </div>
+      )
+    }
+
+    const metadata = notification.metadata || {}
+    const sender = notification.sender || getUser(notification.senderId)
+    const isPending = notification.actionStatus === "pending"
+    const isSenderCopy = Boolean(metadata.senderCopy || notification.senderCopy)
+    const isInviteType = ["space_invite", "channel_invite"].includes(notification.type)
+    const isActionable = !isSenderCopy && isPending && ["connection_invite", "space_invite", "channel_invite"].includes(notification.type)
+    const isWorking = pendingNotificationActionIds.includes(notification.id)
+    const { space, channel, spaceName, channelName } = getNotificationSpaceContext(notification)
+    const canSeeManagement = canManageNotificationContext(notification)
+    const canManageInviteActions = canSeeManagement && isSenderCopy && isInviteType && isPending
+    const taskTitle = metadata.taskTitle || notification.message || "Untitled task"
+    const sourceLabel =
+      metadata.sourceLabel ||
+      (metadata.source === "channel" ? `Assigned from #${channelName || metadata.channelName || "channel"}` : "Assigned from Tasks")
+
+    return (
+      <div className="workspace-notification-detail-inner">
+        <div className="workspace-notification-detail-header">
+          <div className="workspace-notification-detail-person">
+            <span className="workspace-notification-detail-avatar">
+              {notification.type === "task_assigned" ? (
+                <ClipboardList className="h-5 w-5" />
+              ) : sender ? (
+                renderAvatar(sender, 44)
+              ) : (
+                <Bell className="h-5 w-5" />
+              )}
+            </span>
+            <div className="min-w-0">
+              <div className="workspace-notification-detail-name">{getNotificationTitle(notification)}</div>
+              <div className="workspace-notification-detail-context">
+                {formatDateLabel(notification.createdAt, timeTicker)}
+                {notification.createdAt ? ` at ${formatTime(notification.createdAt)}` : ""}
+              </div>
+            </div>
+          </div>
+          <span className={`workspace-notification-status-pill is-${String(getNotificationStatusLabel(notification)).toLowerCase()}`}>
+            {getNotificationStatusLabel(notification)}
+          </span>
+        </div>
+
+        <div className="workspace-notification-card">
+          {notification.type === "connection_invite" ? (
+            <>
+              <div className="workspace-notification-profile">
+                <span>{sender ? renderAvatar(sender, 56) : <UserIcon className="h-6 w-6" />}</span>
+                <div>
+                  <h3>{notification.senderName}</h3>
+                  <p>{notification.senderName} wants to connect with you</p>
+                </div>
+              </div>
+            </>
+          ) : notification.type === "space_invite" || notification.type === "channel_invite" ? (
+            <>
+              <div className="workspace-notification-kv">
+                <span>Space</span>
+                <strong>{spaceName || "Space"}</strong>
+              </div>
+              {notification.type === "channel_invite" && (
+                <div className="workspace-notification-kv">
+                  <span>Channel</span>
+                  <strong>#{channelName || "channel"}</strong>
+                </div>
+              )}
+              <div className="workspace-notification-kv">
+                <span>{isSenderCopy ? "Invitee" : "Invited by"}</span>
+                <strong>{isSenderCopy ? metadata.recipientName || "Member" : notification.senderName}</strong>
+              </div>
+              <p className="workspace-notification-detail-message">{getNotificationPreview(notification)}</p>
+            </>
+          ) : notification.type === "task_assigned" ? (
+            <>
+              <div className="workspace-notification-kv">
+                <span>Task</span>
+                <strong>{taskTitle}</strong>
+              </div>
+              <div className="workspace-notification-kv">
+                <span>Assigned by</span>
+                <strong>{metadata.senderName || notification.senderName}</strong>
+              </div>
+              <div className="workspace-notification-kv">
+                <span>Source</span>
+                <strong>{sourceLabel}</strong>
+              </div>
+              {metadata.dueDate && (
+                <div className="workspace-notification-kv">
+                  <span>Due</span>
+                  <strong>{metadata.dueDate}</strong>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="workspace-notification-detail-message">{notification.message || getNotificationPreview(notification)}</p>
+          )}
+
+          {isActionable && (
+            <div className="workspace-notification-actions">
+              <button
+                type="button"
+                className="workspace-notification-primary-action"
+                disabled={isWorking}
+                onClick={() => handleNotificationAction(notification.id, notification.type)}
+              >
+                <CheckCircle className="h-4 w-4" />
+                Accept
+              </button>
+              <button
+                type="button"
+                className="workspace-notification-secondary-action"
+                disabled={isWorking}
+                onClick={() => handleRejectNotification(notification.id, notification.type)}
+              >
+                <XCircle className="h-4 w-4" />
+                Decline
+              </button>
+            </div>
+          )}
+
+          {notification.type === "task_assigned" && (
+            <div className="workspace-notification-actions">
+              <button type="button" className="workspace-notification-primary-action" onClick={() => openTaskFromNotification(notification)}>
+                <ExternalLink className="h-4 w-4" />
+                Open task
+              </button>
+            </div>
+          )}
+        </div>
+
+        {canSeeManagement && (space || channel) && (
+          <div className="workspace-notification-management">
+            <h3>Management details</h3>
+            <div className="workspace-notification-management-grid">
+              <div>
+                <span>Members</span>
+                <strong>{channel ? (channel.members || []).length : (space?.members || []).length}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{notification.actionStatus || notification.status}</strong>
+              </div>
+              <div>
+                <span>Pending members</span>
+                <strong>{isInviteType && isPending ? 1 : 0}</strong>
+              </div>
+              <div>
+                <span>Invites</span>
+                <strong>{isInviteType ? 1 : 0}</strong>
+              </div>
+              <div>
+                <span>Requests</span>
+                <strong>0</strong>
+              </div>
+            </div>
+            {canManageInviteActions && (
+              <div className="workspace-notification-actions">
+                <button
+                  type="button"
+                  className="workspace-notification-secondary-action"
+                  disabled={isWorking}
+                  onClick={() => handleRemindNotification(notification.id)}
+                >
+                  <Bell className="h-4 w-4" />
+                  Remind
+                </button>
+                <button
+                  type="button"
+                  className="workspace-notification-secondary-action is-danger"
+                  disabled={isWorking}
+                  onClick={() => handleWithdrawNotification(notification.id)}
+                >
+                  <XCircle className="h-4 w-4" />
+                  Withdraw
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const renderNotificationsPage = () => (
+    <div className={`workspace-notifications-frame workspace-starred-frame workspace-dedicated-frame ${isDarkMode ? "is-dark" : ""}`}>
+      <aside className="workspace-starred-sidebar workspace-notifications-sidebar">
+        <div className="workspace-starred-sidebar-header">
+          <div className="workspace-starred-title-row">
+            <span className="workspace-starred-icon workspace-notifications-icon">
+              <Bell className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <h2>Notifications</h2>
+              <p>{unreadNotifications.length ? `${unreadNotifications.length} unread` : "You're all caught up"}</p>
+            </div>
+          </div>
+        </div>
+
+        {notificationsError && normalizedNotifications.length > 0 && (
+          <div className="workspace-notification-inline-error">
+            <ShieldAlert className="h-4 w-4" />
+            <span>{notificationsError}</span>
+          </div>
+        )}
+
+        <div className="workspace-starred-list workspace-notifications-list">
+          {notificationsLoading && normalizedNotifications.length === 0 ? (
+            <div className="workspace-starred-empty">
+              <Loader2 className="h-7 w-7 animate-spin" />
+              <span>Loading notifications</span>
+            </div>
+          ) : notificationsError && normalizedNotifications.length === 0 ? (
+            <div className="workspace-starred-empty">
+              <ShieldAlert className="h-7 w-7" />
+              <span>{notificationsError}</span>
+            </div>
+          ) : normalizedNotifications.length === 0 ? (
+            <div className="workspace-starred-empty">
+              <Bell className="h-7 w-7" />
+              <span>No notifications yet</span>
+            </div>
+          ) : (
+            normalizedNotifications.map(notification => {
+              const isSelected = selectedNotification?.id === notification.id
+              const unread = notification.status !== "read"
+              const statusLabel = getNotificationStatusLabel(notification)
+              return (
+                <button
+                  key={`notification-${notification.id}`}
+                  type="button"
+                  onClick={() => setActiveNotificationId(notification.id)}
+                  className={`workspace-notification-list-item ${isSelected ? "is-active" : ""} ${unread ? "is-unread" : ""}`}
+                >
+                  <span className="workspace-starred-list-avatar workspace-notification-list-avatar">
+                    {notification.type === "task_assigned" ? (
+                      <ClipboardList className="h-4 w-4" />
+                    ) : notification.sender ? (
+                      renderAvatar(notification.sender, 30)
+                    ) : (
+                      <Bell className="h-4 w-4" />
+                    )}
+                  </span>
+                  <span className="workspace-starred-list-copy">
+                    <span className="workspace-starred-list-meta">
+                      <span>{getNotificationTitle(notification)}</span>
+                      <span>{formatRelativeTime(notification.createdAt, timeTicker)}</span>
+                    </span>
+                    <span className="workspace-starred-list-preview">{getNotificationPreview(notification)}</span>
+                    <span className="workspace-notification-list-footer">
+                      <span>{statusLabel}</span>
+                      {unread && <span className="workspace-notification-unread-dot" />}
+                    </span>
+                  </span>
+                </button>
+              )
+            })
+          )}
+        </div>
+      </aside>
+
+      <main className="workspace-starred-detail workspace-notification-detail">
+        <div className="workspace-starred-detail-panel workspace-notification-detail-panel">
+          {renderNotificationDetail(selectedNotification)}
+        </div>
+      </main>
+    </div>
+  )
+
+  const renderWorkspaceSearchPage = () => {
+    const query = debouncedSearchQuery.trim()
+    const tabs = [
+      { key: "messages", label: "Messages", count: workspaceSearchCounts.messages },
+      { key: "files", label: "Files", count: workspaceSearchCounts.files },
+      { key: "spaces", label: "Spaces", count: workspaceSearchCounts.spaces },
+    ]
+    const totalResults = workspaceSearchCounts.messages + workspaceSearchCounts.files + workspaceSearchCounts.spaces
+    const activeResults =
+      workspaceSearchTab === "files"
+        ? filteredFileSearchResults
+        : workspaceSearchTab === "spaces"
+          ? spaceSearchResults
+          : filteredMessageSearchResults
+
+    return (
+      <div className={`workspace-search-page ${isDarkMode ? "is-dark" : ""}`}>
+        <div className="workspace-search-page-tabs" role="tablist" aria-label="Search result types">
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={workspaceSearchTab === tab.key}
+              className={`workspace-search-tab ${workspaceSearchTab === tab.key ? "is-active" : ""}`}
+              onClick={() => setWorkspaceSearchTab(tab.key)}
+            >
+              <span>{tab.label}</span>
+              <span className="workspace-search-tab-count">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {(workspaceSearchTab === "messages" || workspaceSearchTab === "files") && (
+          <div className="workspace-search-filterbar">
+            {workspaceSearchTab === "messages" && (
+              <label className="workspace-search-filter-control">
+                <span>From</span>
+                <select value={workspaceSearchFromFilter} onChange={event => setWorkspaceSearchFromFilter(event.target.value)}>
+                  <option value="all">Anyone</option>
+                  <option value="you">You</option>
+                  <option value="others">Others</option>
+                </select>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </label>
+            )}
+            <label className="workspace-search-filter-control">
+              <span>Date</span>
+              <select value={workspaceSearchDateFilter} onChange={event => setWorkspaceSearchDateFilter(event.target.value)}>
+                <option value="all">Any time</option>
+                <option value="today">Today</option>
+                <option value="week">Past week</option>
+                <option value="month">Past month</option>
+              </select>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </label>
+          </div>
+        )}
+
+        <div className="workspace-search-page-scroll">
+          {totalResults === 0 ? (
+            <div className="workspace-search-empty-state">
+              <Search className="h-6 w-6" />
+              <span>No results found</span>
+            </div>
+          ) : activeResults.length === 0 ? (
+            <div className="workspace-search-empty-state">
+              <Search className="h-6 w-6" />
+              <span>No {workspaceSearchTab} match "{query}"</span>
+            </div>
+          ) : workspaceSearchTab === "messages" ? (
+            <div className="workspace-search-results-column">
+              {activeResults.map(result => (
+                <button
+                  key={result.id}
+                  type="button"
+                  className="workspace-search-message-card"
+                  onClick={() => openMessageSearchResult(result)}
+                >
+                  <div className="workspace-search-result-context">
+                    {result.resultScope === "channel" ? <Hash className="h-3.5 w-3.5" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                    <span>{result.contextPath}</span>
+                  </div>
+                  <div className="workspace-search-message-content">
+                    <span className="workspace-search-avatar">
+                      {renderAvatar(result.avatarUser || currentUser, 34)}
+                    </span>
+                    <span className="workspace-search-message-copy">
+                      <span className="workspace-search-message-meta">
+                        <span className="workspace-search-message-author">{result.title}</span>
+                        {result.timestamp && <span>{formatTime(result.timestamp)}</span>}
+                      </span>
+                      <span className="workspace-search-message-snippet">
+                        {renderWithHighlight(result.subtitle, query)}
+                      </span>
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : workspaceSearchTab === "files" ? (
+            <div className="workspace-search-results-column">
+              {activeResults.map(result => (
+                <button
+                  key={result.id}
+                  type="button"
+                  className="workspace-search-file-card"
+                  onClick={() => openFileSearchResult(result)}
+                >
+                  <span className="workspace-search-file-icon">
+                    {result.icon ? (
+                      <SmartImage src={result.icon} alt="" className="h-6 w-6 object-contain" fallback={<span>{result.emoji}</span>} />
+                    ) : (
+                      <FileIcon className="h-5 w-5" />
+                    )}
+                  </span>
+                  <span className="workspace-search-file-copy">
+                    <span className="workspace-search-file-title">{renderWithHighlight(result.title, query)}</span>
+                    <span className="workspace-search-file-subtitle">{renderWithHighlight(result.subtitle, query)}</span>
+                  </span>
+                  <span className="workspace-search-source-pill">{result.sourceLabel}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="workspace-search-results-column">
+              {activeResults.map(result => (
+                <button
+                  key={result.id}
+                  type="button"
+                  className="workspace-search-space-card"
+                  onClick={() => openSpaceSearchResult(result)}
+                >
+                  <span className="workspace-search-space-icon">
+                    {result.type === "space" ? (
+                      <SpaceImageIcon space={result.space} index={result.spaceIndex || 0} className="h-7 w-7" />
+                    ) : (
+                      <Hash className="h-5 w-5" />
+                    )}
+                  </span>
+                  <span className="workspace-search-space-copy">
+                    <span className="workspace-search-space-title">{renderWithHighlight(result.title, query)}</span>
+                    <span className="workspace-search-space-subtitle">{renderWithHighlight(result.subtitle, query)}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderWorkspaceCommunityChannel = (space, channel, options = {}) => {
+    const normalizedSpaceId = space?.id ?? options.pinnedItem?.spaceId
+    const normalizedChannelId = channel?.id ?? options.pinnedItem?.channelId
+    if (normalizedSpaceId === undefined || normalizedSpaceId === null || normalizedChannelId === undefined || normalizedChannelId === null) {
+      return null
+    }
+
+    const channelName = channel?.name || options.pinnedItem?.channelName || "channel"
+    const spaceName = space?.name || options.pinnedItem?.spaceName || "Space"
+    const isPinnedChannel = pinnedChannelIdSet.has(String(normalizedChannelId))
+    const isActiveChannel =
+      activeView === "channel" &&
+      String(activeChannel) === String(normalizedChannelId)
+    const isMenuOpen =
+      channelActionMenu &&
+      String(channelActionMenu.spaceId) === String(normalizedSpaceId) &&
+      String(channelActionMenu.channelId) === String(normalizedChannelId)
+    const hasUnread =
+      unreadChannels.some(id => String(id) === String(normalizedChannelId)) &&
+      String(activeChannel) !== String(normalizedChannelId)
+    const channelForActions = { ...(channel || {}), id: normalizedChannelId, name: channelName }
+    const spaceForActions = { ...(space || {}), id: normalizedSpaceId, name: spaceName }
+
+    return (
+      <div
+        key={options.key || `${normalizedSpaceId}-${normalizedChannelId}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => handleChannelNavigation(normalizedSpaceId, normalizedChannelId)}
+        onKeyDown={event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault()
+            handleChannelNavigation(normalizedSpaceId, normalizedChannelId)
+          }
+        }}
+        className={`workspace-community-channel ${options.pinned ? "is-pinned" : ""} ${isActiveChannel ? "is-active" : ""} ${isMenuOpen ? "is-menu-open" : ""}`}
+        title={options.pinned ? `${spaceName} / ${channelName}` : channelName}
+      >
+        <Hash
+          className={`workspace-community-channel-icon ${options.pinned ? "workspace-community-pinned-channel-icon" : ""}`}
+          strokeWidth={1.9}
+        />
+        <span className="workspace-community-channel-copy">
+          <span className="workspace-community-channel-name">{channelName}</span>
+          {options.pinned && (
+            <span className="workspace-community-channel-context">{spaceName}</span>
+          )}
+        </span>
+        {hasUnread && <span className="workspace-community-unread-dot" />}
+        {isPinnedChannel && !options.pinned && (
+          <Pin className="workspace-community-channel-pin" strokeWidth={1.9} />
+        )}
+        <button
+          type="button"
+          className="workspace-community-channel-menu-button"
+          onClick={event => openChannelActionMenu(event, spaceForActions, channelForActions)}
+          title="Channel options"
+          aria-label={`Options for ${channelName}`}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(isMenuOpen)}
+        >
+          <MoreVertical className="workspace-community-channel-more" strokeWidth={1.9} />
+        </button>
+      </div>
+    )
+  }
+
+  const renderChannelActionMenu = () => {
+    if (!channelActionMenu) return null
+    const isPinnedChannel = pinnedChannelIdSet.has(String(channelActionMenu.channelId))
+    const canManageChannel = Boolean(channelActionMenu.canManageChannel)
+
+    return createPortal(
+      <div
+        className={`workspace-channel-actions-menu ${isDarkMode ? "is-dark" : ""}`}
+        style={{
+          top: channelActionMenu.top,
+          left: channelActionMenu.left,
+        }}
+        role="menu"
+        onClick={event => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="workspace-channel-actions-item"
+          onClick={() => toggleChannelPin(channelActionMenu.channelId)}
+        >
+          <Pin className={isPinnedChannel ? "fill-current" : ""} />
+          <span>{isPinnedChannel ? "Unpin" : "Pin"}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="workspace-channel-actions-item"
+          disabled={!canManageChannel}
+          title={canManageChannel ? "Edit channel" : "Only the space owner can edit this channel"}
+          onClick={() => {
+            if (!canManageChannel) return
+            setNewNameInput(channelActionMenu.channelName || "")
+            setShowRenameModal({
+              type: "channel",
+              id: channelActionMenu.channelId,
+              spaceId: channelActionMenu.spaceId,
+              currentName: channelActionMenu.channelName || "channel"
+            })
+            setChannelActionMenu(null)
+          }}
+        >
+          <Edit2 />
+          <span>Edit</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="workspace-channel-actions-item is-danger"
+          disabled={!canManageChannel}
+          title={canManageChannel ? "Delete channel" : "Only the space owner can delete this channel"}
+          onClick={() => {
+            if (!canManageChannel) return
+            setShowDeleteConfirm({
+              type: "channel",
+              id: channelActionMenu.channelId,
+              spaceId: channelActionMenu.spaceId
+            })
+            setChannelActionMenu(null)
+          }}
+        >
+          <Trash2 />
+          <span>Delete</span>
+        </button>
+      </div>,
+      document.body
+    )
+  }
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-all ease-in-out duration-500 ${isDarkMode ? 'dark bg-[var(--bg-primary)] text-[var(--text-primary)]' : 'text-slate-700 bg-[#f4f6fb]'} mesh-gradient`}>
@@ -9656,7 +11407,7 @@ export default function CollaborationApp() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in">
           {/* Backdrop with blur */}
           <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
-          
+
           {/* Call Card */}
           <div className="relative z-10 w-full max-w-sm mx-4">
             <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl border border-white/10">
@@ -9664,7 +11415,7 @@ export default function CollaborationApp() {
               <div className="absolute inset-0 opacity-30">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 rounded-full blur-3xl animate-pulse" />
               </div>
-              
+
               {/* Content */}
               <div className="relative p-8 text-center">
                 {/* Timer Circle */}
@@ -9672,11 +11423,11 @@ export default function CollaborationApp() {
                   <div className="relative w-10 h-10">
                     <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                       <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                      <circle 
-                        cx="18" cy="18" r="16" 
-                        fill="none" 
-                        stroke="#10b981" 
-                        strokeWidth="3" 
+                      <circle
+                        cx="18" cy="18" r="16"
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="3"
                         strokeLinecap="round"
                         strokeDasharray={`${(incomingCallCountdown / 10) * 100}, 100`}
                         className="transition-all duration-1000"
@@ -9687,7 +11438,7 @@ export default function CollaborationApp() {
                     </span>
                   </div>
                 </div>
-                
+
                 {/* Caller Avatar with Ring Animation */}
                 <div className="relative inline-block mb-6">
                   <div className="absolute inset-0 bg-emerald-500/30 rounded-full animate-ping" style={{ animationDuration: '1.5s' }} />
@@ -9696,7 +11447,7 @@ export default function CollaborationApp() {
                     {renderAvatar({ avatar: incomingCall.fromAvatar, avatar_url: incomingCall.fromAvatar, name: incomingCall.fromName }, 112) || incomingCall.fromAvatar}
                   </div>
                 </div>
-                
+
                 {/* Caller Info */}
                 <h2 className="text-2xl font-bold text-white mb-1">{incomingCall.fromName}</h2>
                 <p className="text-emerald-400 font-medium flex items-center justify-center gap-2 mb-8">
@@ -9706,7 +11457,7 @@ export default function CollaborationApp() {
                   </span>
                   Incoming Video Call
                 </p>
-                
+
                 {/* Action Buttons */}
                 <div className="flex items-center justify-center gap-6">
                   {/* Decline Button */}
@@ -9720,7 +11471,7 @@ export default function CollaborationApp() {
                     </button>
                     <span className="text-xs text-slate-400 font-medium">Decline</span>
                   </div>
-                  
+
                   {/* Accept Button */}
                   <div className="flex flex-col items-center gap-2">
                     <button
@@ -10474,12 +12225,19 @@ export default function CollaborationApp() {
             setShowTaskModal(false)
             setTaskModalDraft(null)
           }}
-          members={activeMembers}
+          members={taskAssignableMembers}
           currentUser={currentUser}
           spaceId={activeSpace}
+          source={taskCreationSource}
+          channelId={taskCreationSource === "channel" ? activeChannel : null}
+          channelName={taskCreationSource === "channel" ? activeChannelData?.name || "" : ""}
+          spaceName={currentSpace?.name || ""}
           initialTaskText={taskModalDraft?.initialTaskText || ""}
           initialAssignees={taskModalDraft?.initialAssignees || []}
           sourceMessageId={taskModalDraft?.sourceMessageId || null}
+          listId={taskModalDraft?.listId || "my-tasks"}
+          listName={taskModalDraft?.listName || "My Tasks"}
+          listOptions={taskModalDraft?.listOptions || [{ id: "my-tasks", title: "My Tasks" }]}
           onTaskCreated={(payload) => {
             // optimistic UI: add a task message to current chat and add to tasks list
             try {
@@ -10491,6 +12249,14 @@ export default function CollaborationApp() {
                 timestamp: payload.timestamp || new Date().toISOString(),
                 type: 'task',
                 assigned_to: payload.assigned_to,
+                assignee_statuses: payload.assignee_statuses,
+                list_id: payload.list_id,
+                listName: payload.listName,
+                source: payload.source,
+                channel_id: payload.channel_id || payload.channelId,
+                channelName: payload.channelName,
+                spaceId: payload.spaceId || payload.space_id,
+                spaceName: payload.spaceName,
                 contextIds: taskModalDraft?.contextId ? [taskModalDraft.contextId] : [],
                 isDecision: false,
                 taskId: payload.id,
@@ -10498,7 +12264,7 @@ export default function CollaborationApp() {
                 status: 'sent',
                 optimistic: false
               }
-              if (chatId) {
+              if (payload.source === "channel" && chatId) {
                 setMessages(prev => ({
                   ...prev,
                   [chatId]: [...(prev[chatId] || []), newMsg]
@@ -10509,6 +12275,11 @@ export default function CollaborationApp() {
                 patchMessage(payload.sourceMessageId, message => ({
                   ...message,
                   taskId: payload.id,
+                  taskStatus: payload.status || "pending",
+                  assigned_to: payload.assigned_to || [],
+                  assignee_statuses: payload.assignee_statuses || {},
+                  list_id: payload.list_id,
+                  listName: payload.listName,
                 }))
               }
               if (taskModalDraft?.contextId) {
@@ -10828,6 +12599,100 @@ export default function CollaborationApp() {
         </div>
       )}
 
+      {!isMobile && (
+        <aside className={`workspace-app-rail hidden h-full w-[68px] shrink-0 flex-col items-center border-r px-2 py-3 md:flex ${
+          isDarkMode
+            ? "border-white/10 bg-[#0b1118]/95 text-slate-300"
+            : "border-slate-200/80 bg-white/90 text-slate-500 shadow-[12px_0_34px_rgba(15,23,42,0.04)]"
+        }`}>
+          <button
+            type="button"
+            onClick={openHomePage}
+            className={`workspace-app-rail-logo flex h-11 w-11 items-center justify-center rounded-2xl border transition ${
+              isDarkMode
+                ? "border-white/10 bg-white/[0.06] hover:bg-white/[0.09]"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+            title="Spacess home"
+            aria-label="Spacess home"
+          >
+            <SmartImage
+              src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
+              alt="Spacess"
+              className="h-6 w-6 object-contain"
+              loading="eager"
+              fetchPriority="high"
+            />
+          </button>
+
+          <nav className="mt-5 flex w-full flex-1 flex-col items-center gap-1.5" aria-label="Primary app navigation">
+            {appRailItems.map(item => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.action}
+                  title={item.title}
+                  aria-label={item.title}
+                  aria-current={item.active ? "page" : undefined}
+                  className={`workspace-app-rail-button relative flex h-[58px] w-[58px] flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-semibold transition-all ${item.active ? "is-active" : ""} ${
+                    item.active
+                      ? isDarkMode
+                        ? "bg-sky-400/14 text-sky-200 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22)]"
+                        : "bg-sky-50 text-sky-700 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.55)]"
+                      : isDarkMode
+                        ? "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100"
+                        : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  }`}
+                >
+                  {item.active && (
+                    <span className={`workspace-app-rail-active-marker absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full ${isDarkMode ? "bg-sky-300" : "bg-sky-600"}`} />
+                  )}
+                  {item.imageSrc ? (
+                    <SmartImage
+                      src={item.imageSrc}
+                      alt={item.label}
+                      className="workspace-app-rail-image"
+                      fallback={Icon ? <Icon className="h-[19px] w-[19px] shrink-0" strokeWidth={1.9} /> : null}
+                    />
+                  ) : Icon ? (
+                    <Icon className="h-[19px] w-[19px] shrink-0" strokeWidth={1.9} />
+                  ) : null}
+                  <span className="sr-only">{item.label}</span>
+                  {item.badge > 0 && (
+                    <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white shadow-sm">
+                      {item.badge > 9 ? "9+" : item.badge}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </nav>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAvatarPreview(currentUser?.avatar_url || null)
+              setAvatarFile(null)
+              setShowProfileModal(true)
+            }}
+            className={`workspace-app-rail-profile mt-3 flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border transition ${
+              isDarkMode
+                ? "border-white/10 bg-white/[0.06] hover:bg-white/[0.09]"
+                : "border-slate-200 bg-slate-50 hover:bg-white"
+            }`}
+            title="Profile"
+            aria-label="Profile"
+          >
+            {renderAvatar(currentUser, 36)}
+          </button>
+        </aside>
+      )}
+
+      {renderChannelActionMenu()}
+
+      <div className="workspace-shell flex min-w-0 flex-1">
       {activeView === "home" ? (
         <HomeHub
           currentUser={currentUser}
@@ -10855,10 +12720,10 @@ export default function CollaborationApp() {
           onAcceptRequest={notificationId => handleNotificationAction(notificationId, "friend_request")}
           onRejectRequest={notificationId => handleRejectNotification(notificationId, "friend_request")}
           onOpenFile={openHomeFile}
-          onOpenDocumentsHub={handleDocsClick}
+          onOpenDocumentsHub={openDocumentsPage}
           onConnectMail={handleConnectGoogleDocs}
           onRefreshMail={refreshHomeMail}
-          onOpenNotifications={() => setShowNotificationsModal(true)}
+          onOpenNotifications={openNotificationsPage}
           onOpenProfile={() => {
             setAvatarPreview(currentUser?.avatar_url || null)
             setAvatarFile(null)
@@ -10943,23 +12808,12 @@ export default function CollaborationApp() {
             }
           />
         )
-      ) : activeView === "tasks" ? (
-        <TasksHub
-          isDarkMode={isDarkMode}
-          tasks={tasksList}
-          messages={messages}
-          currentUser={currentUser}
-          channels={allWorkspaceChannels}
-          completingTaskId={completingTaskId}
-          onBackHome={() => {
-            pushAppRoute(restoreFromDedicatedPage())
-          }}
-          onMarkTaskComplete={handleMarkTaskComplete}
-        />
       ) : (
         <>
+      {shouldShowSpacesSidebar && (
+        <>
       {/* Mobile Sidebar Overlay */}
-      {isMobile && (mobileView === "spaces" || mobileView === "friends") && (
+      {isMobile && mobileView === "spaces" && (
         <div 
           className="mobile-sidebar-overlay"
           onClick={() => setMobileView("chat")}
@@ -10969,7 +12823,7 @@ export default function CollaborationApp() {
       {/* Left Sidebar - SPACES */}
       <div
         className={`${
-          sidebarCollapsed ? "w-[76px]" : "w-[248px]"
+          sidebarCollapsed ? "w-[76px]" : "w-[300px]"
         } ${isMobile ? (mobileView === "spaces" ? "flex fixed inset-0 left-0 w-screen max-w-none mobile-slide-in-left z-[70]" : "hidden") : "flex"} flex-col transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 flex-shrink-0 liquid-glass-sidebar`}
       >
         {/* Mobile Swipe Indicator */}
@@ -10977,54 +12831,9 @@ export default function CollaborationApp() {
           <div className="swipe-indicator mt-2" />
         )}
         {/* ... (Sidebar Content) ... */}
-        <div className={`px-4 py-3 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[60px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
-          {(!sidebarCollapsed || isMobile) && (
-            <div
-              className="flex items-center gap-3 animate-fade-in cursor-pointer group"
-              onClick={() => {
-                if (!googleCalendarToken) {
-                  setShowCalendarConnectModal(true)
-                } else {
-                  setActiveView("calendar")
-                  setActiveSpace(null)
-                }
-              }}
-            >
-              <SmartImage
-                src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
-                alt="Spaces logo"
-                className="h-7 w-auto object-contain"
-                loading="eager"
-                fetchPriority="high"
-              />
-            </div>
-          )}
+        <div className={`workspace-sidebar-topbar px-4 py-3 ${isMobile ? 'pt-4 pb-4' : ''} flex items-center justify-between h-[60px] border-b ${isDarkMode ? 'border-[var(--border-light)]' : 'border-slate-100/60'}`}>
           <div className="flex gap-2 ml-auto">
-            {isMobile && (
-              <button
-                type="button"
-                onClick={() => { setActiveView("home"); setHomeSection("overview"); setMobileView("chat") }}
-                className={getTopNavIconButtonClass(isDarkMode, activeView === "home")}
-                title="Home"
-                aria-label="Home"
-                aria-current={activeView === "home" ? "page" : undefined}
-              >
-                <HomeIcon className="h-[19px] w-[19px]" strokeWidth={1.9} />
-              </button>
-            )}
-            {isMobile && (
-              <button
-                type="button"
-                onClick={() => { setActiveSpace(null); openTasksPage(); setMobileView('chat') }}
-                className={getTopNavIconButtonClass(isDarkMode, activeView === "tasks")}
-                title="Tasks"
-                aria-label="Tasks"
-                aria-current={activeView === "tasks" ? "page" : undefined}
-              >
-                <ClipboardList className="h-[19px] w-[19px]" strokeWidth={1.9} />
-              </button>
-            )}
-            {isMobile && (
+            {showLegacySidebarControls && isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
                 className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
@@ -11041,7 +12850,7 @@ export default function CollaborationApp() {
                 <X className="w-4 h-4" />
               </button>
             )}
-            {!sidebarCollapsed && !isMobile && (
+            {showLegacySidebarControls && !sidebarCollapsed && !isMobile && (
               <button
                 onClick={() => setShowCreateSpaceModal(true)}
                 className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400 hover:text-sky-600'}`}
@@ -11049,32 +12858,8 @@ export default function CollaborationApp() {
                 <Plus className="w-4 h-4" />
               </button>
             )}
-            {!sidebarCollapsed && !isMobile && (
-              <button
-                type="button"
-                onClick={() => { setActiveView("home"); setHomeSection("overview") }}
-                className={getTopNavIconButtonClass(isDarkMode, activeView === "home")}
-                title="Home"
-                aria-label="Home"
-                aria-current={activeView === "home" ? "page" : undefined}
-              >
-                <HomeIcon className="h-[19px] w-[19px]" strokeWidth={1.9} />
-              </button>
-            )}
-            {!sidebarCollapsed && !isMobile && (
-              <button
-                type="button"
-                onClick={() => { setActiveSpace(null); openTasksPage() }}
-                className={getTopNavIconButtonClass(isDarkMode, activeView === "tasks")}
-                title="Tasks"
-                aria-label="Tasks"
-                aria-current={activeView === "tasks" ? "page" : undefined}
-              >
-                <ClipboardList className="h-[19px] w-[19px]" strokeWidth={1.9} />
-              </button>
-            )}
             {/* Admin dashboard access - visible to company admins/owners of verified orgs */}
-            {!sidebarCollapsed && !isMobile && canOpenAdminDashboard && (
+            {showLegacySidebarControls && !sidebarCollapsed && !isMobile && canOpenAdminDashboard && (
               <button
                 onClick={openAdminDashboard}
                 className="p-1.5 rounded-lg transition-colors hover:bg-slate-100 text-slate-400 hover:text-sky-600"
@@ -11083,27 +12868,16 @@ export default function CollaborationApp() {
                 <Grid3x3 className="w-4 h-4" />
               </button>
             )}
-            {!isMobile && (
-              <button
-                type="button"
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-[#2C2C2C] text-slate-400 hover:text-sky-400' : 'hover:bg-slate-100 text-slate-400'}`}
-                title="Menu"
-                aria-label="Menu"
-              >
-                <Menu className="w-4 h-4" />
-              </button>
-            )}
           </div>
         </div>
 
-        {(!sidebarCollapsed || isMobile) && (
-          <div className="px-4 pt-4 pb-1 animate-fade-in">
+        {showLegacySidebarSearch && (!sidebarCollapsed || isMobile) && (
+          <div className="hidden">
             <div className="relative group">
               <Search className="absolute left-3 top-2.5 w-4 h-4 transition-colors text-slate-400 group-focus-within:text-sky-500" />
               <input
-                type="text"
-                placeholder="Find a space..."
+                type="search"
+                placeholder="Search spaces and DMs..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className={`w-full pl-9 pr-3 py-2 rounded-xl text-[13px] focus:outline-none transition-all ease-in-out duration-300 ${
@@ -11118,106 +12892,339 @@ export default function CollaborationApp() {
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3 space-y-4">
           {(!sidebarCollapsed || isMobile) ? (
-            <div className="animate-fade-in">
+            <>
+            <div className={`${isDirectMessagesShell ? "workspace-dms-sidebar" : "workspace-communities-sidebar"} animate-fade-in`}>
+              {isDirectMessagesShell ? (
+                <>
+                  <div className="workspace-communities-title-row">
+                    <h2>Direct Messages</h2>
+                    <div className="workspace-communities-title-actions">
+                      <button
+                        type="button"
+                        onClick={openHomeConnect}
+                        className="workspace-communities-action-button"
+                        title="New direct message"
+                        aria-label="New direct message"
+                      >
+                        <Plus className="h-5 w-5" strokeWidth={1.8} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="workspace-dm-list">
+                    {friends.length === 0 ? (
+                      <div className="workspace-dm-empty">
+                        <Users className="h-5 w-5" strokeWidth={1.8} />
+                        <span>No direct messages yet</span>
+                      </div>
+                    ) : (
+                      friends.map(friend => {
+                        const isActiveFriend = activeView === "dm" && String(activeDMUser) === String(friend.id)
+                        return (
+                          <button
+                            key={friend.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveDMUser(friend.id)
+                              setHomeActiveDMUser(friend.id)
+                              setActiveChannelTab("messages")
+                              setActiveView("dm")
+                              if (isMobile) setMobileView("chat")
+                              loadDMMessagesForUser(friend.id)
+                              pushAppRoute(`/dm/${encodeURIComponent(slugifyRoutePart(friend.name) || String(friend.id))}`)
+                            }}
+                            className={`workspace-dm-row ${isActiveFriend ? "is-active" : ""}`}
+                          >
+                            <span className="workspace-dm-avatar">
+                              {renderAvatar(friend, 36)}
+                              <span className={`workspace-dm-status ${friend.status === "online" ? "is-online" : ""}`} />
+                            </span>
+                            <span className="workspace-dm-copy">
+                              <span className="workspace-dm-name">{friend.name}</span>
+                              <span className="workspace-dm-meta">{friend.status === "online" ? "Online" : "Offline"}</span>
+                            </span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+              <div className="workspace-communities-title-row">
+                <h2>Spaces</h2>
+                <div className="workspace-communities-title-actions">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateSpaceModal(true)}
+                    className="workspace-communities-action-button"
+                    title="Create space"
+                    aria-label="Create space"
+                  >
+                    <Plus className="h-5 w-5" strokeWidth={1.8} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="workspace-community-list">
+                {pinnedChannels.length > 0 && (
+                  <section className="workspace-community-pinned-section">
+                    <div className="workspace-community-section-label">
+                      <Pin className="h-3.5 w-3.5 fill-current" strokeWidth={1.9} />
+                      <span>Pinned</span>
+                    </div>
+                    <div className="workspace-community-channel-list">
+                      {pinnedChannels.map(item => {
+                        const fallback = findSpaceAndChannel(item.channelId)
+                        const pinnedSpace =
+                          fallback.space ||
+                          spaces.find(space => String(space.id) === String(item.spaceId)) ||
+                          { id: item.spaceId, name: item.spaceName || "Space" }
+                        const pinnedChannel =
+                          fallback.channel ||
+                          { id: item.channelId, name: item.channelName || "channel" }
+
+                        return renderWorkspaceCommunityChannel(pinnedSpace, pinnedChannel, {
+                          pinned: true,
+                          pinnedItem: item,
+                          key: `pinned-visible-${item.spaceId || pinnedSpace.id}-${item.channelId}`
+                        })
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {spaces.map((space, spaceIndex) => {
+                  const accessibleChannels = getAccessibleChannelsForSpace(space)
+                  const isSpaceActive = activeView === "channel" && String(activeSpace) === String(space.id)
+
+                  return (
+                    <section key={space.id} className="workspace-community-section">
+                      {spaceIndex > 0 && <div className="workspace-community-divider" />}
+                      <button
+                        type="button"
+                        onClick={() => toggleSpaceExpansion(space.id)}
+                        className={`workspace-community-space-heading ${isSpaceActive ? "is-active" : ""}`}
+                        title={space.name}
+                      >
+                        <span className="workspace-community-space-icon">
+                          <SpaceImageIcon space={space} index={spaceIndex} className="h-7 w-7" />
+                        </span>
+                        <span className="workspace-community-space-name">{space.name}</span>
+                        {space.expanded === false ? (
+                          <ChevronRight className="workspace-community-space-chevron" strokeWidth={1.9} />
+                        ) : (
+                          <ChevronDown className="workspace-community-space-chevron" strokeWidth={1.9} />
+                        )}
+                      </button>
+
+                      {space.expanded !== false && (
+                        <div className="workspace-community-channel-list">
+                          {accessibleChannels.map(channel =>
+                            renderWorkspaceCommunityChannel(space, channel, {
+                              key: `space-visible-${space.id}-${channel.id}`
+                            })
+                          )}
+
+                          {space.ownerId === currentUser?.id && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveSpace(space.id)
+                                setShowChannelModal(true)
+                              }}
+                              className="workspace-community-add-channel"
+                            >
+                              <Plus className="h-4 w-4" strokeWidth={1.6} />
+                              <span>Add channel</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  )
+                })}
+              </div>
+                </>
+              )}
+            </div>
+            <div className="hidden">
               {/* Conditional Rendering: Show Search Results or Standard Tree */}
               {debouncedSearchQuery.trim().length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="px-2 mb-1 flex items-center justify-between">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                       Search Results
                     </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                      {spaceSearchResults.length}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500"
+                    }`}>
+                      {spaceSearchResults.length + dmSearchResults.length}
                     </span>
                   </div>
-                  {spaceSearchResults.length === 0 ? (
+                  {spaceSearchResults.length + dmSearchResults.length === 0 ? (
                     <div className="text-center py-8 text-slate-500 text-xs font-medium">
                       No results found
                     </div>
                   ) : (
-                    spaceSearchResults.map(result => (
-                      <div
-                        key={result.id}
-                        onClick={() => {
-                          if (result.spaceId && result.channelId) {
-                            handleChannelNavigation(
-                              result.spaceId,
-                              result.channelId
-                            )
-
-                            // Highlight the search query in the channel
-                            setHighlightTerm(debouncedSearchQuery)
-
-                            if (result.messageId) {
-                              // Scroll to the message and pin it for review
-                              setTargetMessageId(result.messageId)
-                              setPinnedMessageId(result.messageId)
-                            } else {
-                              // If we don't have a specific message, try to find the first message in the channel that matches
-                              ;(async () => {
-                                try {
-                                  const chatId = Number(result.channelId)
-                                  const existing = messages[chatId]
-                                  const msgs =
-                                    Array.isArray(existing) && existing.length > 0
-                                      ? existing
-                                      : (await Storage.getMessages(chatId)) || []
-
-                                  const firstMatch = (msgs || []).find(m =>
-                                    m.text &&
-                                    m.text
-                                      .toLowerCase()
-                                      .includes(debouncedSearchQuery.toLowerCase())
+                    <>
+                      {spaceSearchResults.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Spaces
+                          </div>
+                          {spaceSearchResults.map(result => (
+                            <button
+                              key={result.id}
+                              type="button"
+                              onClick={() => {
+                                if (result.spaceId && result.channelId) {
+                                  handleChannelNavigation(
+                                    result.spaceId,
+                                    result.channelId
                                   )
 
-                                  if (firstMatch) {
-                                    setTargetMessageId(firstMatch.id)
-                                    setPinnedMessageId(firstMatch.id)
+                                  // Highlight the search query in the channel
+                                  setHighlightTerm(debouncedSearchQuery)
+
+                                  if (result.messageId) {
+                                    // Scroll to the message and pin it for review
+                                    setTargetMessageId(result.messageId)
+                                    setPinnedMessageId(result.messageId)
+                                  } else {
+                                    // If we don't have a specific message, try to find the first message in the channel that matches
+                                    ;(async () => {
+                                      try {
+                                        const chatId = Number(result.channelId)
+                                        const existing = messages[chatId]
+                                        const msgs =
+                                          Array.isArray(existing) && existing.length > 0
+                                            ? existing
+                                            : (await Storage.getMessages(chatId)) || []
+
+                                        const firstMatch = (msgs || []).find(m =>
+                                          m.text &&
+                                          m.text
+                                            .toLowerCase()
+                                            .includes(debouncedSearchQuery.toLowerCase())
+                                        )
+
+                                        if (firstMatch) {
+                                          setTargetMessageId(firstMatch.id)
+                                          setPinnedMessageId(firstMatch.id)
+                                        } else {
+                                          setPinnedMessageId(null)
+                                          setTargetMessageId(null)
+                                        }
+                                      } catch (e) {
+                                        console.error("Search navigation failed to load messages", e)
+                                        setPinnedMessageId(null)
+                                        setTargetMessageId(null)
+                                      }
+                                    })()
+                                  }
+                                } else if (result.spaceId) {
+                                  const matchedSpace = spaces.find(space => String(space.id) === String(result.spaceId))
+                                  const firstChannel = getAccessibleChannelsForSpace(matchedSpace)[0]
+                                  if (firstChannel) {
+                                    handleChannelNavigation(result.spaceId, firstChannel.id)
+                                  } else {
+                                    setActiveSpace(result.spaceId)
+                                    setActiveView("channel")
+                                  }
+                                }
+                              }}
+                              className={`w-full rounded-xl border p-2 text-left shadow-sm transition-all group ${
+                                isDarkMode
+                                  ? "border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.07]"
+                                  : "border-slate-100 bg-white hover:shadow-md"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <span
+                                  className={`p-1.5 rounded-lg ${
+                                    result.type === "message"
+                                      ? "bg-sky-50 text-sky-500"
+                                      : isDarkMode
+                                        ? "bg-white/10 text-slate-300"
+                                        : "bg-slate-100 text-slate-500"
+                                  }`}
+                                >
+                                  {result.type === "space" ? (
+                                    <Briefcase className="w-3 h-3" />
+                                  ) : result.type === "channel" ? (
+                                    <Hash className="w-3 h-3" />
+                                  ) : (
+                                    <MessageSquare className="w-3 h-3" />
+                                  )}
+                                </span>
+                                <span className={`text-xs font-bold ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                                  {result.title}
+                                </span>
+                              </div>
+                              <div className={`text-xs truncate pl-9 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                                {renderWithHighlight(
+                                  result.subtitle,
+                                  debouncedSearchQuery
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {dmSearchResults.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Direct Messages
+                          </div>
+                          {dmSearchResults.map(result => (
+                            <button
+                              key={result.id}
+                              type="button"
+                              onClick={() => {
+                                if (result.userId) {
+                                  setActiveDMUser(result.userId)
+                                  setActiveView("dm")
+                                  if (isMobile) setMobileView("chat")
+                                  if (result.messageId) {
+                                    setTargetMessageId(result.messageId)
+                                    setPinnedMessageId(result.messageId)
+                                    setHighlightTerm(debouncedSearchQuery)
                                   } else {
                                     setPinnedMessageId(null)
-                                    setTargetMessageId(null)
                                   }
-                                } catch (e) {
-                                  console.error("Search navigation failed to load messages", e)
-                                  setPinnedMessageId(null)
-                                  setTargetMessageId(null)
                                 }
-                              })()
-                            }
-                          } else if (result.spaceId) {
-                            setActiveSpace(result.spaceId)
-                          }
-                        }}
-                        className="p-2 rounded-xl bg-white border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group"
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className={`p-1.5 rounded-lg ${
-                              result.type === "message"
-                                ? "bg-sky-50 text-sky-500"
-                                : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {result.type === "space" ? (
-                              <Briefcase className="w-3 h-3" />
-                            ) : result.type === "channel" ? (
-                              <Hash className="w-3 h-3" />
-                            ) : (
-                              <MessageSquare className="w-3 h-3" />
-                            )}
-                          </span>
-                          <span className="text-xs font-bold text-slate-700">
-                            {result.title}
-                          </span>
+                              }}
+                              className={`sidebar-section-row flex min-h-11 w-full items-center gap-3 px-2.5 py-2 text-left transition-colors duration-150 ease-in-out ${
+                                activeView === "dm" && activeDMUser === result.userId
+                                  ? isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-slate-900"
+                                  : isDarkMode ? "text-slate-300 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900"
+                              }`}
+                            >
+                              <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-base">
+                                {result.icon}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-center justify-between gap-2">
+                                  <span className="block truncate text-[13px] font-semibold">
+                                    {result.title}
+                                  </span>
+                                  {result.timestamp && (
+                                    <span className={`shrink-0 text-[10px] ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+                                      {formatTime(result.timestamp)}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className={`block truncate text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                                  {renderWithHighlight(result.subtitle, debouncedSearchQuery)}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
                         </div>
-                        <div className="text-xs text-slate-500 truncate pl-9">
-                          {renderWithHighlight(
-                            result.subtitle,
-                            debouncedSearchQuery
-                          )}
-                        </div>
-                      </div>
-                    ))
+                      )}
+                    </>
                   )}
                 </div>
               ) : (
@@ -11259,36 +13266,6 @@ export default function CollaborationApp() {
                     </span>
                   </button>
 
-                  <section className="sidebar-section-group">
-                    <div className="sidebar-section-header">
-                      <span>
-                        Timesavers
-                      </span>
-                      {timesaversLoading && (
-                        <Loader2 className={`h-3.5 w-3.5 animate-spin ${isDarkMode ? "text-slate-500" : "text-slate-400"}`} />
-                      )}
-                    </div>
-
-                    <div className="sidebar-section-list">
-                      <button
-                        onClick={openStarredMessages}
-                        className={`sidebar-section-row flex h-8 w-full items-center gap-2.5 px-2.5 text-[13px] font-medium transition-colors duration-150 ease-in-out ${
-                          activeView === "starred"
-                            ? (isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-slate-100" : "bg-[rgba(59,130,246,0.12)] text-sky-800")
-                            : (isDarkMode ? "text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-slate-100" : "text-slate-600 hover:bg-[rgba(15,23,42,0.06)] hover:text-slate-900")
-                        }`}
-                      >
-                        <Star className={`h-3.5 w-3.5 ${activeView === "starred" ? "fill-current" : ""}`} />
-                        <span className="min-w-0 flex-1 truncate text-left">Starred</span>
-                        {starredMessages.length > 0 && (
-                          <span className={`text-[10px] font-semibold ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                            {starredMessages.length}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </section>
-
                   {pinnedChannels.length > 0 && (
                     <section className="sidebar-section-group">
                       <div className="sidebar-section-header">
@@ -11324,17 +13301,35 @@ export default function CollaborationApp() {
                   )}
 
                   <section className="sidebar-section-group">
-                    <div className="sidebar-section-header">
-                      <span>
-                        Your Spaces
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSidebarSectionOpen(prev => ({
+                          ...prev,
+                          spaces: !prev.spaces
+                        }))
+                      }
+                      className={`sidebar-section-header w-full cursor-pointer rounded-xl transition-colors ${
+                        isDarkMode ? "hover:bg-white/[0.06]" : "hover:bg-slate-100/70"
+                      }`}
+                      aria-expanded={sidebarSectionOpen.spaces}
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        {sidebarSectionOpen.spaces ? (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="truncate">Your Spaces</span>
                       </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-[#2C2C2C] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
                         {spaces.length}
                       </span>
-                    </div>
+                    </button>
 
+                    {sidebarSectionOpen.spaces && (
                     <div className="sidebar-section-list">
-                      {spaces.map(space => (
+                      {spaces.map((space, spaceIndex) => (
                         <div key={space.id} className="mb-1">
                           <div
                             className={`sidebar-section-row flex h-9 items-center gap-2 px-2 cursor-pointer transition-colors duration-150 ease-in-out group ${
@@ -11350,14 +13345,8 @@ export default function CollaborationApp() {
                               toggleSpaceExpansion(space.id)
                             }}
                           >
-                        <span
-                          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
-                            activeView === "channel" && activeSpace === space.id
-                              ? (isDarkMode ? "bg-white/10 text-slate-100" : "bg-white/70 text-slate-700")
-                              : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-500")
-                          }`}
-                        >
-                          <SpaceFolderIcon src={getSpaceVectorIconSrc(isDarkMode)} className="h-4 w-4" />
+                        <span className="flex h-7 w-7 items-center justify-center rounded-none bg-transparent transition-colors">
+                          <SpaceImageIcon space={space} index={spaceIndex} className="h-5 w-5" />
                         </span>
                         <span
                           className={`font-semibold text-[13px] truncate flex-1 transition-colors ${
@@ -11497,9 +13486,11 @@ export default function CollaborationApp() {
                                       className="p-1 text-blue-500 hover:text-blue-600 cursor-pointer"
                                       onClick={e => {
                                         e.stopPropagation()
+                                        setNewNameInput(channel.name)
                                         setShowRenameModal({
                                           type: "channel",
                                           id: channel.id,
+                                          spaceId: space.id,
                                           currentName: channel.name
                                         })
                                       }}
@@ -11512,7 +13503,8 @@ export default function CollaborationApp() {
                                         e.stopPropagation()
                                         setShowDeleteConfirm({
                                           type: "channel",
-                                          id: channel.id
+                                          id: channel.id,
+                                          spaceId: space.id
                                         })
                                       }}
                                     >
@@ -11546,10 +13538,115 @@ export default function CollaborationApp() {
                     </div>
                   ))}
                     </div>
+                  )}
+                  </section>
+
+                  <section className={`rounded-[20px] border p-3.5 ${
+                    isDarkMode ? "border-white/10 bg-[#111111]" : "border-[#eef2f6] bg-[#fbfdff]"
+                  }`}>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSidebarSectionOpen(prev => ({
+                            ...prev,
+                            dms: !prev.dms
+                          }))
+                        }
+                        className={`inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left text-sm font-semibold transition-colors ${
+                          isDarkMode ? "text-slate-200 hover:bg-white/[0.06]" : "text-[#374151] hover:bg-[#f4f7fb]"
+                        }`}
+                        aria-expanded={sidebarSectionOpen.dms}
+                      >
+                        {sidebarSectionOpen.dms ? (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        )}
+                        <span className="truncate">Direct Messages</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openHomeConnect}
+                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+                          isDarkMode
+                            ? "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                            : "text-[#6b7280] hover:bg-[#f4f7fb] hover:text-[#111827]"
+                        }`}
+                        title="Start a new direct message"
+                        aria-label="Start a new direct message"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {sidebarSectionOpen.dms && (
+                    <div className="flex min-h-[220px] flex-col gap-2 overflow-y-auto pr-1">
+                      {friends.length === 0 ? (
+                        <div className="flex flex-1 flex-col items-center justify-center px-3 py-6 text-center">
+                          <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full ${
+                            isDarkMode ? "bg-slate-800 text-slate-500" : "bg-slate-100/80 text-slate-400"
+                          }`}>
+                            <Users className="h-6 w-6" />
+                          </div>
+                          <p className={`mb-3 text-sm font-medium ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>
+                            No friends yet.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={openHomeConnect}
+                            className={`text-xs font-bold hover:underline ${isDarkMode ? "text-sky-400" : "text-sky-600"}`}
+                          >
+                            Find people
+                          </button>
+                        </div>
+                      ) : (
+                        friends.map(friend => (
+                          <button
+                            key={friend.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveDMUser(friend.id)
+                              setActiveView("dm")
+                              if (isMobile) setMobileView("chat")
+                            }}
+                            className={`flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-2 text-left transition-colors duration-150 ease-in-out ${
+                              activeView === "dm" && activeDMUser === friend.id
+                                ? isDarkMode ? "bg-white/[0.07]" : "bg-[#f4f7fb]"
+                                : isDarkMode ? "hover:bg-white/[0.04]" : "hover:bg-white"
+                            }`}
+                          >
+                            <span className="relative shrink-0">
+                              <span className={`flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-base ${
+                                isDarkMode ? "bg-white/[0.05]" : "bg-[#f3f6fa]"
+                              }`}>
+                                {renderAvatar(friend, 36)}
+                              </span>
+                              <span
+                                className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 ${
+                                  friend.status === "online"
+                                    ? "bg-emerald-400"
+                                    : "bg-slate-300"
+                                } ${isDarkMode ? "border-[#0f1724]" : "border-white"}`}
+                              />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className={`block truncate text-sm font-medium ${
+                                isDarkMode ? "text-slate-100" : "text-[#111827]"
+                              }`}>
+                                {friend.name}
+                              </span>
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                   </section>
                 </div>
               )}
             </div>
+            </>
           ) : (
             <div className="flex flex-col items-center gap-2 mt-1 animate-fade-in">
               <button
@@ -11571,7 +13668,7 @@ export default function CollaborationApp() {
                 <Calendar className="w-4 h-4" />
               </button>
               <div className="w-7 h-px my-1 bg-slate-200"></div>
-              {spaces.map(s => {
+              {spaces.map((s, spaceIndex) => {
                 const accessibleChannels = getAccessibleChannelsForSpace(s)
                 const isMenuOpen = collapsedSpaceMenu?.spaceId === s.id
                 return (
@@ -11594,14 +13691,8 @@ export default function CollaborationApp() {
                       openCollapsedSpaceMenu(s, event)
                     }}
                   >
-                    <span
-                      className={`flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold uppercase ${
-                        activeSpace === s.id || isMenuOpen
-                          ? (isDarkMode ? "bg-white/10 text-slate-100" : "bg-white/70 text-sky-700")
-                          : (isDarkMode ? "bg-[#2C2C2C] text-slate-300" : "bg-slate-100 text-slate-600")
-                      }`}
-                    >
-                      {(s.name || "?").trim().charAt(0) || "?"}
+                    <span className="flex h-7 w-7 items-center justify-center rounded-none bg-transparent text-[13px] font-bold uppercase">
+                      <SpaceImageIcon space={s} index={spaceIndex} className="h-5 w-5" />
                     </span>
                   </button>
                 )
@@ -11616,11 +13707,53 @@ export default function CollaborationApp() {
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* ... (Main Content, Headers, etc.) ... */}
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 min-h-0 relative ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
+      <div className={`workspace-main-shell flex-1 flex flex-col min-w-0 min-h-0 relative ${activeView === "tasks" ? "workspace-main-shell--tasks" : ""} ${isMobile && mobileView !== "chat" ? "hidden" : ""}`}>
+        {shouldShowWorkspaceSearch && (
+          <div className="workspace-global-search-row">
+            <div className="workspace-global-search-wrap">
+              <Search className="workspace-global-search-icon" strokeWidth={1.8} />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={event => {
+                  setWorkspaceSearchDismissed(false)
+                  setSearchQuery(event.target.value)
+                }}
+                onFocus={() => {
+                  if (searchQuery.trim()) setWorkspaceSearchDismissed(false)
+                }}
+                placeholder="Search"
+                className="workspace-global-search-input"
+                aria-label="Search workspace"
+              />
+              {searchQuery.trim().length > 0 && (
+                <button
+                  type="button"
+                  className="workspace-global-search-clear"
+                  onClick={() => {
+                    setSearchQuery("")
+                    setWorkspaceSearchDismissed(false)
+                    setPinnedMessageId(null)
+                    setTargetMessageId(null)
+                    setHighlightTerm("")
+                    setFileSearchResults([])
+                  }}
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {shouldShowWorkspaceSearch && workspaceSearchOpen && renderWorkspaceSearchPage()}
         {/* VIEW: VIDEO MEETING / CALENDAR (No changes needed) ... */}
         {activeView === "meeting" ? (
           <div className="flex-1 flex flex-col relative bg-slate-900">
@@ -11862,85 +13995,184 @@ export default function CollaborationApp() {
             </div>
           </div>
         ) : activeView === "starred" ? (
-          <div className={`flex-1 overflow-hidden ${isDarkMode ? "bg-[#0d0001] text-slate-100" : "bg-white text-slate-900"}`}>
-            <div className={`h-[80px] flex items-center justify-between px-8 border-b ${isDarkMode ? "border-white/10" : "border-slate-200/70"}`}>
-              <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                  isDarkMode ? "bg-[rgba(96,165,250,0.16)] text-sky-200" : "bg-[rgba(59,130,246,0.12)] text-sky-700"
-                }`}>
-                  <Star className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold">Starred messages</h2>
-                  <p className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                    {starredMessages.length ? `${starredMessages.length} saved message${starredMessages.length === 1 ? "" : "s"}` : "No starred messages yet"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="h-[calc(100%-80px)] overflow-y-auto px-6 py-5">
-              {starredMessages.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="text-center">
-                    <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
-                      isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-slate-100 text-slate-400"
-                    }`}>
-                      <Star className="h-7 w-7" />
-                    </div>
-                    <div className={`text-sm font-semibold ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>No starred messages yet</div>
+          <div className={`workspace-starred-frame workspace-dedicated-frame ${isDarkMode ? "is-dark" : ""}`}>
+            <aside className="workspace-starred-sidebar">
+              <div className="workspace-starred-sidebar-header">
+                <div className="workspace-starred-title-row">
+                  <span className="workspace-starred-icon">
+                    <Star className="h-5 w-5 fill-current" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2>Starred messages</h2>
+                    <p>{starredMessages.length ? `${starredMessages.length} saved message${starredMessages.length === 1 ? "" : "s"}` : "No starred messages yet"}</p>
                   </div>
                 </div>
-              ) : (
-                <div className="mx-auto max-w-4xl space-y-2">
-                  {starredMessages.map(item => {
+              </div>
+
+              <div className="workspace-starred-list">
+                {starredMessages.length === 0 ? (
+                  <div className="workspace-starred-empty">
+                    <Star className="h-7 w-7" />
+                    <span>No starred messages yet</span>
+                  </div>
+                ) : (
+                  starredMessages.map(item => {
                     const message = item.message || {}
-                    const preview = String(message.text || "Attachment").replace(/\s+/g, " ").trim()
+                    const attachments = Array.isArray(message.attachments) ? message.attachments : []
+                    const messageText = String(message.text || message.message || "").replace(/\s+/g, " ").trim()
+                    const preview = messageText || (attachments.length ? `${attachments.length} attachment${attachments.length === 1 ? "" : "s"}` : "Attachment")
                     const dateLabel = formatDateLabel(message.timestamp || item.createdAt, timeTicker)
-                    const senderName = item.sender?.name || "Unknown user"
-                    const contextLabel = [item.spaceName, item.channelName ? `#${item.channelName}` : ""].filter(Boolean).join(" / ")
+                    const senderId = item.sender?.id || message.userId || message.senderId || message.createdBy
+                    const senderName = item.sender?.name || message.userName || message.senderName || getUser(senderId)?.name || "Unknown user"
+                    const channelLabel = item.channelName && item.channelName !== "Direct message" ? `#${item.channelName}` : item.channelName
+                    const contextLabel = [item.spaceName, channelLabel].filter(Boolean).join(" / ") || "Direct message"
+                    const itemKey = getStarredItemKey(item)
+                    const isSelected = selectedStarredMessage && getStarredItemKey(selectedStarredMessage) === itemKey
+
                     return (
-                      <article
-                        key={`starred-${item.chatId}-${item.messageId}`}
-                        onClick={() => openStarredMessage(item)}
-                        className={`group flex cursor-pointer items-start gap-3 rounded-2xl px-4 py-3 transition-colors ${
-                          isDarkMode ? "hover:bg-white/[0.06]" : "hover:bg-slate-100"
-                        }`}
+                      <button
+                        key={`starred-${itemKey}`}
+                        type="button"
+                        onClick={() => setActiveStarredMessageId(itemKey)}
+                        className={`workspace-starred-list-item ${isSelected ? "is-active" : ""}`}
                       >
-                        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                          isDarkMode ? "bg-amber-400/15 text-amber-300" : "bg-amber-50 text-amber-500"
-                        }`}>
+                        <span className="workspace-starred-list-avatar">
                           <Star className="h-4 w-4 fill-current" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className={`truncate text-sm font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>{senderName}</span>
-                            <span className={`shrink-0 text-xs ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>{dateLabel}</span>
-                          </div>
-                          <div className={`mt-0.5 truncate text-sm ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>{preview}</div>
-                          <div className={`mt-1 truncate text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{contextLabel}</div>
-                        </div>
+                        </span>
+                        <span className="workspace-starred-list-copy">
+                          <span className="workspace-starred-list-meta">
+                            <span>{senderName}</span>
+                            <span>{dateLabel}</span>
+                          </span>
+                          <span className="workspace-starred-list-preview">{preview}</span>
+                          <span className="workspace-starred-list-context">{contextLabel}</span>
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </aside>
+
+            <main className="workspace-starred-detail">
+              <div className="workspace-starred-detail-panel">
+                {selectedStarredMessage ? (() => {
+                  const item = selectedStarredMessage
+                  const message = item.message || {}
+                  const attachments = Array.isArray(message.attachments) ? message.attachments : []
+                  const messageText = String(message.text || message.message || "").trim()
+                  const timestamp = message.timestamp || item.createdAt
+                  const dateLabel = `${formatDateLabel(timestamp, timeTicker)}${timestamp ? ` at ${formatTime(timestamp)}` : ""}`
+                  const channelLabel = item.channelName && item.channelName !== "Direct message" ? `#${item.channelName}` : item.channelName
+                  const starredSpaceIndex = spaces.findIndex(space => String(space.id) === String(item.spaceId))
+                  const starredSpace = starredSpaceIndex >= 0
+                    ? spaces[starredSpaceIndex]
+                    : item.spaceId
+                      ? { id: item.spaceId, name: item.spaceName || "Space", iconType: item.iconType }
+                      : null
+                  const locationTitle = item.spaceName || "Direct message"
+                  const locationSubtitle = channelLabel || (item.channelName || "Saved message")
+
+                  return (
+                    <div className="workspace-starred-detail-inner">
+                      <div className="workspace-starred-detail-header">
                         <button
                           type="button"
-                          onClick={event => {
-                            event.stopPropagation()
-                            toggleMessageStar({ id: item.messageId })
-                          }}
-                          className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${
-                            isDarkMode ? "text-slate-400 hover:bg-white/10 hover:text-slate-100" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                          }`}
-                          aria-label="Unstar message"
-                          title="Unstar message"
+                          onClick={() => openStarredMessage(item)}
+                          className="workspace-starred-detail-location"
+                          title="Open this message in its original channel"
                         >
-                          <X className="h-4 w-4" />
+                          <span className="workspace-starred-detail-space-icon">
+                            {starredSpace ? (
+                              <SpaceImageIcon
+                                space={starredSpace}
+                                index={starredSpaceIndex >= 0 ? starredSpaceIndex : 0}
+                                className="h-7 w-7"
+                              />
+                            ) : (
+                              <UserIcon className="h-5 w-5" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="workspace-starred-detail-name">{locationTitle}</div>
+                            <div className="workspace-starred-detail-context">{locationSubtitle}</div>
+                          </div>
                         </button>
-                      </article>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+                        <div className="workspace-starred-detail-actions">
+                          <button type="button" onClick={() => openStarredMessage(item)} className="workspace-starred-action-button">
+                            <ExternalLink className="h-4 w-4" />
+                            Open original
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleMessageStar({ id: item.messageId })}
+                            className="workspace-starred-action-button is-danger"
+                          >
+                            <X className="h-4 w-4" />
+                            Unstar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="workspace-starred-message-card">
+                        <div className="workspace-starred-message-topline">
+                          <span className="workspace-starred-message-badge">
+                            <Star className="h-3.5 w-3.5 fill-current" />
+                            Starred
+                          </span>
+                          <span>{dateLabel}</span>
+                        </div>
+
+                        {messageText ? (
+                          <p className="workspace-starred-message-text">{messageText}</p>
+                        ) : (
+                          <div className="workspace-starred-message-empty">This starred item does not include saved message text.</div>
+                        )}
+
+                        {attachments.length > 0 && (
+                          <div className="workspace-starred-attachments">
+                            <div className="workspace-starred-attachments-title">Attachments</div>
+                            <div className="workspace-starred-attachment-list">
+                              {attachments.map((attachment, index) => {
+                                const attachmentName = attachment.name || attachment.filename || `Attachment ${index + 1}`
+                                const attachmentMeta = [
+                                  attachment.mimeType || attachment.type,
+                                  attachment.size ? formatDocsSize(attachment.size) : "",
+                                ].filter(Boolean).join(" | ")
+
+                                return (
+                                  <button
+                                    key={`${item.messageId}-attachment-${attachment.id || attachmentName || index}`}
+                                    type="button"
+                                    onClick={() => openAttachment(attachment)}
+                                    className="workspace-starred-attachment"
+                                  >
+                                    <FileIcon className="h-4 w-4" />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="workspace-starred-attachment-name">{attachmentName}</span>
+                                      {attachmentMeta && <span className="workspace-starred-attachment-meta">{attachmentMeta}</span>}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })() : (
+                  <div className="workspace-starred-detail-empty">
+                    <Star className="h-10 w-10" />
+                    <h3>No starred message selected</h3>
+                    <p>Star a message from any conversation and it will appear here.</p>
+                  </div>
+                )}
+              </div>
+            </main>
           </div>
+        ) : activeView === "notifications" ? (
+          renderNotificationsPage()
         ) : activeView === "contexts" ? (
           currentContext ? (
             <LivingContextPanel
@@ -12007,18 +14239,85 @@ export default function CollaborationApp() {
             />
           )
         ) : activeView === "tasks" ? (
-          <TasksHub
-            isDarkMode={isDarkMode}
-            tasks={tasksList}
-            messages={messages}
-            currentUser={currentUser}
-            channels={allWorkspaceChannels}
-            completingTaskId={completingTaskId}
-            onBackHome={() => {
-              pushAppRoute(restoreFromDedicatedPage())
-            }}
-            onMarkTaskComplete={handleMarkTaskComplete}
-          />
+          <div className={`workspace-dedicated-frame ${isDarkMode ? "is-dark" : ""}`}>
+            <TasksHub
+              isDarkMode={isDarkMode}
+              tasks={tasksList}
+              messages={messages}
+              currentUser={currentUser}
+              members={taskAssignableMembers}
+              channels={allWorkspaceChannels}
+              completingTaskId={completingTaskId}
+              assignedNewCount={unreadAssignedTaskNotifications.length}
+              focusTaskId={focusedTaskId}
+              onAssignedScopeOpen={markAssignedTaskNotificationsRead}
+              onCreateTask={(list, listOptions) => {
+                setTaskModalDraft({
+                  source: "tasks_section",
+                  listId: list?.id || "my-tasks",
+                  listName: list?.title || "My Tasks",
+                  listOptions: Array.isArray(listOptions) && listOptions.length > 0
+                    ? listOptions
+                    : [{ id: list?.id || "my-tasks", title: list?.title || "My Tasks" }],
+                })
+                setShowTaskModal(true)
+              }}
+              onBackHome={() => {
+                pushAppRoute(restoreFromDedicatedPage())
+              }}
+              onMarkTaskComplete={handleMarkTaskComplete}
+              onDeleteCompletedTasks={handleDeleteCompletedTasks}
+            />
+          </div>
+        ) : activeView === "documents" ? (
+          <div className={`workspace-documents-frame ${isDarkMode ? "is-dark" : ""}`}>
+            <DocumentsHub
+              embedded
+              isDarkMode={isDarkMode}
+              googleAccessToken={googleAccessToken}
+              loadingDocs={loadingDocs}
+              docsError={docsError}
+              selectedAppFilter={selectedAppFilter}
+              docsOverview={docsOverview}
+              docsCollectionSummary={docsCollectionSummary}
+              googleDocs={googleDocs}
+              sortedGoogleDocs={sortedGoogleDocs}
+              sharedChatDocs={sharedChatDocs}
+              gmailAttachments={dedupedGmailAttachments}
+              formatDocsDate={formatDocsDate}
+              formatDocsSize={formatDocsSize}
+              onBackHome={closeDocumentsPage}
+              onConnectGoogle={handleConnectGoogleDocs}
+              onReconnectGoogle={handleDocumentsReconnect}
+              onRefresh={handleDocumentsRefresh}
+              onOpenConnections={() => setShowConnectAppsModal(true)}
+              onSelectFilter={handleDocumentsFilterSelect}
+              onOpenAttachment={openAttachment}
+              onAddDocument={handleHubAddDocument}
+            />
+          </div>
+        ) : activeView === "connect" ? (
+          <div className={`workspace-dedicated-frame ${isDarkMode ? "is-dark" : ""}`}>
+            <div className={`h-full min-h-0 w-full overflow-y-auto ${
+              isDarkMode ? "bg-[#0d1117] text-slate-100" : "bg-[#f6f8fb] text-slate-900"
+            }`}>
+              <div className="mx-auto flex min-h-full w-full max-w-[1500px] flex-col px-4 py-4 sm:px-6">
+                <ConnectHub
+                  currentUser={currentUser}
+                  friends={homeFriends}
+                  pendingRequests={pendingFriendRequests}
+                  renderAvatar={renderAvatar}
+                  onOpenDM={openHomeDM}
+                  onAcceptRequest={notificationId => handleNotificationAction(notificationId, "friend_request")}
+                  onRejectRequest={notificationId => handleRejectNotification(notificationId, "friend_request")}
+                  onConnectUser={sendFriendRequest}
+                  preferredPane={connectPreferredPane}
+                  onPaneChange={setConnectPreferredPane}
+                  isDarkMode={isDarkMode}
+                />
+              </div>
+            </div>
+          </div>
         ) : (
           /* VIEW: CHANNEL / DM */
           <>
@@ -12026,7 +14325,14 @@ export default function CollaborationApp() {
             <div className={`workspace-topbar h-[80px] sticky top-0 z-30 ${isMobile ? 'hidden' : 'flex'} items-center justify-between gap-3 px-5 mx-0 w-full mt-0`}>
               {/* Liquid Glass Channel Info Container */}
               <div
-                onClick={() => setShowMemberDetails(prev => !prev)}
+                onClick={() => {
+                  if (activeView === "channel") {
+                    setShowMemberDetails(false)
+                    setActiveChannelTab("members")
+                  } else {
+                    setShowMemberDetails(prev => !prev)
+                  }
+                }}
                 className={`liquid-glass-header workspace-channel-summary flex items-center gap-2.5 cursor-pointer group px-2.5 py-1.5 transition-all ease-in-out duration-300 hover:scale-[1.01]`}
               >
                 {activeView === "dm" ? (
@@ -12060,12 +14366,7 @@ export default function CollaborationApp() {
                     </div>
                     <div>
                       <h2 className={`font-bold text-[14px] leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'} flex items-center gap-1.5`}>
-                        {/* Header Breadcrumb Context */}
-                        <span className={`font-semibold max-w-[15vw] truncate block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} title={currentSpace?.name}>
-                          {currentSpace?.name}
-                        </span>
-                        <ChevronRight className={`w-3 h-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
-                        <span className="truncate max-w-[17vw] block" title={getActiveViewName().replace('#','')}>
+                        <span className="truncate max-w-[24vw] block" title={getActiveViewName().replace('#','')}>
                           {getActiveViewName().replace("#", "")}
                         </span>
                       </h2>
@@ -12109,23 +14410,6 @@ export default function CollaborationApp() {
 
               {/* Action Buttons with Liquid Glass */}
               <div className="workspace-navbar-actions flex items-center gap-1.5">
-                {/* Docs Icon */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={handleDocsClick}
-                    className={getChannelIconButtonClass(isDarkMode, { active: showDocsModal })}
-                    title="Files"
-                    aria-label="Files"
-                    aria-pressed={showDocsModal}
-                  >
-                    <Files className="h-[19px] w-[19px]" strokeWidth={1.9} />
-                    {googleAccessToken && (
-                      <span className={`absolute right-2 top-2 h-2 w-2 rounded-full border-2 bg-green-500 shadow-md animate-pulse ${isDarkMode ? 'border-[#0d0001]' : 'border-white'}`}></span>
-                    )}
-                  </button>
-                </div>
-
                 {/* Google Apps Grid Icon */}
                 <div className="relative">
                   <button
@@ -12332,7 +14616,7 @@ export default function CollaborationApp() {
                           </button>
                           <button
                             onClick={() => {
-                              setShowNotificationsModal(true)
+                              openNotificationsPage()
                               setShowUserMenu(false)
                             }}
                             className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-sky-50 hover:text-sky-700'}`}
@@ -12340,9 +14624,9 @@ export default function CollaborationApp() {
                             <div className="flex items-center gap-3">
                               <Bell className="w-4 h-4" /> Notifications
                             </div>
-                            {currentUser?.notifications?.length ? (
+                            {unreadNotifications.length ? (
                               <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-red-500/30">
-                                {currentUser?.notifications?.length || 0}
+                                {unreadNotifications.length || 0}
                               </span>
                             ) : null}
                           </button>
@@ -12373,7 +14657,14 @@ export default function CollaborationApp() {
               }`}>
                 {/* Left: Profile & Context */}
                 <div 
-                  onClick={() => setShowMemberDetails(prev => !prev)}
+                  onClick={() => {
+                    if (activeView === "channel") {
+                      setShowMemberDetails(false)
+                      setActiveChannelTab("members")
+                    } else {
+                      setShowMemberDetails(prev => !prev)
+                    }
+                  }}
                   className="workspace-mobile-title flex-1 min-w-0 flex items-center gap-3 cursor-pointer touch-active"
                 >
                   {activeView === "dm" ? (
@@ -12415,8 +14706,6 @@ export default function CollaborationApp() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <h2 className={`workspace-mobile-channel-name font-bold text-[15px] leading-tight flex min-w-0 items-center gap-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                          <span className={`font-medium text-xs truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{currentSpace?.name}</span>
-                          <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-slate-600' : 'text-slate-300'}`} />
                           <span className="truncate">{getActiveViewName().replace("#", "")}</span>
                         </h2>
                         <p className={`text-[11px] font-medium flex items-center gap-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -12429,21 +14718,6 @@ export default function CollaborationApp() {
 
                 {/* Right: Action Icons & Menu */}
                 <div className="workspace-mobile-actions flex items-center gap-1 flex-shrink-0 relative z-10">
-                  {/* Docs Icon */}
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleDocsClick(); }}
-                    className={`${getMobileIconButtonClass(isDarkMode, { active: showDocsModal })} relative`}
-                    title="Files"
-                    aria-label="Files"
-                    aria-pressed={showDocsModal}
-                  >
-                    <Files className="h-5 w-5" strokeWidth={1.9} />
-                    {googleAccessToken && (
-                      <span className={`absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full border ${isDarkMode ? 'border-slate-800' : 'border-white'}`}></span>
-                    )}
-                  </button>
-
                   {/* Video Call Icon */}
                   {VIDEO_ENABLED && (
                     <div className="relative">
@@ -12593,7 +14867,7 @@ export default function CollaborationApp() {
                           {/* Notifications */}
                           <button
                             onClick={() => {
-                              setShowNotificationsModal(true)
+                              openNotificationsPage()
                               setShowMobileDrawer(false)
                             }}
                             className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-t ${
@@ -12604,9 +14878,9 @@ export default function CollaborationApp() {
                           >
                             <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-slate-700 text-amber-400' : 'bg-slate-100 text-slate-500'}`}>
                               <Bell className="w-4 h-4" />
-                              {currentUser?.notifications?.length > 0 && (
+                              {unreadNotifications.length > 0 && (
                                 <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                                  {currentUser?.notifications?.length}
+                                  {unreadNotifications.length}
                                 </span>
                               )}
                             </div>
@@ -12740,6 +15014,7 @@ export default function CollaborationApp() {
                         formatTime={formatContextTime}
                       />
                     )}
+                    {activeView === "channel" && activeChannelTab === "members" && renderChannelMembersView()}
                   </div>
                 )}
                 <div className={`${(activeView === "channel" || activeView === "dm") && activeChannelTab !== "messages" ? "hidden" : "flex flex-col flex-1 min-h-0"}`}>
@@ -13493,7 +15768,7 @@ export default function CollaborationApp() {
                     {showComposerFormatting && (
                       <div className={`flex min-h-9 items-center gap-0.5 rounded-t-[inherit] border-b px-2 ${
                         isDarkMode
-                          ? 'border-slate-700/80 bg-slate-900/70'
+                          ? 'border-slate-700/80 bg-[#EBEBEB]'
                           : 'border-[#edf0f3] bg-[#f7f7f8]'
                       }`}>
                         {COMPOSER_FORMAT_ACTIONS.filter(action => action.key !== "underline" && action.key !== "quote").map(action => {
@@ -13831,7 +16106,7 @@ export default function CollaborationApp() {
               {/* Member Details Sidebar - Added Logic for Add Friend */}
               <div
                 className={`absolute right-0 top-0 bottom-0 border-l transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col z-40 ${isDarkMode ? 'border-[#2b3038] bg-[#111315] shadow-2xl shadow-black/45' : 'border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-300/30'} backdrop-blur-xl ${
-                  showMemberDetails
+                  showMemberDetails && activeView === "dm"
                     ? "w-96 translate-x-0 opacity-100"
                       : "w-96 translate-x-full opacity-0 pointer-events-none"
                 }`}
@@ -14057,6 +16332,8 @@ export default function CollaborationApp() {
           document.body
         )}
 
+      {showLegacyFriendsSidebar && (
+        <>
       {/* Right Sidebar - FRIENDS & DMs */}
       <div className={`${isMobile ? (mobileView === "friends" ? "flex fixed inset-0 right-0 w-screen max-w-none mobile-slide-in-right z-[70]" : "hidden") : "hidden lg:flex"} flex-col ${friendsSidebarCollapsed ? "w-[92px]" : "w-[272px]"} transition-all ease-[cubic-bezier(0.32,0.72,0,1)] duration-300 z-40 liquid-glass-sidebar-right`}>
         {/* Mobile Swipe Indicator */}
@@ -14110,8 +16387,8 @@ export default function CollaborationApp() {
               <input
                 type="text"
                 placeholder="Filter connections..."
-                value={dmSearchQuery}
-                onChange={e => setDmSearchQuery(e.target.value)}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
                 className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm focus:outline-none transition-all duration-300 ease-in-out ${isDarkMode ? 'bg-slate-800/70 border-slate-700 focus:bg-slate-800 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 text-white hover:bg-slate-800 hover:border-slate-600 placeholder:text-slate-500' : 'bg-white/70 border-slate-200/50 focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-300 text-slate-700 hover:bg-white hover:border-slate-300 placeholder:text-slate-400 shadow-sm'} border`}
               />
             </div>
@@ -14129,14 +16406,12 @@ export default function CollaborationApp() {
                       if (result.userId) {
                         setActiveDMUser(result.userId)
                         setActiveView("dm")
-                        // When opening a DM, collapse the spaces (left) sidebar for focus
-                        setSidebarCollapsed(true)
                         if (isMobile) setMobileView("chat")
                         if (result.messageId) {
                           // Scroll to the message and pin it for review
                           setTargetMessageId(result.messageId)
                           setPinnedMessageId(result.messageId)
-                          setHighlightTerm(debouncedDmSearchQuery)
+                          setHighlightTerm(debouncedSearchQuery)
                         } else {
                           // Navigating to a DM without a specific message should clear any pinned result
                           setPinnedMessageId(null)
@@ -14172,7 +16447,7 @@ export default function CollaborationApp() {
                       <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {renderWithHighlight(
                           result.subtitle,
-                          debouncedDmSearchQuery
+                          debouncedSearchQuery
                         )}
                       </div>
                     </div>
@@ -14200,8 +16475,6 @@ export default function CollaborationApp() {
                     onClick={() => {
                       setActiveDMUser(friend.id)
                       setActiveView("dm")
-                      // Collapse spaces sidebar when opening friends chat
-                      setSidebarCollapsed(true)
                       if (isMobile) setMobileView("chat")
                     }}
                     className={`flex items-center gap-3 p-3 rounded-[10px] cursor-pointer transition-all duration-300 border hover-lift ${
@@ -14270,8 +16543,6 @@ export default function CollaborationApp() {
                       onClick={() => {
                         setActiveDMUser(friend.id)
                         setActiveView("dm")
-                        // Collapse spaces sidebar when opening friends chat
-                        setSidebarCollapsed(true)
                         if (isMobile) setMobileView("chat")
                       }}
                     >
@@ -14303,6 +16574,8 @@ export default function CollaborationApp() {
           )}
         </div>
       </div>
+        </>
+      )}
       </>
       )}
 
@@ -14605,6 +16878,7 @@ export default function CollaborationApp() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Google Apps Menu - Mobile Full Screen Modal */}
       {isMobile && showGoogleAppsMenu && (
@@ -14667,8 +16941,8 @@ export default function CollaborationApp() {
                 }
                 setMobileView("spaces")
               }}
-              className={`mobile-nav-item ${mobileView === "spaces" ? "active" : ""} ${
-                mobileView === "spaces"
+              className={`mobile-nav-item ${mobileView === "spaces" && activeView !== "dm" ? "active" : ""} ${
+                mobileView === "spaces" && activeView !== "dm"
                   ? isDarkMode ? "text-sky-400" : "text-sky-600"
                   : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
@@ -14696,16 +16970,16 @@ export default function CollaborationApp() {
                 if (activeView === "home") {
                   openWorkspaceFriendsHome()
                 }
-                setMobileView("friends")
+                setMobileView("spaces")
               }}
-              className={`mobile-nav-item ${mobileView === "friends" ? "active" : ""} ${
-                mobileView === "friends"
+              className={`mobile-nav-item ${mobileView === "spaces" && activeView === "dm" ? "active" : ""} ${
+                mobileView === "spaces" && activeView === "dm"
                   ? isDarkMode ? "text-sky-400" : "text-sky-600"
                   : isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
             >
-              <Users className={`w-5 h-5 transition-transform duration-200`} />
-              <span className="text-[10px] font-semibold">Friends</span>
+              <MessageSquare className={`w-5 h-5 transition-transform duration-200`} />
+              <span className="text-[10px] font-semibold">DMs</span>
             </button>
           </div>
         </div>

@@ -1350,7 +1350,7 @@ export default function HomeHub({
     return renderOverview()
   }
 
-  const showSidebar = !isMobile
+  const showSidebar = false
 
   return (
     <div className={cx("min-h-[100dvh] w-full overflow-x-hidden transition-colors", ui.page)}>

@@ -234,6 +234,49 @@ export const invalidateUsersCache = () => {
 
 export const invalidateSpacesCache = () => {
   removeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY)
+  spacesRequestCache.clear()
+  spacesForUserRequestCache.clear()
+  bootstrapRequestCache.clear()
+}
+
+const upsertSpaceInCache = space => {
+  if (!space || space.id === undefined || space.id === null) return
+  try {
+    const existing = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY).data
+    const spaces = Array.isArray(existing) ? existing : []
+    const next = [
+      space,
+      ...spaces.filter(item => String(item?.id) !== String(space.id))
+    ]
+    writeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY, next)
+    spacesRequestCache.clear()
+    spacesForUserRequestCache.clear()
+    bootstrapRequestCache.clear()
+  } catch {
+    // Cache writes are best-effort.
+  }
+}
+
+const removeSpaceFromCache = spaceId => {
+  if (spaceId === undefined || spaceId === null) return
+  try {
+    const existing = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY).data
+    if (!Array.isArray(existing)) return
+    const next = existing.filter(space => String(space?.id) !== String(spaceId))
+    writeSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY, next)
+    spacesRequestCache.clear()
+    spacesForUserRequestCache.clear()
+    bootstrapRequestCache.clear()
+  } catch {
+    // Cache writes are best-effort.
+  }
+}
+
+const serializeSpaceForStorage = space => {
+  if (!space || typeof space !== "object") return space
+  const persistableSpace = { ...space }
+  delete persistableSpace.icon
+  return persistableSpace
 }
 
 const getContextCacheKeys = chatId => ({
@@ -661,11 +704,24 @@ export const getSpaces = async (options = {}) => {
 }
 
 export const saveSpace = async space => {
-  await authFetch(`${API_BASE}/spaces/`, {
-    method: "POST",
-    body: JSON.stringify(space)
-  })
-  invalidateSpacesCache()
+  const persistableSpace = serializeSpaceForStorage(space)
+  upsertSpaceInCache(persistableSpace)
+  try {
+    const res = await authFetch(`${API_BASE}/spaces/`, {
+      method: "POST",
+      body: JSON.stringify(persistableSpace)
+    })
+    const data = await safeJson(res)
+    if (!res.ok) {
+      invalidateSpacesCache()
+      throw new Error(data?.detail || `Failed to save space (${res.status})`)
+    }
+    upsertSpaceInCache(data || persistableSpace)
+    return data || persistableSpace
+  } catch (error) {
+    invalidateSpacesCache()
+    throw error
+  }
 }
 
 export const getSpacesForUser = async (userSpaceIds, options = {}) => {
@@ -1096,10 +1152,15 @@ export const getFriends = async (friendIds, options = {}) => {
 export const sendFriendRequest = async (fromId, fromName, toUserId) => {
   const notification = {
     id: `fr-${Date.now()}-${Math.random()}`,
-    type: "friend_request",
+    type: "connection_invite",
     from: fromName,
     fromId,
-    status: "pending",
+    status: "unread",
+    actionStatus: "pending",
+    message: `${fromName} wants to connect with you`,
+    metadata: {
+      senderName: fromName,
+    },
     timestamp: Date.now()
   }
 
@@ -1157,12 +1218,14 @@ export const removeMemberFromSpace = async (userIdToRemove, spaceId, channelId =
 }
 
 export const acceptInvite = async (userId, notificationId) => {
-  const res = await authFetch(`${API_BASE}/actions/accept-invite`, {
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/accept`, {
     method: "POST",
     body: JSON.stringify({ userId, notificationId })
   })
   invalidateUsersCache()
-  return safeJson(res)
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to accept invite (${res.status})`)
+  return data
 }
 
 // --------------------
@@ -1271,28 +1334,21 @@ export const deleteChannel = async (spaceId, channelId) => {
 }
 
 export const deleteSpace = async spaceId => {
-  // Try RESTful delete if backend implements it
+  removeSpaceFromCache(spaceId)
   try {
-    const res = await authFetch(`${API_BASE}/spaces/${spaceId}`, {
+    const res = await authFetch(`${API_BASE}/spaces/${encodeURIComponent(String(spaceId))}`, {
       method: "DELETE"
     })
-    if (res && res.ok) return safeJson(res)
-  } catch (err) {
-    // ignore and fallback
-  }
-
-  // Fallback: remove from localStorage-spaces if present (non-persistent if backend doesn't support delete)
-  try {
-    const stored = await getSpaces()
-    const remaining = stored.filter(s => s.id !== spaceId)
-    // Attempt to persist remaining spaces by re-saving each (best-effort)
-    for (const s of remaining) {
-      await saveSpace(s)
+    const data = await safeJson(res)
+    if (!res.ok) {
+      invalidateSpacesCache()
+      throw new Error(data?.detail || `Failed to delete space (${res.status})`)
     }
-    return { status: "deleted (client-side)" }
-  } catch (e) {
-    console.error("deleteSpace fallback failed", e)
-    return null
+    removeSpaceFromCache(spaceId)
+    return data || { status: "deleted" }
+  } catch (error) {
+    invalidateSpacesCache()
+    throw error
   }
 }
 
@@ -1411,6 +1467,16 @@ export const deleteNotification = async (userId, notificationId) => {
 }
 
 export const rejectFriendRequest = async (friendId, notificationId) => {
+  if (notificationId) {
+    const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/decline`, {
+      method: "POST",
+      body: JSON.stringify({ friendId, notificationId })
+    })
+    invalidateUsersCache()
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(data?.detail || `Failed to decline request (${res.status})`)
+    return data
+  }
   const res = await authFetch(`${API_BASE}/actions/reject-friend`, {
     method: "POST",
     body: JSON.stringify({ friendId, notificationId })
@@ -1420,8 +1486,78 @@ export const rejectFriendRequest = async (friendId, notificationId) => {
 }
 
 export const rejectInvite = async (userId, notificationId) => {
-  // same as deleteNotification for invites
-  return deleteNotification(userId, notificationId)
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/decline`, {
+    method: "POST",
+    body: JSON.stringify({ userId, notificationId })
+  })
+  invalidateUsersCache()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to decline invite (${res.status})`)
+  return data
+}
+
+export const getNotifications = async () => {
+  const res = await authFetch(`${API_BASE}/notifications`)
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(data?.detail || `Failed to load notifications (${res.status})`)
+  }
+  return ensureArray(data)
+}
+
+export const markNotificationRead = async notificationId => {
+  if (!notificationId) return null
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/read`, {
+    method: "POST",
+  })
+  invalidateUsersCache()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to mark notification read (${res.status})`)
+  return data
+}
+
+export const acceptNotification = async notificationId => {
+  if (!notificationId) return null
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/accept`, {
+    method: "POST",
+  })
+  invalidateUsersCache()
+  invalidateSpacesCache()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to accept notification (${res.status})`)
+  return data
+}
+
+export const declineNotification = async notificationId => {
+  if (!notificationId) return null
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/decline`, {
+    method: "POST",
+  })
+  invalidateUsersCache()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to decline notification (${res.status})`)
+  return data
+}
+
+export const withdrawNotification = async notificationId => {
+  if (!notificationId) return null
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/withdraw`, {
+    method: "POST",
+  })
+  invalidateUsersCache()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to withdraw notification (${res.status})`)
+  return data
+}
+
+export const remindNotification = async notificationId => {
+  if (!notificationId) return null
+  const res = await authFetch(`${API_BASE}/notifications/${encodeURIComponent(String(notificationId))}/remind`, {
+    method: "POST",
+  })
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data?.detail || `Failed to remind notification (${res.status})`)
+  return data
 }
 
 // --------------------

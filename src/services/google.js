@@ -278,22 +278,31 @@ export const fetchGoogleDriveFiles = async (accessToken, appType = 'all') => {
   }
 
   try {
-    const response = await axios.get(
-      'https://www.googleapis.com/drive/v3/files',
-      {
-        params: {
-          pageSize: 50,
-          fields: 'files(id, name, mimeType, webViewLink, iconLink, thumbnailLink, createdTime, modifiedTime, owners)',
-          orderBy: 'modifiedTime desc',
-          q: query
-        },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Accept': 'application/json'
+    const files = []
+    let pageToken = null
+
+    do {
+      const response = await axios.get(
+        'https://www.googleapis.com/drive/v3/files',
+        {
+          params: {
+            pageSize: 1000,
+            fields: 'nextPageToken,files(id, name, mimeType, webViewLink, iconLink, thumbnailLink, createdTime, modifiedTime, owners)',
+            orderBy: 'modifiedTime desc',
+            q: query,
+            ...(pageToken ? { pageToken } : {})
+          },
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
         }
-      }
-    )
-    const files = response.data.files || []
+      )
+
+      files.push(...(response.data.files || []))
+      pageToken = response.data.nextPageToken || null
+    } while (pageToken)
+
     try {
       localStorage.setItem('google_drive_cache', JSON.stringify({ time: Date.now(), files }))
     } catch (e) {}

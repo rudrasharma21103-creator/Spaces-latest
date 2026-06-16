@@ -70,6 +70,18 @@ const mergeTaskLists = (...lists) => {
   return Array.from(merged.values())
 }
 
+const getTaskId = task => {
+  if (!task) return ""
+  if (task.id !== undefined && task.id !== null) return String(task.id)
+  if (task.taskId !== undefined && task.taskId !== null) return String(task.taskId)
+  if (task._id !== undefined && task._id !== null) {
+    if (typeof task._id === "object" && task._id.$oid) return String(task._id.$oid)
+    return String(task._id)
+  }
+  if (task.timestamp !== undefined && task.timestamp !== null) return String(task.timestamp)
+  return ""
+}
+
 export const peekTasksForUser = () => readCachedTasks()
 
 export const createTask = async (task) => {
@@ -86,7 +98,8 @@ export const createTask = async (task) => {
     body: JSON.stringify(task)
   })
   if (!res.ok) throw new Error('Failed to create task')
-  const savedTask = await res.json()
+  const payload = await res.json()
+  const savedTask = payload?.task || payload
   writeCachedTasks(mergeTaskLists([savedTask], readCachedTasks()))
   return savedTask
 }
@@ -125,7 +138,26 @@ export const updateTask = async (taskId, patch) => {
     body: JSON.stringify(patch)
   })
   if (!res.ok) throw new Error('Failed to update task')
-  const task = await res.json()
+  const payload = await res.json()
+  const task = payload?.task || payload
   writeCachedTasks(mergeTaskLists([task], readCachedTasks()))
   return task
+}
+
+export const deleteTask = async (taskId) => {
+  const url = `${API_BASE}/tasks/${encodeURIComponent(taskId)}`
+  const token = getToken()
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  }
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers,
+    credentials: 'include'
+  })
+  if (!res.ok) throw new Error('Failed to delete task')
+  const payload = await res.json()
+  const deletedId = String(payload?.taskId || taskId)
+  writeCachedTasks(readCachedTasks().filter(task => getTaskId(task) !== deletedId))
+  return payload
 }

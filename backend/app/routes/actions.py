@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from app.database import users_collection, spaces_collection
 from app.deps import get_request_user
 from app.routes.messages import _check_channel_access
+from app.routes.notifications import create_notification, accept_notification_for_user
 from app.ws_manager import manager
 
 router = APIRouter(prefix="/actions")
@@ -132,8 +133,8 @@ async def send_friend_request(request: Request, payload: dict):
                 "id": {"$in": sender_id_values},
                 "notifications": {
                     "$elemMatch": {
-                        "type": "friend_request",
-                        "status": "pending",
+                        "type": {"$in": ["friend_request", "connection_invite"]},
+                        "$or": [{"status": "pending"}, {"actionStatus": "pending"}],
                         "fromId": {"$in": id_query_values(recipient_id)},
                     }
                 },
@@ -149,8 +150,8 @@ async def send_friend_request(request: Request, payload: dict):
                 "id": {"$in": id_query_values(recipient_id)},
                 "notifications": {
                     "$elemMatch": {
-                        "type": "friend_request",
-                        "status": "pending",
+                        "type": {"$in": ["friend_request", "connection_invite"]},
+                        "$or": [{"status": "pending"}, {"actionStatus": "pending"}],
                         "fromId": {"$in": sender_id_values},
                     }
                 },
@@ -164,33 +165,30 @@ async def send_friend_request(request: Request, payload: dict):
     except Exception:
         pass
 
-    update_result = users_collection.update_one(
-        {
-            "id": {"$in": id_query_values(recipient_id)},
-            "notifications": {
-                "$not": {
-                    "$elemMatch": {
-                        "type": "friend_request",
-                        "status": "pending",
-                        "fromId": {"$in": sender_id_values},
-                    }
-                }
-            },
+    sender_name = actor.get("name") or actor.get("email") or "Someone"
+    created = await create_notification(
+        recipient_id=recipient_id,
+        sender_id=from_id,
+        type="connection_invite",
+        message=f"{sender_name} wants to connect with you",
+        action_status="pending",
+        status_value="unread",
+        dedupe_key=f"connection_invite:{from_id}:{recipient_id}",
+        metadata={
+            "senderName": sender_name,
+            "recipientName": recipient.get("name") or recipient.get("email"),
         },
-        {"$push": {"notifications": notification}}
+        extra={
+            **notification,
+            "type": "connection_invite",
+            "from": sender_name,
+            "fromId": from_id,
+            "status": "unread",
+            "actionStatus": "pending",
+        },
     )
-    if update_result.matched_count == 0:
-        if users_collection.find_one({"id": {"$in": id_query_values(recipient_id)}}, {"_id": 1}):
-            return {"status": "pending"}
-        raise HTTPException(status_code=404, detail="Recipient not found")
-    
-    # Send real-time WebSocket notification to the target user
-    try:
-        await manager.send_to_user(str(recipient_id), {"type": "notification", "notification": notification})
-    except Exception:
-        pass
-    
-    return {"status": "sent"}
+
+    return {"status": "sent", "notificationId": created.get("id") if created else None}
 
 @router.post("/accept-friend")
 async def accept_friend(request: Request, payload: dict):
@@ -209,8 +207,8 @@ async def accept_friend(request: Request, payload: dict):
                     "notifications": {
                         "$elemMatch": {
                             "id": notification_id,
-                            "type": "friend_request",
-                            "fromId": friend_id
+                            "type": {"$in": ["friend_request", "connection_invite"]},
+                            "fromId": {"$in": id_query_values(friend_id)}
                         }
                     }
                 },
@@ -234,15 +232,18 @@ async def accept_friend(request: Request, payload: dict):
             user = users_collection.find_one({"id": user_id})
             friend = users_collection.find_one({"id": friend_id})
             if friend:
-                notif = {
-                    "id": f"fr-accept-{int(__import__('time').time()*1000)}",
-                    "type": "info",
-                    "message": f"{user.get('name')} accepted your friend request",
-                    "timestamp": __import__('time').time()
-                }
-                users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
-                # Send real-time WebSocket notification immediately
-                await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
+                await create_notification(
+                    recipient_id=friend_id,
+                    sender_id=user_id,
+                    type="connection_invite_response",
+                    message=f"{user.get('name')} accepted your connection invite",
+                    action_status="accepted",
+                    status_value="unread",
+                    metadata={
+                        "senderName": user.get("name"),
+                        "recipientName": friend.get("name"),
+                    },
+                )
                 # Notify both users to refresh friend state immediately
                 await manager.send_to_user(str(user_id), {"type": "friends_updated"})
                 await manager.send_to_user(str(friend_id), {"type": "friends_updated"})
@@ -269,8 +270,8 @@ async def reject_friend(request: Request, payload: dict):
                     "notifications": {
                         "$elemMatch": {
                             "id": notification_id,
-                            "type": "friend_request",
-                            "fromId": friend_id
+                            "type": {"$in": ["friend_request", "connection_invite"]},
+                            "fromId": {"$in": id_query_values(friend_id)}
                         }
                     }
                 },
@@ -285,18 +286,19 @@ async def reject_friend(request: Request, payload: dict):
             user = users_collection.find_one({"id": user_id})
             friend = users_collection.find_one({"id": friend_id})
             if friend:
-                notif = {
-                    "id": f"fr-reject-{int(__import__('time').time()*1000)}",
-                    "type": "info",
-                    "message": f"{user.get('name')} rejected your friend request",
-                    "timestamp": __import__('time').time()
-                }
-                users_collection.update_one({"id": friend_id}, {"$push": {"notifications": notif}})
-                # Send real-time WebSocket notification immediately
-                await manager.send_to_user(str(friend_id), {"type": "notification", "notification": notif})
+                await create_notification(
+                    recipient_id=friend_id,
+                    sender_id=user_id,
+                    type="connection_invite_response",
+                    message=f"{user.get('name')} declined your connection invite",
+                    action_status="declined",
+                    status_value="unread",
+                    metadata={
+                        "senderName": user.get("name"),
+                        "recipientName": friend.get("name"),
+                    },
+                )
                 await manager.send_to_user(str(friend_id), {"type": "friends_updated"})
-        except Exception:
-                    pass
         except Exception:
             pass
 
@@ -313,96 +315,92 @@ async def add_member_to_space(request: Request, payload: dict):
     if not user_id_to_add or not space_id:
         return {"error": "Missing userIdToDetail or spaceId"}
 
-    space = spaces_collection.find_one({"id": space_id})
+    space = spaces_collection.find_one({"id": {"$in": id_query_values(space_id)}})
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
     role = _space_manager_role(space, actor_id, channel_id)
     if role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    # 1) Add member to the space-level members list only when no channelId provided
-    if not channel_id:
-        spaces_collection.update_one(
-            {"id": space_id},
-            {"$addToSet": {"members": user_id_to_add}}
-        )
+    target = get_user_by_id(user_id_to_add)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # 2) If a channelId is provided, add the user to that channel only
-    updated_channels = []
-    if space and isinstance(space.get("channels"), list):
-        for ch in space.get("channels", []):
-            ch_members = ch.get("members", [])
-            if channel_id:
-                # Only update the specific channel
-                if ch.get("id") == channel_id:
-                    if user_id_to_add not in ch_members:
-                        ch_members.append(user_id_to_add)
-                # Else leave channel members unchanged
-            else:
-                # Old behavior: add to all channels when channelId not provided
-                if user_id_to_add not in ch_members:
-                    ch_members.append(user_id_to_add)
-            ch["members"] = ch_members
-            updated_channels.append(ch)
+    channel = None
+    if channel_id:
+        for ch in space.get("channels") or []:
+            if str(ch.get("id")) == str(channel_id):
+                channel = ch
+                break
+        if not channel:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if any(str(member) == str(user_id_to_add) for member in (channel.get("members") or [])):
+            return {"status": "already_member"}
+    elif any(str(member) == str(user_id_to_add) for member in (space.get("members") or [])):
+        return {"status": "already_member"}
 
-        # Persist updated channels back to the DB
-        spaces_collection.update_one(
-            {"id": space_id},
-            {"$set": {"channels": updated_channels}}
-        )
-
-    # 3) Add space id to the user's spaces list so the user sees the space
-    users_collection.update_one(
-        {"id": user_id_to_add},
-        {"$addToSet": {"spaces": space_id}}
+    sender_name = actor.get("name") or actor.get("email") or "Someone"
+    space_name = space.get("name") or "Space"
+    channel_name = (channel or {}).get("name")
+    invite_type = "channel_invite" if channel_id else "space_invite"
+    invite_message = (
+        f"{sender_name} invited you to join #{channel_name} in {space_name}"
+        if channel_id
+        else f"{sender_name} invited you to join {space_name}"
     )
 
-    # 4) Notify the added user to refresh their spaces (existing behavior)
-    try:
-        await manager.send_to_user(user_id_to_add, {"type": "sync_spaces", "spaceId": space_id})
-    except Exception:
-        pass
+    notification = await create_notification(
+        recipient_id=user_id_to_add,
+        sender_id=actor_id,
+        type=invite_type,
+        message=invite_message,
+        action_status="pending",
+        status_value="unread",
+        space_id=space_id,
+        channel_id=channel_id,
+        dedupe_key=f"{invite_type}:{space_id}:{channel_id or 'space'}:{user_id_to_add}",
+        metadata={
+            "spaceName": space_name,
+            "channelName": channel_name,
+            "senderName": sender_name,
+            "recipientName": target.get("name") or target.get("email"),
+        },
+        extra={
+            "from": sender_name,
+            "fromId": actor_id,
+            "spaceName": space_name,
+            "channelName": channel_name,
+        },
+    )
 
-    # 5) Broadcast: inform only affected channels and space members
-    try:
-        space_after = spaces_collection.find_one({"id": space_id})
-        if space_after and isinstance(space_after.get("channels"), list):
-            # If channelId provided, broadcast only to that channel
-            if channel_id:
-                try:
-                    await manager.broadcast(channel_id, {
-                        "type": "space_updated",
-                        "spaceId": space_id,
-                        "memberId": user_id_to_add,
-                        "members": space_after.get("members", [])
-                    })
-                except Exception:
-                    pass
-            else:
-                for ch in space_after.get("channels", []):
-                    try:
-                        await manager.broadcast(ch.get("id"), {
-                            "type": "space_updated",
-                            "spaceId": space_id,
-                            "memberId": user_id_to_add,
-                            "members": space_after.get("members", [])
-                        })
-                    except Exception:
-                        pass
+    if notification:
+        target_name = target.get("name") or target.get("email") or "member"
+        await create_notification(
+            recipient_id=actor_id,
+            sender_id=actor_id,
+            type=invite_type,
+            message=(
+                f"Invite sent to {target_name} for #{channel_name} in {space_name}"
+                if channel_id
+                else f"Invite sent to {target_name} for {space_name}"
+            ),
+            action_status="pending",
+            status_value="read",
+            space_id=space_id,
+            channel_id=channel_id,
+            dedupe_key=f"sent:{invite_type}:{space_id}:{channel_id or 'space'}:{user_id_to_add}",
+            metadata={
+                "spaceName": space_name,
+                "channelName": channel_name,
+                "senderName": sender_name,
+                "recipientName": target_name,
+                "recipientId": str(user_id_to_add),
+                "managedNotificationId": notification.get("id"),
+                "senderCopy": True,
+            },
+        )
 
-            # Also send a private update to each online member so they receive the update
-            for member_id in space_after.get("members", []):
-                try:
-                    await manager.send_to_user(member_id, {
-                        "type": "space_updated",
-                        "spaceId": space_id,
-                        "memberId": user_id_to_add,
-                        "members": space_after.get("members", [])
-                    })
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    return {"status": "member added"}
+    return {"status": "invite_sent", "notificationId": notification.get("id") if notification else None}
 
 @router.post("/remove-member")
 async def remove_member(request: Request, payload: dict):
@@ -415,7 +413,9 @@ async def remove_member(request: Request, payload: dict):
     if not user_id_to_remove or not space_id:
         return {"error": "Missing userIdToRemove or spaceId"}
 
-    space = spaces_collection.find_one({"id": space_id})
+    space = spaces_collection.find_one({"id": {"$in": id_query_values(space_id)}})
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
     role = _space_manager_role(space, actor_id, channel_id)
     if role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -424,7 +424,7 @@ async def remove_member(request: Request, payload: dict):
 
     # Remove user from space-level members
     spaces_collection.update_one(
-        {"id": space_id},
+        {"id": {"$in": id_query_values(space_id)}},
         {"$pull": {"members": user_id_to_remove}}
     )
 
@@ -434,18 +434,18 @@ async def remove_member(request: Request, payload: dict):
         for ch in space.get("channels", []):
             ch_members = ch.get("members", []) or []
             if channel_id:
-                if ch.get("id") == channel_id:
-                    ch_members = [m for m in ch_members if m != user_id_to_remove]
+                if str(ch.get("id")) == str(channel_id):
+                    ch_members = [m for m in ch_members if str(m) != str(user_id_to_remove)]
             else:
-                ch_members = [m for m in ch_members if m != user_id_to_remove]
+                ch_members = [m for m in ch_members if str(m) != str(user_id_to_remove)]
             ch["members"] = ch_members
             updated_channels.append(ch)
 
-        spaces_collection.update_one({"id": space_id}, {"$set": {"channels": updated_channels}})
+        spaces_collection.update_one({"id": {"$in": id_query_values(space_id)}}, {"$set": {"channels": updated_channels}})
 
     # If removing from the whole space (no channel_id provided), also remove space from user's spaces
     if not channel_id:
-        users_collection.update_one({"id": user_id_to_remove}, {"$pull": {"spaces": space_id}})
+        users_collection.update_one({"id": {"$in": id_query_values(user_id_to_remove)}}, {"$pull": {"spaces": space_id}})
 
     # Notify removed user
     try:
@@ -455,14 +455,14 @@ async def remove_member(request: Request, payload: dict):
             "message": f"You were removed from {space.get('name')}",
             "timestamp": __import__('time').time()
         }
-        users_collection.update_one({"id": user_id_to_remove}, {"$push": {"notifications": notif}})
+        users_collection.update_one({"id": {"$in": id_query_values(user_id_to_remove)}}, {"$push": {"notifications": notif}})
         await manager.send_to_user(user_id_to_remove, {"type": "notification", "notification": notif})
     except Exception:
         pass
 
     # Broadcast updates to affected channels and inform members
     try:
-        space_after = spaces_collection.find_one({"id": space_id})
+        space_after = spaces_collection.find_one({"id": {"$in": id_query_values(space_id)}})
         if space_after and isinstance(space_after.get("channels"), list):
             if channel_id:
                 try:
@@ -507,23 +507,9 @@ async def accept_invite(request: Request, payload: dict):
     actor = require_actor(request)
     user_id = actor.get("id")
     notification_id = payload.get("notificationId")
-    
-    # Send real-time notification to refresh the user's spaces
-    try:
-        await manager.send_to_user(str(user_id), {"type": "sync_spaces"})
-    except Exception:
-        pass
-    
-    # In real app, you'd find the space from notification
-    # For now, return a mock response
-    return {
-        "status": "accepted",
-        "space": {
-            "id": 12345,
-            "name": "Test Space",
-            "channels": [{"id": 1, "name": "general"}]
-        }
-    }
+    if not notification_id:
+        raise HTTPException(status_code=400, detail="notificationId required")
+    return await accept_notification_for_user(user_id, notification_id)
 
 
 @router.post("/send-meet-invite")

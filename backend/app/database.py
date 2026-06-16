@@ -221,6 +221,11 @@ try:
     drafts_collection.create_index([("userId", 1), ("id", 1)], unique=True)
 
     notifications_collection.create_index("userId")
+    notifications_collection.create_index("recipientId")
+    notifications_collection.create_index("senderId")
+    notifications_collection.create_index("id", unique=True)
+    notifications_collection.create_index([("recipientId", 1), ("createdAt", -1)])
+    notifications_collection.create_index([("recipientId", 1), ("status", 1)])
     notifications_collection.create_index("email")
     notifications_collection.create_index([("email", 1), ("timestamp", -1)])
 
