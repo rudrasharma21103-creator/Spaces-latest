@@ -349,10 +349,56 @@ def build_bootstrap_payload(requester):
         if space:
             ordered_spaces.append(space)
 
+    member_ids = []
+    seen_member_ids = set()
+
+    def add_member_id(raw_id):
+        if raw_id is None:
+            return
+        resolved_id = raw_id
+        if isinstance(raw_id, dict):
+            resolved_id = raw_id.get("id") or raw_id.get("_id") or raw_id.get("userId") or raw_id.get("user_id")
+        if resolved_id is None:
+            return
+        member_id = str(resolved_id)
+        if not member_id or member_id in seen_member_ids:
+            return
+        seen_member_ids.add(member_id)
+        member_ids.append(resolved_id)
+
+    for space in ordered_spaces:
+        add_member_id(space.get("ownerId"))
+        add_member_id(space.get("createdBy"))
+        for member_id in space.get("members") or []:
+            add_member_id(member_id)
+        for channel in space.get("channels") or []:
+            if not isinstance(channel, dict):
+                continue
+            add_member_id(channel.get("ownerId"))
+            add_member_id(channel.get("createdBy"))
+            for member_id in channel.get("members") or []:
+                add_member_id(member_id)
+            for member_id in (channel.get("roles") or {}).keys():
+                add_member_id(member_id)
+
+    members_raw = fetch_users_by_ids(member_ids, USER_LIST_PROJECTION)
+    members_by_id = {str(member.get("id")): member for member in members_raw if member.get("id") is not None}
+    ordered_members = []
+    seen_profile_ids = set()
+    for raw_id in member_ids:
+        member_id = str(raw_id)
+        if member_id in seen_profile_ids:
+            continue
+        seen_profile_ids.add(member_id)
+        member = members_by_id.get(member_id)
+        if member:
+            ordered_members.append(serialize_user(member))
+
     return {
         "user": serialized_user,
         "friends": ordered_friends,
         "spaces": ordered_spaces,
+        "users": ordered_members,
     }
 
 
@@ -447,6 +493,56 @@ def fetch_spaces_by_ids(space_ids):
 
 def resolve_requester(request: Request):
     return get_request_user(request)
+
+
+def users_share_workspace(requester, candidate):
+    if not requester or not candidate:
+        return False
+
+    requester_id = requester.get("id")
+    candidate_id = candidate.get("id")
+    if requester_id is None or candidate_id is None:
+        return False
+
+    requester_ids = expand_user_ids_for_query([requester_id])
+    candidate_ids = expand_user_ids_for_query([candidate_id])
+    if not requester_ids or not candidate_ids:
+        return False
+
+    requester_space_ids = {str(space_id) for space_id in (requester.get("spaces") or []) if space_id is not None}
+    candidate_space_ids = {str(space_id) for space_id in (candidate.get("spaces") or []) if space_id is not None}
+    if requester_space_ids and requester_space_ids.intersection(candidate_space_ids):
+        return True
+
+    requester_membership_query = {
+        "$or": [
+            {"ownerId": {"$in": requester_ids}},
+            {"createdBy": {"$in": requester_ids}},
+            {"members": {"$in": requester_ids}},
+            {"channels.members": {"$in": requester_ids}},
+        ]
+    }
+    candidate_membership_query = {
+        "$or": [
+            {"ownerId": {"$in": candidate_ids}},
+            {"createdBy": {"$in": candidate_ids}},
+            {"members": {"$in": candidate_ids}},
+            {"channels.members": {"$in": candidate_ids}},
+        ]
+    }
+
+    requester_space_query_ids = expand_user_ids_for_query(list(requester_space_ids))
+    if requester_space_query_ids:
+        requester_membership_query["$or"].append({"id": {"$in": requester_space_query_ids}})
+
+    candidate_space_query_ids = expand_user_ids_for_query(list(candidate_space_ids))
+    if candidate_space_query_ids:
+        candidate_membership_query["$or"].append({"id": {"$in": candidate_space_query_ids}})
+
+    return bool(spaces_collection.find_one(
+        {"$and": [requester_membership_query, candidate_membership_query]},
+        {"_id": 1},
+    ))
 
 
 def can_requester_see_user(requester, candidate):
@@ -733,8 +829,15 @@ def get_users_by_ids(user_ids: list, request: Request):
             continue
 
         candidate = users_by_id.get(user_id)
+        try:
+            shares_workspace = users_share_workspace(requester, candidate) if candidate else False
+        except PyMongoError as exc:
+            logger.error("Failed to check shared workspace visibility for %s: %s", user_id, exc)
+            raise HTTPException(status_code=503, detail="Database is temporarily unavailable. Please retry.")
+
         if candidate and (
             user_id in requester_friend_ids
+            or shares_workspace
             or can_requester_see_user(requester, candidate)
         ):
             ordered_users.append(serialize_user(candidate))

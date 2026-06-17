@@ -366,12 +366,12 @@ export default function DocumentsHub(props) {
 
     const base = [
       { key: "all", label: "All files", description: "Every connected file source", count: overview.total, icon: <Grid3x3 className="h-4 w-4" /> },
-      { key: "drive", label: "Google Drive", description: "Drive files and folders", count: overview.drive, icon: <SmartImage src="/google-drive.png" alt="Google Drive" className="h-4 w-4" /> },
-      { key: "docs", label: "Google Docs", description: "Documents and written work", count: docsCount || overview.docs, icon: <SmartImage src="/google-docs.png" alt="Google Docs" className="h-4 w-4" /> },
-      { key: "gmail", label: "Gmail", description: "Email attachments", count: overview.gmail, icon: <SmartImage src="/gmail.png" alt="Gmail" className="h-4 w-4" /> },
+      { key: "drive", label: "Google Drive", description: "Drive files and folders", count: overview.drive, icon: <SmartImage src="/google%20drive.png" alt="Google Drive" className="h-4 w-4" /> },
+      { key: "docs", label: "Google Docs", description: "Documents and written work", count: docsCount || overview.docs, icon: <SmartImage src="/google%20docs.png" alt="Google Docs" className="h-4 w-4" /> },
+      { key: "gmail", label: "Gmail", description: "Email attachments", count: overview.gmail, icon: <SmartImage src="/gmail%20(1).png" alt="Gmail" className="h-4 w-4" /> },
       { key: "shared", label: "Shared files", description: "Files from chats", count: overview.shared, icon: <SmartImage src="/shared.png.png" alt="Shared" className="h-4 w-4" /> },
-      { key: "sheets", label: "Google Sheets", description: "Sheets and trackers", count: sheetsCount || overview.sheets, icon: <SmartImage src="/google-sheets.png" alt="Google Sheets" className="h-4 w-4" /> },
-      { key: "slides", label: "Google Slides", description: "Decks and presentations", count: slidesCount || overview.slides, icon: <SmartImage src="/slides.png" alt="Google Slides" className="h-4 w-4" /> },
+      { key: "sheets", label: "Google Sheets", description: "Sheets and trackers", count: sheetsCount || overview.sheets, icon: <SmartImage src="/google%20sheets.png" alt="Google Sheets" className="h-4 w-4" /> },
+      { key: "slides", label: "Google Slides", description: "Decks and presentations", count: slidesCount || overview.slides, icon: <SmartImage src="/google%20slides.png" alt="Google Slides" className="h-4 w-4" /> },
     ]
 
     return base

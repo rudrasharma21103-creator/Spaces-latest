@@ -346,37 +346,37 @@ export const getAppIcon = (appType) => {
       emoji: '📊', 
       color: 'bg-green-50 text-green-600', 
       border: 'border-green-200',
-      iconUrl: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x128.png'
+      iconUrl: '/google%20sheets.png'
     },
     docs: { 
       emoji: '📄', 
       color: 'bg-blue-50 text-blue-600', 
       border: 'border-blue-200',
-      iconUrl: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x128.png'
+      iconUrl: '/google%20docs.png'
     },
     slides: { 
       emoji: '📽️', 
       color: 'bg-yellow-50 text-yellow-600', 
       border: 'border-yellow-200',
-      iconUrl: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x128.png'
+      iconUrl: '/google%20slides.png'
     },
     gmail: { 
       emoji: '📧', 
       color: 'bg-red-50 text-red-600', 
       border: 'border-red-200',
-      iconUrl: '/gmail.png'
+      iconUrl: '/gmail%20(1).png'
     },
     drive: { 
       emoji: '📁', 
       color: 'bg-blue-50 text-blue-600', 
       border: 'border-blue-200',
-      iconUrl: '/google-drive.png'
+      iconUrl: '/google%20drive.png'
     },
     shared: {
       emoji: '📂',
       color: 'bg-slate-50 text-slate-700',
       border: 'border-slate-200',
-      iconUrl: '/google-drive.png'
+      iconUrl: '/google%20drive.png'
     },
     pdf: { 
       emoji: '📕', 

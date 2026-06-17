@@ -11435,8 +11435,10 @@ body.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled:hove
 }
 
 .workspace-app-rail-button {
-  width: 48px !important;
-  height: 44px !important;
+  width: 52px !important;
+  height: 52px !important;
+  padding: 5px 2px 4px !important;
+  gap: 3px !important;
   border-radius: 10px !important;
   background: transparent !important;
   color: #2f3437 !important;
@@ -11455,8 +11457,22 @@ body.dark .workspace-navbar-actions .workspace-premium-icon-button:disabled:hove
 }
 
 .workspace-app-rail-button svg {
-  width: 22px !important;
-  height: 22px !important;
+  width: 21px !important;
+  height: 21px !important;
+}
+
+.workspace-app-rail-label {
+  display: block;
+  width: 100%;
+  max-width: 48px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .workspace-app-rail-active-marker {
@@ -14088,7 +14104,7 @@ body.dark .workspace-dedicated-sidebar-control > div:last-child:focus-within,
   display: flex;
   min-height: 0;
   flex-direction: column;
-  border-right: 1px solid rgba(148, 163, 184, 0.14);
+  border-right: 0;
   background: #ebebeb;
 }
 
@@ -15477,11 +15493,11 @@ body.dark .workspace-community-channel-menu-button[aria-expanded="true"] {
 
   .workspace-starred-sidebar {
     border-right: 0;
-    border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+    border-bottom: 0;
   }
 
   .workspace-starred-frame.is-dark .workspace-starred-sidebar {
-    border-bottom-color: rgba(255, 255, 255, 0.08);
+    border-bottom-color: transparent;
   }
 
   .workspace-starred-detail {
@@ -15669,8 +15685,8 @@ body.dark .workspace-app-rail-profile {
 }
 
 .workspace-app-rail-image {
-  width: 24px;
-  height: 24px;
+  width: 23px;
+  height: 23px;
   flex-shrink: 0;
   object-fit: contain;
 }
@@ -16039,7 +16055,7 @@ body.dark .workspace-topbar-tabs .workspace-channel-tab-button.active {
 .workspace-channel-members-header,
 .workspace-channel-member-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(180px, 360px);
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 420px);
   align-items: center;
 }
 
@@ -16127,6 +16143,36 @@ body.dark .workspace-topbar-tabs .workspace-channel-tab-button.active {
   background: #fee2e2;
 }
 
+.workspace-channel-member-connect {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(14, 165, 233, 0.24);
+  border-radius: 6px;
+  background: #e0f2fe;
+  padding: 0 10px;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 800;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.workspace-channel-member-connect:hover:not(:disabled) {
+  border-color: rgba(2, 132, 199, 0.38);
+  background: #bae6fd;
+  color: #075985;
+}
+
+.workspace-channel-member-connect:disabled,
+.workspace-channel-member-connect.is-pending {
+  cursor: default;
+  border-color: rgba(148, 163, 184, 0.32);
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 .workspace-channel-members-empty {
   border-top: 1px solid rgba(226, 232, 240, 0.72);
   padding: 18px 0;
@@ -16194,6 +16240,25 @@ body.dark .workspace-topbar-tabs .workspace-channel-tab-button.active {
 .workspace-channel-files-view.is-dark .workspace-channel-file-menu button:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
+}
+
+.workspace-channel-details-view.is-dark .workspace-channel-member-connect {
+  border-color: rgba(56, 189, 248, 0.24);
+  background: rgba(14, 165, 233, 0.14);
+  color: #bae6fd;
+}
+
+.workspace-channel-details-view.is-dark .workspace-channel-member-connect:hover:not(:disabled) {
+  border-color: rgba(125, 211, 252, 0.34);
+  background: rgba(14, 165, 233, 0.22);
+  color: #e0f2fe;
+}
+
+.workspace-channel-details-view.is-dark .workspace-channel-member-connect:disabled,
+.workspace-channel-details-view.is-dark .workspace-channel-member-connect.is-pending {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  color: #9ca3af;
 }
 
 .workspace-channel-details-view.is-dark .workspace-channel-members-section-title,

@@ -437,8 +437,9 @@ export const getBootstrap = async (options = {}) => {
     const user = data?.user || null
     const friends = ensureArray(data?.friends)
     const spaces = ensureArray(data?.spaces)
+    const users = ensureArray(data?.users)
 
-    mergeUsersIntoCache([user, ...friends].filter(Boolean))
+    mergeUsersIntoCache([user, ...friends, ...users].filter(Boolean))
     if (spaces.length > 0) {
       try {
         const existing = readSimpleCache(SPACES_CACHE_KEY, SPACES_CACHE_TIME_KEY).data
@@ -459,6 +460,7 @@ export const getBootstrap = async (options = {}) => {
       user,
       friends,
       spaces,
+      users,
     }
   })()
     .finally(() => {

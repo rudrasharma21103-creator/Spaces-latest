@@ -1621,6 +1621,7 @@ export default function CollaborationApp() {
   const callTimerRef = useRef(null)
   const callerCountdownRef = useRef(null)
   const workspaceSearchHydratedChatsRef = useRef(new Set())
+  const channelMemberHydrationKeyRef = useRef("")
   const currentUserRef = useRef(currentUser)
   const orgInfoRef = useRef(orgInfo)
   const orgFormRef = useRef(orgForm)
@@ -2404,6 +2405,7 @@ export default function CollaborationApp() {
 
         const bootstrap = await bootstrapPromise
         const effectiveUser = filterDismissedUser(bootstrap?.user || currentUser)
+        const bootstrapUsers = Array.isArray(bootstrap?.users) ? bootstrap.users : []
         const friendsPromise = Array.isArray(bootstrap?.friends) && bootstrap.friends.length > 0
           ? Promise.resolve(bootstrap.friends)
           : Storage.getFriends(effectiveUser.friends || [])
@@ -2436,7 +2438,7 @@ export default function CollaborationApp() {
             if (user?.id === undefined || user?.id === null) return
             merged.set(String(user.id), user)
           })
-          ;[effectiveUser, ...safeFriends].forEach(user => {
+          ;[effectiveUser, ...safeFriends, ...bootstrapUsers].forEach(user => {
             if (user?.id === undefined || user?.id === null) return
             merged.set(String(user.id), { ...(merged.get(String(user.id)) || {}), ...user })
           })
@@ -6434,17 +6436,139 @@ export default function CollaborationApp() {
     [currentChannels, activeChannel]
   )
 
+  const activeChannelMemberIds = useMemo(() => {
+    const isChannelContext =
+      activeView === "channel" ||
+      (activeView === "contexts" && contextsSourceView === "channel")
+
+    if (!isChannelContext || !activeChannelData) return []
+
+    const memberIds = []
+    const seen = new Set()
+    const addMemberId = id => {
+      const resolvedId =
+        id && typeof id === "object"
+          ? (id.id ?? id._id ?? id.userId ?? id.user_id)
+          : id
+      if (resolvedId === undefined || resolvedId === null || resolvedId === "") return
+      const key = String(resolvedId)
+      if (seen.has(key)) return
+      seen.add(key)
+      memberIds.push(resolvedId)
+    }
+
+    if (activeChannelData.type === "public") {
+      ;(currentSpace?.members || []).forEach(addMemberId)
+    }
+    ;(activeChannelData.members || []).forEach(addMemberId)
+    addMemberId(activeChannelData.ownerId)
+    addMemberId(currentSpace?.ownerId)
+    Object.keys(activeChannelData.roles || {}).forEach(addMemberId)
+
+    return memberIds
+  }, [activeView, activeChannelData, contextsSourceView, currentSpace])
+
+  const activeChannelMemberIdKey = useMemo(
+    () => activeChannelMemberIds.map(id => String(id)).join(","),
+    [activeChannelMemberIds]
+  )
+
+  useEffect(() => {
+    if (!isAuthenticated || activeChannelMemberIds.length === 0) {
+      channelMemberHydrationKeyRef.current = ""
+      return
+    }
+
+    const missingMemberIds = activeChannelMemberIds.filter(id => !usersById[String(id)])
+    const requestKey = missingMemberIds.map(id => String(id)).sort().join(",")
+    if (!requestKey) {
+      channelMemberHydrationKeyRef.current = ""
+      return
+    }
+    if (channelMemberHydrationKeyRef.current === requestKey) return
+
+    channelMemberHydrationKeyRef.current = requestKey
+
+    Storage.getUsersByIds(missingMemberIds, { forceRefresh: true, cacheTtl: 0 })
+      .then(memberProfiles => {
+        if (!Array.isArray(memberProfiles) || memberProfiles.length === 0) return
+        setUsers(prev => {
+          const merged = new Map()
+          ;(Array.isArray(prev) ? prev : []).forEach(user => {
+            if (user?.id === undefined || user?.id === null) return
+            merged.set(String(user.id), user)
+          })
+          memberProfiles.forEach(user => {
+            if (user?.id === undefined || user?.id === null) return
+            merged.set(String(user.id), { ...(merged.get(String(user.id)) || {}), ...user })
+          })
+          return Array.from(merged.values())
+        })
+      })
+      .catch(error => {
+        channelMemberHydrationKeyRef.current = ""
+        console.warn("Failed to load channel member profiles", error)
+      })
+  }, [activeChannelMemberIdKey, activeChannelMemberIds, isAuthenticated, usersById])
+
   const activeMembers = useMemo(() => {
     if (activeView === "channel" || (activeView === "contexts" && contextsSourceView === "channel")) {
       if (!activeChannelData) return []
-      return (activeChannelData.members || []).map(id => getUser(id)).filter(Boolean)
+      const embeddedMembersById = {}
+      const addEmbeddedProfile = member => {
+        if (!member || typeof member !== "object") return
+        const id =
+          member.id !== undefined && member.id !== null
+            ? String(member.id)
+            : member.userId !== undefined && member.userId !== null
+              ? String(member.userId)
+              : member.user_id !== undefined && member.user_id !== null
+                ? String(member.user_id)
+                : member._id !== undefined && member._id !== null
+                  ? String(member._id?.$oid || member._id)
+                  : ""
+        if (!id) return
+        embeddedMembersById[id] = {
+          ...(embeddedMembersById[id] || {}),
+          ...member,
+          id: member.id ?? id,
+        }
+      }
+
+      ;(currentSpace?.members || []).forEach(addEmbeddedProfile)
+      ;(currentSpace?.memberDetails || []).forEach(addEmbeddedProfile)
+      ;(currentSpace?.memberProfiles || []).forEach(addEmbeddedProfile)
+      ;(currentSpace?.memberUsers || []).forEach(addEmbeddedProfile)
+      ;(currentSpace?.users || []).forEach(addEmbeddedProfile)
+      ;(activeChannelData?.members || []).forEach(addEmbeddedProfile)
+      ;(activeChannelData?.memberDetails || []).forEach(addEmbeddedProfile)
+      ;(activeChannelData?.memberProfiles || []).forEach(addEmbeddedProfile)
+      ;(activeChannelData?.memberUsers || []).forEach(addEmbeddedProfile)
+      ;(activeChannelData?.users || []).forEach(addEmbeddedProfile)
+
+      return activeChannelMemberIds.map(id => {
+        const resolvedMember = usersById[String(id)] || embeddedMembersById[String(id)]
+        if (resolvedMember) {
+          return {
+            ...resolvedMember,
+            id: resolvedMember.id ?? resolvedMember.userId ?? resolvedMember.user_id ?? id,
+          }
+        }
+        return {
+          id,
+          name: "Loading member...",
+          email: "",
+          status: "offline",
+          unresolved: true,
+        }
+      })
     }
     if (activeView === "dm" && activeDMUser && currentUser) {
-      const partner = getUser(activeDMUser)
+      const partner = usersById[String(activeDMUser)]
       return partner ? [currentUser, partner] : [currentUser]
     }
     return []
-  }, [activeView, activeChannelData, activeDMUser, contextsSourceView, currentUser, usersById])
+  }, [activeView, activeChannelData, activeChannelMemberIds, activeDMUser, contextsSourceView, currentSpace, currentUser, usersById])
 
   const taskCreationSource =
     taskModalDraft?.source ||
@@ -9148,11 +9272,16 @@ export default function CollaborationApp() {
     pendingFriendRequestIdsRef.current.add(pendingKey)
     setPendingFriendRequestIds(prev => (prev.some(id => String(id) === pendingKey) ? prev : [...prev, requestTargetId]))
 
+    let keepPendingState = false
     try {
-      return await Storage.sendFriendRequest(currentUser.id, currentUser.name, requestTargetId)
+      const response = await Storage.sendFriendRequest(currentUser.id, currentUser.name, requestTargetId)
+      keepPendingState = !["already_connected", "incoming_request", "accepted"].includes(response?.status)
+      return response
     } finally {
       pendingFriendRequestIdsRef.current.delete(pendingKey)
-      setPendingFriendRequestIds(prev => prev.filter(id => String(id) !== pendingKey))
+      if (!keepPendingState) {
+        setPendingFriendRequestIds(prev => prev.filter(id => String(id) !== pendingKey))
+      }
     }
   }
 
@@ -10570,10 +10699,10 @@ export default function CollaborationApp() {
     (activeView === "contexts" && contextsSourceView !== "dm")
   const appRailItems = [
     { key: "home", label: "Home", title: "Home", icon: HomeIcon, imageSrc: "/Home.png", active: activeView === "home" && homeSection === "overview", action: openHomePage },
-    { key: "work", label: "Spaces", title: "Spaces", icon: Briefcase, imageSrc: "/Work.png", active: isWorkspaceRailActive, action: openWorkspaceHome },
+    { key: "work", label: "Work", title: "Spaces", icon: Briefcase, imageSrc: "/Work.png", active: isWorkspaceRailActive, action: openWorkspaceHome },
     { key: "dms", label: "DMs", title: "Direct Messages", icon: MessageSquare, active: (activeView === "home" && homeSection === "dm") || activeView === "dm", action: openDirectMessagesPage },
     { key: "starred", label: "Starred", title: "Starred messages", icon: Star, imageSrc: "/Starred.png", active: activeView === "starred", badge: starredMessages.length, action: openStarredMessages },
-    { key: "notifications", label: "Notifications", title: "Notifications", icon: Bell, imageSrc: "/Activity.png", active: activeView === "notifications", badge: appRailNotificationCount, action: openNotificationsPage },
+    { key: "notifications", label: "Activity", title: "Notifications", icon: Bell, imageSrc: "/Activity.png", active: activeView === "notifications", badge: appRailNotificationCount, action: openNotificationsPage },
     { key: "files", label: "Files", title: "Files", icon: FileText, imageSrc: "/Files.png", active: activeView === "documents" || showDocsModal, action: openDocumentsPage },
     { key: "tasks", label: "Tasks", title: "Tasks", icon: ClipboardList, imageSrc: "/Tasks.png", active: activeView === "tasks", badge: appRailTaskAssignmentCount, action: openTasksPage },
     { key: "calendar", label: "Calendar", title: "Calendar", icon: Calendar, imageSrc: calendarRailIconSrc, active: activeView === "calendar", action: () => {
@@ -10602,11 +10731,69 @@ export default function CollaborationApp() {
     const ownerIds = new Set(ownerMembers.map(member => String(member.id)))
     const regularMembers = activeMembers.filter(member => !ownerIds.has(String(member.id)))
     const canEditRoles = String(currentUser?.id || "") === String(currentSpaceRecord?.ownerId || "")
+    const currentFriendIds = new Set([
+      ...(Array.isArray(currentUser?.friends) ? currentUser.friends : []),
+      ...(Array.isArray(friends) ? friends.map(friend => friend?.id ?? friend).filter(id => id !== undefined && id !== null) : []),
+    ].map(id => String(id)))
+
+    const isPendingNotification = notification => {
+      const status = notification?.actionStatus || notification?.status
+      return !["accepted", "declined", "withdrawn"].includes(status)
+    }
+
+    const getMemberConnectionState = member => {
+      const memberId = String(member?.id ?? "")
+      const currentUserId = String(currentUser?.id ?? "")
+      if (!memberId || memberId === currentUserId) return { status: "self", notificationId: null }
+      if (currentFriendIds.has(memberId)) return { status: "connected", notificationId: null }
+
+      const incomingRequest = (currentUser?.notifications || []).find(notification =>
+        ["friend_request", "connection_invite"].includes(notification?.type) &&
+        String(notification?.fromId ?? notification?.senderId ?? notification?.from) === memberId &&
+        isPendingNotification(notification)
+      )
+      if (incomingRequest) return { status: "incoming_request", notificationId: incomingRequest.id || null }
+
+      if (pendingFriendRequestIds.some(id => String(id) === memberId)) {
+        return { status: "outgoing_request", notificationId: null }
+      }
+
+      return { status: "can_connect", notificationId: null }
+    }
 
     const formatRole = member => {
       if (ownerIds.has(String(member.id))) return "Owner"
       const role = getChannelRole(member.id)
       return role ? role.charAt(0).toUpperCase() + role.slice(1) : "Member"
+    }
+
+    const renderConnectionAction = member => {
+      const relationship = getMemberConnectionState(member)
+      if (relationship.status === "self" || relationship.status === "connected") return null
+
+      const isOutgoing = relationship.status === "outgoing_request"
+      const isIncoming = relationship.status === "incoming_request"
+      const label = isIncoming ? "Accept" : isOutgoing ? "Pending" : "Connect"
+
+      return (
+        <button
+          type="button"
+          className={`workspace-channel-member-connect ${isOutgoing ? "is-pending" : ""}`}
+          disabled={isOutgoing}
+          onClick={() => {
+            if (isIncoming && relationship.notificationId) {
+              handleNotificationAction(relationship.notificationId, "friend_request")
+              return
+            }
+            setShowAddFriendConfirm(member.id)
+          }}
+          title={label}
+          aria-label={`${label} with ${member.name || member.email || "member"}`}
+        >
+          {isOutgoing ? <Check className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
+          <span>{label}</span>
+        </button>
+      )
     }
 
     const renderMemberRow = (member, section) => {
@@ -10630,6 +10817,7 @@ export default function CollaborationApp() {
             </div>
           </div>
           <div className="workspace-channel-member-role">
+            {renderConnectionAction(member)}
             {canManageMember ? (
               <select
                 value={getChannelRole(member.id)}
@@ -12659,7 +12847,7 @@ export default function CollaborationApp() {
                   ) : Icon ? (
                     <Icon className="h-[19px] w-[19px] shrink-0" strokeWidth={1.9} />
                   ) : null}
-                  <span className="sr-only">{item.label}</span>
+                  <span className="workspace-app-rail-label">{item.label}</span>
                   {item.badge > 0 && (
                     <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white shadow-sm">
                       {item.badge > 9 ? "9+" : item.badge}
@@ -14562,12 +14750,6 @@ export default function CollaborationApp() {
                       <div className={`w-10 h-10 rounded-[18px] flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
                         {renderAvatar(currentUser, 40)}
                       </div>
-                      {currentUser?.notifications?.length ? (
-                        <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-4 w-4 bg-gradient-to-br from-red-500 to-rose-600 border-[3px] border-white shadow-lg"></span>
-                        </span>
-                      ) : null}
                     </div>
                     <ChevronDown
                       className={`w-4 h-4 relative z-10 transition-transform duration-300 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} ${
@@ -15720,7 +15902,7 @@ export default function CollaborationApp() {
                           >
                             {file.source === "drive" || file.source === "gmail" ? (
                               <SmartImage
-                                src={file.iconLink || GoogleService.getAppIcon(GoogleService.getAppTypeFromMime(file.type)).iconUrl || "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png"}
+                                src={file.iconLink || GoogleService.getAppIcon(GoogleService.getAppTypeFromMime(file.type)).iconUrl || "/google%20drive.png"}
                                 className="w-6 h-6"
                                 alt={file.source === "gmail" ? "Gmail" : "Drive"}
                               />
@@ -15768,7 +15950,7 @@ export default function CollaborationApp() {
                     {showComposerFormatting && (
                       <div className={`flex min-h-9 items-center gap-0.5 rounded-t-[inherit] border-b px-2 ${
                         isDarkMode
-                          ? 'border-slate-700/80 bg-[#EBEBEB]'
+                          ? 'border-[#3a3a3a] bg-[#292929]'
                           : 'border-[#edf0f3] bg-[#f7f7f8]'
                       }`}>
                         {COMPOSER_FORMAT_ACTIONS.filter(action => action.key !== "underline" && action.key !== "quote").map(action => {
@@ -16594,7 +16776,7 @@ export default function CollaborationApp() {
             <p className={`text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               Do you want to send a friend request to{" "}
               <span className="font-bold">
-                {users.find(u => u.id === showAddFriendConfirm)?.name}
+                {getUser(showAddFriendConfirm)?.name || activeMembers.find(member => String(member.id) === String(showAddFriendConfirm))?.name || "this member"}
               </span>
               ?
             </p>
@@ -18012,7 +18194,7 @@ export default function CollaborationApp() {
                 >
                   {
                     (() => {
-                      const imgSrc = app.id === 'docs' ? '/google-docs.png' : app.id === 'sheets' ? '/google-sheets.png' : app.id === 'slides' ? '/slides.png' : app.id === 'gmail' ? '/gmail.png' : '/google-drive.png'
+                      const imgSrc = app.id === 'docs' ? '/google%20docs.png' : app.id === 'sheets' ? '/google%20sheets.png' : app.id === 'slides' ? '/google%20slides.png' : app.id === 'gmail' ? '/gmail%20(1).png' : '/google%20drive.png'
                       return <SmartImage src={imgSrc} alt={app.name} className="w-8 h-8 rounded-md" />
                     })()
                   }

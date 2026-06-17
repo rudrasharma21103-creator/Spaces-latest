@@ -15,12 +15,14 @@ FRIEND_REQUEST_SENDER_PROJECTION = {
     "organizationId": 1,
     "invitePermissions": 1,
     "friends": 1,
+    "spaces": 1,
 }
 
 FRIEND_REQUEST_RECIPIENT_PROJECTION = {
     "id": 1,
     "email": 1,
     "organizationId": 1,
+    "spaces": 1,
 }
 
 
@@ -38,6 +40,15 @@ def id_query_values(value):
     return values
 
 
+def id_query_values_many(values):
+    expanded = []
+    for value in values or []:
+        for candidate in id_query_values(value):
+            if candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
+
+
 def get_user_by_id(user_id):
     user = users_collection.find_one({"id": user_id})
     if user:
@@ -46,6 +57,50 @@ def get_user_by_id(user_id):
         return users_collection.find_one({"id": int(user_id)})
     except (TypeError, ValueError):
         return None
+
+
+def users_share_workspace_by_ids(left_id, right_id):
+    left_values = id_query_values(left_id)
+    right_values = id_query_values(right_id)
+    if not left_values or not right_values:
+        return False
+
+    left_user = users_collection.find_one({"id": {"$in": left_values}}, {"spaces": 1})
+    right_user = users_collection.find_one({"id": {"$in": right_values}}, {"spaces": 1})
+    left_space_ids = {str(space_id) for space_id in ((left_user or {}).get("spaces") or []) if space_id is not None}
+    right_space_ids = {str(space_id) for space_id in ((right_user or {}).get("spaces") or []) if space_id is not None}
+    if left_space_ids and left_space_ids.intersection(right_space_ids):
+        return True
+
+    left_membership_query = {
+        "$or": [
+            {"ownerId": {"$in": left_values}},
+            {"createdBy": {"$in": left_values}},
+            {"members": {"$in": left_values}},
+            {"channels.members": {"$in": left_values}},
+        ]
+    }
+    right_membership_query = {
+        "$or": [
+            {"ownerId": {"$in": right_values}},
+            {"createdBy": {"$in": right_values}},
+            {"members": {"$in": right_values}},
+            {"channels.members": {"$in": right_values}},
+        ]
+    }
+
+    left_space_query_ids = id_query_values_many(left_space_ids)
+    if left_space_query_ids:
+        left_membership_query["$or"].append({"id": {"$in": left_space_query_ids}})
+
+    right_space_query_ids = id_query_values_many(right_space_ids)
+    if right_space_query_ids:
+        right_membership_query["$or"].append({"id": {"$in": right_space_query_ids}})
+
+    return bool(spaces_collection.find_one(
+        {"$and": [left_membership_query, right_membership_query]},
+        {"_id": 1},
+    ))
 
 
 def extract_email_domain(email):
@@ -104,17 +159,18 @@ async def send_friend_request(request: Request, payload: dict):
             can_all = perms.get("canInviteAll")
             can_company = perms.get("canInviteCompanyOnly")
             if can_company and not can_all:
+                shares_workspace = users_share_workspace_by_ids(from_id, recipient.get("id"))
                 # Compare organizationId first
                 s_org = sender.get("organizationId")
                 r_org = recipient.get("organizationId") if recipient else None
                 if s_org and r_org:
-                    if str(s_org) != str(r_org):
+                    if str(s_org) != str(r_org) and not shares_workspace:
                         raise HTTPException(status_code=403, detail="Not allowed to invite users outside your organization")
                 else:
                     # Fallback to email domain comparison
                     sd = extract_email_domain(sender.get("email"))
                     rd = extract_email_domain(recipient.get("email"))
-                    if sd != rd:
+                    if sd != rd and not shares_workspace:
                         raise HTTPException(status_code=403, detail="Not allowed to invite users outside your company domain")
     except HTTPException:
         raise

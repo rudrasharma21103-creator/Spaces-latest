@@ -1922,10 +1922,6 @@ export function ChannelFilesGallery({ files, isDarkMode, onAttachFile, onOpenFil
                         <Download className="h-4 w-4" />
                         Download
                       </button>
-                      <button type="button" onClick={() => { copyFileLink(file); setOpenMenuFileId(null) }}>
-                        <LinkIcon className="h-4 w-4" />
-                        Copy link
-                      </button>
                       <button type="button" onClick={() => { onAttachFile?.(file); setOpenMenuFileId(null) }}>
                         <Plus className="h-4 w-4" />
                         Attach to message
