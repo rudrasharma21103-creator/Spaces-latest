@@ -548,73 +548,61 @@ export function ContextsTabView({
   }
 
   return (
-    <div className="mx-4 sm:mx-6">
-      <div className="max-w-[440px] space-y-4">
+    <div className={`workspace-channel-contexts-view ${isDarkMode ? "is-dark" : ""}`}>
+      <div className="workspace-channel-contexts-list">
         {contexts.map(context => {
           const statusMeta = CONTEXT_STATUS_META[context.status] || CONTEXT_STATUS_META.active
+          const statusKey = Object.prototype.hasOwnProperty.call(CONTEXT_STATUS_META, context.status)
+            ? context.status
+            : "active"
           const showDelete = typeof canDelete === "function" ? canDelete(context) : false
+          const detailParts = [
+            `Messages ${(context.linkedMessageIds || []).length}`,
+            `Files ${(context.linkedFileIds || []).length}`,
+            `Contributors ${(context.contributorIds || []).length}`,
+            `Tasks ${(context.taskIds || []).length}`,
+          ]
+          const updatedLabel = formatUpdatedTime?.(context.updatedAt)
+
           return (
-            <article
-              key={context.id}
-              onClick={() => onOpen(context.id)}
-              onKeyDown={event => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault()
-                  onOpen(context.id)
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              className={`text-left transition-all hover:-translate-y-0.5 ${
-                isDarkMode
-                  ? "rounded-[1.5rem] border border-slate-800 bg-[#16181c] p-4 hover:border-slate-700"
-                  : "rounded-[1.7rem] border border-slate-200/90 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.04)] hover:border-slate-300/90"
-              }`}
-            >
-              <div className="mb-5 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className={`truncate text-[1.05rem] font-semibold ${isDarkMode ? "text-white" : "text-slate-800"}`}>{context.title}</div>
-                  {!isDarkMode && context.summary ? (
-                    <div className="mt-1 line-clamp-1 text-sm text-slate-400">{context.summary}</div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full border px-3 py-1 text-xs ${isDarkMode ? statusMeta.dark : statusMeta.light}`}>
+            <div key={context.id} className="workspace-channel-context-row">
+              <button
+                type="button"
+                onClick={() => onOpen(context.id)}
+                className="workspace-channel-context-main"
+              >
+                <span className="workspace-channel-context-title-line">
+                  <span className="workspace-channel-context-title">{context.title}</span>
+                  <span className={`workspace-channel-context-status status-${statusKey}`}>
                     {statusMeta.label}
                   </span>
-                  {showDelete && (
-                    <button
-                      type="button"
-                      onClick={event => {
-                        event.stopPropagation()
-                        onDelete?.(context.id)
-                      }}
-                      className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors ${
-                        isDarkMode
-                          ? "text-rose-300 hover:bg-rose-500/12 hover:text-rose-200"
-                          : "text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                      }`}
-                      aria-label={`Delete ${context.title}`}
-                      title="Delete context permanently"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className={`mb-5 grid grid-cols-2 gap-2 text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Messages {context.linkedMessageIds.length}</div>
-                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Files {context.linkedFileIds.length}</div>
-                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Contributors {context.contributorIds.length}</div>
-                <div className={`rounded-xl px-3 py-2 ${isDarkMode ? "border border-white/5 bg-black/5" : "bg-[#f3f5f7]"}`}>Tasks {context.taskIds.length}</div>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>Owner {renderOwner(context.ownerId)}</span>
-                <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>{formatUpdatedTime(context.updatedAt)}</span>
-              </div>
-            </article>
+                </span>
+                {context.summary ? (
+                  <span className="workspace-channel-context-summary">{context.summary}</span>
+                ) : null}
+                <span className="workspace-channel-context-meta">{detailParts.join(" | ")}</span>
+                <span className="workspace-channel-context-owner">
+                  <span>Owner {renderOwner(context.ownerId)}</span>
+                  {updatedLabel ? (
+                    <>
+                      <span aria-hidden="true">|</span>
+                      <span>{updatedLabel}</span>
+                    </>
+                  ) : null}
+                </span>
+              </button>
+              {showDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete?.(context.id)}
+                  className="workspace-channel-context-delete"
+                  aria-label={`Delete ${context.title}`}
+                  title="Delete context permanently"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           )
         })}
       </div>

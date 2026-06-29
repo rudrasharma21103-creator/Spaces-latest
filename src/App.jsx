@@ -514,6 +514,7 @@ export default function CollaborationApp() {
   }
   const [mobileView, setMobileView] = useState("chat") // "spaces" | "chat" | "friends"
   const [showMobileDrawer, setShowMobileDrawer] = useState(false) // Mobile drawer menu
+  const showMobileAccountSidebar = showMobileDrawer === "account"
 
   // Dark Mode State - persisted to localStorage
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -853,6 +854,7 @@ export default function CollaborationApp() {
   const openTasksPage = React.useCallback(() => {
     if (typeof window !== "undefined" && activeView === "tasks" && window.location.pathname === "/tasks") return
     setCollapsedSpaceMenu(null)
+    setShowMobileDrawer(false)
     setFocusedTaskId(null)
     setDedicatedPageReturn({
       view: activeView,
@@ -864,7 +866,8 @@ export default function CollaborationApp() {
     setOpenContextId(null)
     setActiveView("tasks")
     pushAppRoute("/tasks")
-  }, [activeChannelTab, activeView, contextsSourceView, homeSection, openContextId])
+    if (isMobile) setMobileView("chat")
+  }, [activeChannelTab, activeView, contextsSourceView, homeSection, isMobile, openContextId])
 
   const openContextsPage = React.useCallback((contextId = null) => {
     const targetPath = contextId ? `/contexts/${encodeURIComponent(String(contextId))}` : "/contexts"
@@ -3566,6 +3569,7 @@ export default function CollaborationApp() {
     setAuthPending(false)
     setGoogleAuthPending(false)
     setSearchQuery("")
+    setShowMobileDrawer(false)
     
     // Clear Google data
     GoogleService.removeGoogleAccessToken()
@@ -3838,6 +3842,7 @@ export default function CollaborationApp() {
   const openDocumentsPage = () => {
     setActiveDraftId(null)
     setCollapsedSpaceMenu(null)
+    setShowMobileDrawer(false)
     setShowDocsModal(false)
     setShowGoogleAppsMenu(false)
     setOpenContextId(null)
@@ -5946,6 +5951,7 @@ export default function CollaborationApp() {
 
   const openHomePage = () => {
     setActiveDraftId(null)
+    setShowMobileDrawer(false)
     setShowDocsModal(false)
     setShowGoogleAppsMenu(false)
     setOpenContextId(null)
@@ -5957,6 +5963,7 @@ export default function CollaborationApp() {
 
   const openDirectMessagesPage = () => {
     setActiveDraftId(null)
+    setShowMobileDrawer(false)
     setShowDocsModal(false)
     setShowGoogleAppsMenu(false)
     setOpenContextId(null)
@@ -5978,6 +5985,7 @@ export default function CollaborationApp() {
 
   const openWorkspaceHome = () => {
     setActiveDraftId(null)
+    setShowMobileDrawer(false)
     if (!appDataReady || !currentUser?.id || !Array.isArray(spaces) || spaces.length === 0) {
       setActiveView("home")
       setHomeSection("overview")
@@ -6018,6 +6026,7 @@ export default function CollaborationApp() {
 
   const openWorkspaceFriendsHome = () => {
     setActiveDraftId(null)
+    setShowMobileDrawer(false)
     const targetDMUser = homeActiveDMUser || activeDMUser || friends[0]?.id || null
     if (targetDMUser) {
       setActiveDMUser(targetDMUser)
@@ -6048,6 +6057,7 @@ export default function CollaborationApp() {
 
   const openHomeConnect = () => {
     setActiveDraftId(null)
+    setShowMobileDrawer(false)
     setCollapsedSpaceMenu(null)
     setInviteSearchQuery("")
     setSelectedFriendInvitees([])
@@ -6060,10 +6070,30 @@ export default function CollaborationApp() {
     if (isMobile) setMobileView("chat")
   }
 
+  const openHomeNetwork = () => {
+    openHomeConnect()
+    setConnectPreferredPane("network")
+  }
+
+  const openCalendarPage = () => {
+    setActiveDraftId(null)
+    setShowMobileDrawer(false)
+    setCollapsedSpaceMenu(null)
+    setOpenContextId(null)
+    if (!googleCalendarToken) {
+      setShowCalendarConnectModal(true)
+      return
+    }
+    setActiveView("calendar")
+    setActiveSpace(null)
+    if (isMobile) setMobileView("chat")
+  }
+
   const openHomeDM = async (partnerId, options = {}) => {
     if (options.clearDraft !== false) {
       setActiveDraftId(null)
     }
+    setShowMobileDrawer(false)
     setActiveDMUser(partnerId)
     setHomeActiveDMUser(partnerId)
     setActiveView("dm")
@@ -8082,6 +8112,7 @@ export default function CollaborationApp() {
 
   const openStarredMessages = useCallback(() => {
     setOpenContextId(null)
+    setShowMobileDrawer(false)
     setActiveView("starred")
     pushAppRoute("/starred")
     if (isMobile) setMobileView("chat")
@@ -8089,6 +8120,7 @@ export default function CollaborationApp() {
 
   const openNotificationsPage = useCallback(() => {
     setOpenContextId(null)
+    setShowMobileDrawer(false)
     setShowNotificationsModal(false)
     setActiveView("notifications")
     pushAppRoute("/notifications")
@@ -10705,16 +10737,197 @@ export default function CollaborationApp() {
     { key: "notifications", label: "Activity", title: "Notifications", icon: Bell, imageSrc: "/Activity.png", active: activeView === "notifications", badge: appRailNotificationCount, action: openNotificationsPage },
     { key: "files", label: "Files", title: "Files", icon: FileText, imageSrc: "/Files.png", active: activeView === "documents" || showDocsModal, action: openDocumentsPage },
     { key: "tasks", label: "Tasks", title: "Tasks", icon: ClipboardList, imageSrc: "/Tasks.png", active: activeView === "tasks", badge: appRailTaskAssignmentCount, action: openTasksPage },
-    { key: "calendar", label: "Calendar", title: "Calendar", icon: Calendar, imageSrc: calendarRailIconSrc, active: activeView === "calendar", action: () => {
-      if (!googleCalendarToken) {
-        setShowCalendarConnectModal(true)
-      } else {
-        setActiveView("calendar")
-        setActiveSpace(null)
-      }
-    } },
+    { key: "calendar", label: "Calendar", title: "Calendar", icon: Calendar, imageSrc: calendarRailIconSrc, active: activeView === "calendar", action: openCalendarPage },
     { key: "connect", label: "Connect", title: "Connect", icon: UserPlus, active: activeView === "connect" || (activeView === "home" && homeSection === "connect"), action: openHomeConnect },
   ]
+  const mobilePrimaryNavItems = [
+    {
+      key: "dms",
+      label: "DMs",
+      title: "Direct messages",
+      icon: MessageSquare,
+      active: (activeView === "home" && homeSection === "dm") || activeView === "dm",
+      action: openDirectMessagesPage,
+    },
+    {
+      key: "work",
+      label: "Work",
+      title: "Work",
+      icon: Briefcase,
+      imageSrc: "/Work.png",
+      active: isWorkspaceRailActive || (isMobile && mobileView === "spaces"),
+      action: () => {
+        openWorkspaceHome()
+        if (isMobile) setMobileView("spaces")
+      },
+    },
+    {
+      key: "files",
+      label: "Files",
+      title: "Files",
+      icon: FileText,
+      imageSrc: "/Files.png",
+      active: activeView === "documents" || showDocsModal,
+      action: openDocumentsPage,
+    },
+    {
+      key: "tasks",
+      label: "Tasks",
+      title: "Tasks",
+      icon: ClipboardList,
+      imageSrc: "/Tasks.png",
+      active: activeView === "tasks",
+      badge: appRailTaskAssignmentCount,
+      action: openTasksPage,
+    },
+    {
+      key: "activity",
+      label: "Activity",
+      title: "Activity",
+      icon: Bell,
+      imageSrc: "/Activity.png",
+      active: activeView === "notifications",
+      badge: appRailNotificationCount,
+      action: openNotificationsPage,
+    },
+  ]
+
+  const openProfileEditor = () => {
+    setSelectedPreset(currentUser?.avatar_preset || null)
+    setAvatarPreview(currentUser?.avatar_url || null)
+    setAvatarFile(null)
+    setShowProfileModal(true)
+    setShowUserMenu(false)
+    setShowMobileDrawer(false)
+  }
+
+  const renderMobileAccountSidebar = () => {
+    if (!isMobile || !showMobileAccountSidebar) return null
+
+    const rowBase = `flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-sm font-semibold transition ${
+      isDarkMode
+        ? "text-slate-200 hover:bg-white/[0.07] active:bg-white/[0.10]"
+        : "text-slate-700 hover:bg-slate-100 active:bg-slate-200/70"
+    }`
+    const iconBase = `flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+      isDarkMode ? "bg-white/[0.07] text-slate-100" : "bg-white text-slate-700 shadow-sm"
+    }`
+    const settingsButton = `inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+      isDarkMode ? "bg-white/[0.07] text-slate-100 hover:bg-white/[0.10]" : "bg-white text-slate-700 hover:bg-slate-50"
+    }`
+
+    return (
+      <div className="fixed inset-0 z-[95] md:hidden" role="dialog" aria-modal="true" aria-label="Account sidebar">
+        <button
+          type="button"
+          className="absolute inset-0 bg-slate-950/45"
+          aria-label="Close account sidebar"
+          onClick={() => setShowMobileDrawer(false)}
+        />
+        <aside className={`mobile-slide-in-left absolute inset-y-0 left-0 flex w-[82vw] max-w-[320px] flex-col border-r shadow-2xl ${
+          isDarkMode ? "border-white/10 bg-[#111111] text-slate-100" : "border-slate-200 bg-[#f8fafc] text-slate-900"
+        }`}>
+          <div className={`flex items-center gap-3 border-b px-4 pb-4 pt-[calc(18px+env(safe-area-inset-top))] ${
+            isDarkMode ? "border-white/10" : "border-slate-200"
+          }`}>
+            <div className={`flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border ${
+              isDarkMode ? "border-white/10 bg-white/[0.06]" : "border-slate-200 bg-white"
+            }`}>
+              {renderAvatar(currentUser, 44)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base font-bold">{currentUser?.name || "Profile"}</div>
+              <div className={`truncate text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{currentUser?.email || "Signed in"}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMobileDrawer(false)}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl transition ${
+                isDarkMode ? "text-slate-400 hover:bg-white/[0.08] hover:text-white" : "text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+              }`}
+              aria-label="Close account sidebar"
+              title="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-3 py-3">
+            <div className="space-y-1">
+              <button type="button" onClick={openCalendarPage} className={rowBase}>
+                <span className={iconBase}><Calendar className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">Calendar</span>
+                  <span className={`mt-0.5 block truncate text-xs font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Events and meetings</span>
+                </span>
+              </button>
+
+              <button type="button" onClick={openStarredMessages} className={rowBase}>
+                <span className={iconBase}><Star className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">Starred Messages</span>
+                  <span className={`mt-0.5 block truncate text-xs font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{starredMessages.length} saved</span>
+                </span>
+              </button>
+
+              <button type="button" onClick={openHomeNetwork} className={rowBase}>
+                <span className={iconBase}><Users className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">Network</span>
+                  <span className={`mt-0.5 block truncate text-xs font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Show all connections</span>
+                </span>
+              </button>
+
+              <button type="button" onClick={openHomeConnect} className={rowBase}>
+                <span className={iconBase}><UserPlus className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">Connect</span>
+                  <span className={`mt-0.5 block truncate text-xs font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Find and invite people</span>
+                </span>
+              </button>
+            </div>
+
+            <section className={`mt-4 rounded-[22px] border p-3 ${
+              isDarkMode ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/80"
+            }`}>
+              <div className={`mb-2 flex items-center gap-2 px-1 text-xs font-bold uppercase tracking-[0.18em] ${
+                isDarkMode ? "text-slate-500" : "text-slate-400"
+              }`}>
+                <Settings className="h-4 w-4" />
+                Settings
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setIsDarkMode(prev => !prev)} className={settingsButton}>
+                  {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                  {isDarkMode ? "Light" : "Dark"}
+                </button>
+                <button type="button" onClick={openProfileEditor} className={settingsButton}>
+                  <UserIcon className="h-4 w-4" />
+                  Manage profile
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div className={`border-t p-3 pb-[calc(12px+env(safe-area-inset-bottom))] ${
+            isDarkMode ? "border-white/10" : "border-slate-200"
+          }`}>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                isDarkMode ? "bg-red-500/12 text-red-300 hover:bg-red-500/18" : "bg-red-50 text-red-600 hover:bg-red-100"
+              }`}
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </button>
+          </div>
+        </aside>
+      </div>
+    )
+  }
+
   const renderChannelMembersView = () => {
     const currentSpaceRecord = getCurrentSpace()
     const ownerId = activeChannelData?.ownerId || currentSpaceRecord?.ownerId
@@ -12858,27 +13071,90 @@ export default function CollaborationApp() {
             })}
           </nav>
 
-          <button
-            type="button"
-            onClick={() => {
-              setAvatarPreview(currentUser?.avatar_url || null)
-              setAvatarFile(null)
-              setShowProfileModal(true)
-            }}
-            className={`workspace-app-rail-profile mt-3 flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border transition ${
-              isDarkMode
-                ? "border-white/10 bg-white/[0.06] hover:bg-white/[0.09]"
-                : "border-slate-200 bg-slate-50 hover:bg-white"
-            }`}
-            title="Profile"
-            aria-label="Profile"
-          >
-            {renderAvatar(currentUser, 36)}
-          </button>
+          <div className="workspace-app-rail-account relative mt-3">
+            <button
+              type="button"
+              onClick={() => setShowUserMenu(prev => !prev)}
+              className={`workspace-app-rail-profile flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border transition ${
+                isDarkMode
+                  ? "border-white/10 bg-white/[0.06] hover:bg-white/[0.09]"
+                  : "border-slate-200 bg-slate-50 hover:bg-white"
+              }`}
+              title="Profile"
+              aria-label="Profile"
+              aria-haspopup="menu"
+              aria-expanded={showUserMenu}
+            >
+              {renderAvatar(currentUser, 36)}
+            </button>
+
+            {showUserMenu && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-[54] cursor-default border-0 bg-transparent p-0"
+                  aria-label="Close profile menu"
+                  onClick={() => setShowUserMenu(false)}
+                />
+                <div
+                  className={`workspace-rail-profile-menu ${isDarkMode ? "is-dark" : ""}`}
+                  role="menu"
+                  aria-label="Profile menu"
+                >
+                  <div className="workspace-rail-profile-menu-header">
+                    <span className="workspace-rail-profile-menu-avatar">
+                      {renderAvatar(currentUser, 44)}
+                    </span>
+                    <span className="workspace-rail-profile-menu-copy">
+                      <span className="workspace-rail-profile-menu-name">{currentUser?.name || "Profile"}</span>
+                      <span className="workspace-rail-profile-menu-email">{currentUser?.email || "Signed in"}</span>
+                      <span className="workspace-rail-profile-menu-status">Available</span>
+                    </span>
+                  </div>
+
+                  <div className="workspace-rail-profile-menu-actions">
+                    <button type="button" role="menuitem" onClick={openProfileEditor}>
+                      <UserPlus className="h-4 w-4" />
+                      <span>Edit Profile</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        openNotificationsPage()
+                        setShowUserMenu(false)
+                      }}
+                    >
+                      <Bell className="h-4 w-4" />
+                      <span>Notifications</span>
+                      {unreadNotifications.length ? (
+                        <span className="workspace-rail-profile-menu-badge">
+                          {unreadNotifications.length > 9 ? "9+" : unreadNotifications.length}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="is-danger"
+                      onClick={() => {
+                        setShowUserMenu(false)
+                        handleLogout()
+                      }}
+                    >
+                      <LogOut className="h-4 w-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </aside>
       )}
 
       {renderChannelActionMenu()}
+      {renderMobileAccountSidebar()}
 
       <div className="workspace-shell flex min-w-0 flex-1">
       {activeView === "home" ? (
@@ -14728,105 +15004,6 @@ export default function CollaborationApp() {
                   </div>
                 </button>
 
-                {/* User Menu */}
-                {/* ... (User Menu) ... */}
-                <div className="relative z-50">
-                  <button
-                    onClick={() => setShowUserMenu(!showUserMenu)}
-                    className={`liquid-glass-header flex items-center gap-3 pl-3 pr-2.5 py-1.5 transition-all ${showUserMenu ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
-                  >
-                    {/* Only show name if at least one sidebar is collapsed */}
-                    {!(sidebarCollapsed === false && friendsSidebarCollapsed === false) && (
-                      <div className="text-right hidden sm:block relative z-10">
-                        <div className={`text-[13px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                          {currentUser?.name}
-                        </div>
-                        <div className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                          Available
-                        </div>
-                      </div>
-                    )}
-                    <div className="relative z-10">
-                      <div className={`w-10 h-10 rounded-[18px] flex items-center justify-center text-lg shadow-md border-2 ${isDarkMode ? 'bg-slate-700 border-slate-600 ring-2 ring-slate-700' : 'bg-white border-white ring-2 ring-slate-100'} overflow-hidden`}>
-                        {renderAvatar(currentUser, 40)}
-                      </div>
-                    </div>
-                    <ChevronDown
-                      className={`w-4 h-4 relative z-10 transition-transform duration-300 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} ${
-                        showUserMenu ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-
-                  {showUserMenu && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-40"
-                        onClick={() => setShowUserMenu(false)}
-                      ></div>
-                      <div className={`absolute right-0 top-full mt-3 w-72 rounded-3xl shadow-2xl py-2 animate-fade-in origin-top-right ring-1 ${isDarkMode ? 'bg-[#2C2C2C] border-slate-700/60 ring-slate-600/20 shadow-black/40' : 'bg-white/95 border-slate-100 ring-black/5'} backdrop-blur-xl border z-50`}>
-                        <div className={`px-5 py-4 border-b ${isDarkMode ? 'border-slate-700/60 bg-[#2C2C2C]' : 'border-slate-100 bg-slate-50/50'}`}>
-                          <div className="flex items-center gap-3">
-                            <span className={`text-3xl p-2 rounded-full shadow-sm ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-100'} border`}>
-                              {renderAvatar(currentUser, 36)}
-                            </span>
-                            <div className="overflow-hidden">
-                              <div className={`font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                                {currentUser?.name}
-                              </div>
-                              <div className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {currentUser?.email}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="p-2 space-y-1">
-                          <button
-                            onClick={() => {
-                              // prepare modal
-                              setSelectedPreset(currentUser?.avatar_preset || null)
-                              setAvatarPreview(currentUser?.avatar_url || null)
-                              setAvatarFile(null)
-                              setShowProfileModal(true)
-                              setShowUserMenu(false)
-                            }}
-                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-sky-50 hover:text-sky-700'}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <UserPlus className="w-4 h-4" /> Edit Profile
-                            </div>
-                          </button>
-                          <button
-                            onClick={() => {
-                              openNotificationsPage()
-                              setShowUserMenu(false)
-                            }}
-                            className={`w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center justify-between transition-colors font-medium ${isDarkMode ? 'text-slate-300 hover:bg-slate-700/60 hover:text-white' : 'text-slate-700 hover:bg-sky-50 hover:text-sky-700'}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <Bell className="w-4 h-4" /> Notifications
-                            </div>
-                            {unreadNotifications.length ? (
-                              <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-red-500/30">
-                                {unreadNotifications.length || 0}
-                              </span>
-                            ) : null}
-                          </button>
-                          <div className={`h-px my-1 mx-2 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}></div>
-                          <button
-                            onClick={() => {
-                              handleLogout()
-                              setShowUserMenu(false)
-                            }}
-                            className="w-full text-left px-4 py-3 text-sm rounded-2xl flex items-center gap-3 transition-colors font-medium text-red-600 hover:bg-red-50"
-                          >
-                            <LogIn className="w-4 h-4" /> Sign Out
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
               </div>
             </div>
 
@@ -14837,6 +15014,24 @@ export default function CollaborationApp() {
                   ? 'bg-slate-900/95 border-slate-700/60 shadow-slate-950/30' 
                   : 'bg-white/95 border-slate-200/60 shadow-slate-100/50'
               }`}>
+                <button
+                  type="button"
+                  onClick={event => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setShowMobileDrawer("account")
+                  }}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border transition ${
+                    isDarkMode
+                      ? "border-white/10 bg-white/[0.06] active:bg-white/[0.10]"
+                      : "border-slate-200 bg-white active:bg-slate-100"
+                  }`}
+                  title="Open account sidebar"
+                  aria-label="Open account sidebar"
+                >
+                  {renderAvatar(currentUser, 34)}
+                </button>
+
                 {/* Left: Profile & Context */}
                 <div 
                   onClick={() => {
@@ -14964,7 +15159,7 @@ export default function CollaborationApp() {
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMobileDrawer(prev => !prev); }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMobileDrawer(prev => prev === "quick" ? false : "quick"); }}
                       className={`workspace-mobile-action p-2.5 rounded-xl transition-all touch-active ${
                         isDarkMode 
                           ? 'bg-slate-800 text-slate-400 active:bg-slate-700' 
@@ -14978,7 +15173,7 @@ export default function CollaborationApp() {
                     </button>
                     
                     {/* Quick Menu Dropdown */}
-                    {showMobileDrawer && (
+                    {showMobileDrawer === "quick" && (
                       <>
                         <div 
                           className="fixed inset-0 z-[99]"
@@ -17116,53 +17311,43 @@ export default function CollaborationApp() {
             : 'bg-white/95 border-slate-200/60'
         }`}>
           <div className="flex items-center justify-around h-16 px-2">
-            <button
-              onClick={() => {
-                if (activeView === "home") {
-                  openWorkspaceHome()
-                }
-                setMobileView("spaces")
-              }}
-              className={`mobile-nav-item ${mobileView === "spaces" && activeView !== "dm" ? "active" : ""} ${
-                mobileView === "spaces" && activeView !== "dm"
-                  ? isDarkMode ? "text-sky-400" : "text-sky-600"
-                  : isDarkMode ? "text-slate-500" : "text-slate-400"
-              }`}
-            >
-              <SmartImage
-                src={isDarkMode ? "/logo%20SL.png" : "/logo%20SD.png"}
-                alt="Spaces"
-                className="h-5 w-5 object-contain transition-transform duration-200"
-              />
-              <span className="text-[10px] font-semibold">Spaces</span>
-            </button>
-            <button
-              onClick={() => setMobileView("chat")}
-              className={`mobile-nav-item ${mobileView === "chat" ? "active" : ""} ${
-                mobileView === "chat"
-                  ? isDarkMode ? "text-sky-400" : "text-sky-600"
-                  : isDarkMode ? "text-slate-500" : "text-slate-400"
-              }`}
-            >
-              <MessageCircle className={`w-5 h-5 transition-transform duration-200`} />
-              <span className="text-[10px] font-semibold">Chat</span>
-            </button>
-            <button
-              onClick={() => {
-                if (activeView === "home") {
-                  openWorkspaceFriendsHome()
-                }
-                setMobileView("spaces")
-              }}
-              className={`mobile-nav-item ${mobileView === "spaces" && activeView === "dm" ? "active" : ""} ${
-                mobileView === "spaces" && activeView === "dm"
-                  ? isDarkMode ? "text-sky-400" : "text-sky-600"
-                  : isDarkMode ? "text-slate-500" : "text-slate-400"
-              }`}
-            >
-              <MessageSquare className={`w-5 h-5 transition-transform duration-200`} />
-              <span className="text-[10px] font-semibold">DMs</span>
-            </button>
+            {mobilePrimaryNavItems.map(item => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.action}
+                  className={`mobile-nav-item ${item.active ? "active" : ""} ${
+                    item.active
+                      ? isDarkMode ? "text-sky-400" : "text-sky-600"
+                      : isDarkMode ? "text-slate-500" : "text-slate-400"
+                  }`}
+                  title={item.title}
+                  aria-label={item.title}
+                  aria-current={item.active ? "page" : undefined}
+                >
+                  <span className="relative flex h-6 w-6 items-center justify-center">
+                    {item.imageSrc ? (
+                      <SmartImage
+                        src={item.imageSrc}
+                        alt=""
+                        className="mobile-nav-image h-5 w-5 object-contain transition-transform duration-200"
+                        fallback={<Icon className="h-5 w-5 transition-transform duration-200" />}
+                      />
+                    ) : (
+                      <Icon className="h-5 w-5 transition-transform duration-200" />
+                    )}
+                    {item.badge > 0 && (
+                      <span className="absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white">
+                        {item.badge > 9 ? "9+" : item.badge}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mobile-nav-label text-[10px] font-semibold">{item.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
